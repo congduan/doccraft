@@ -36,7 +36,12 @@ uint32_t Cp1252(uint8_t c) {
       0x2DC,  0x2122, 0x161,  0x203A, 0x153,  0x9D,   0x17E,  0x178};
   return c >= 0x80 && c <= 0x9F ? kMap[c - 0x80] : c;
 }
-void Append(std::string& out, uint32_t c) { Utf8(out, c == 0x0D ? 0x0A : c); }
+void Append(std::string& out, uint32_t c) {
+  // U+FFFE/U+FFFF are not in the XML 1.0 Char production; emit U+FFFD so a
+  // corrupted piece can never produce a not-well-formed document.xml.
+  if (c == 0xFFFE || c == 0xFFFF) c = 0xFFFD;
+  Utf8(out, c == 0x0D ? 0x0A : c);
+}
 }  // namespace
 std::expected<std::string, Error> ExtractText(std::span<const uint8_t> word,
                                               std::span<const uint8_t> table,

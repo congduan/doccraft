@@ -78,6 +78,36 @@ TEST(PieceTableTest, ReadsCompressedAndUtf16Pieces) {
             "A\xE2\x82\xAC"
             "B\nC");
 }
+TEST(PieceTableTest, ReplacesNonXmlCharsWithReplacementChar) {
+  // U+FFFE/U+FFFF are outside the XML 1.0 Char production; a corrupted UTF-16
+  // piece must not be able to produce a not-well-formed document.xml.
+  auto fib = doccraft::doc::ParseFib(Fib());
+  ASSERT_TRUE(fib);
+  std::vector<uint8_t> table(80), word(1024);
+  // PlcPcd with 2 pieces: size = 4*3 CPs + 8*2 PCDs = 28; clx total = 33.
+  table[40] = 2;
+  Put32(table, 41, 28);
+  Put32(table, 45, 0);
+  Put32(table, 49, 3);
+  Put32(table, 53, 5);
+  Put16(table, 57, 0);
+  Put32(table, 59, 600);  // PCD0: uncompressed UTF-16 @600 (flags, fc, prm)
+  Put16(table, 63, 0);
+  Put16(table, 65, 0);
+  Put32(table, 67, 612);  // PCD1: uncompressed UTF-16 @612
+  Put16(table, 71, 0);
+  Put16(word, 600, 0xFFFF);
+  Put16(word, 602, 0xFFFE);
+  Put16(word, 604, 0x0D);
+  Put16(word, 612, 'E');
+  Put16(word, 614, 'F');
+  auto text = doccraft::doc::ExtractText(word, table, *fib);
+  ASSERT_TRUE(text);
+  EXPECT_EQ(*text,
+            "\xEF\xBF\xBD"
+            "\xEF\xBF\xBD"
+            "\nEF");
+}
 TEST(ZipTest, CrcKnownVector) {
   EXPECT_EQ(doccraft::docx::Crc32("123456789"), 0xCBF43926u);
 }
