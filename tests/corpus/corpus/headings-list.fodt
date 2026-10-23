@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:h text:outline-level="1">Heading 1</text:h>
+<text:p>Intro</text:p>
+<text:h text:outline-level="2">Heading 2</text:h>
+<text:list><text:list-item><text:p>Item one</text:p></text:list-item>
+<text:list-item><text:p>Item two</text:p></text:list-item></text:list>
+</office:text></office:body></office:document>

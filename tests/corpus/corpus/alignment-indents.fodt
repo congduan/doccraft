@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:automatic-styles>
+<style:style style:name="P1" style:family="paragraph">
+<style:paragraph-properties fo:text-align="center" fo:margin-top="0.2in"
+ fo:margin-bottom="0.2in" fo:line-height="150%"/></style:style>
+<style:style style:name="P2" style:family="paragraph">
+<style:paragraph-properties fo:text-align="justify" fo:margin-left="0.5in"/></style:style>
+</office:automatic-styles>
+<office:body><office:text>
+<text:p text:style-name="P1">Centered paragraph</text:p>
+<text:p text:style-name="P2">Justified indented paragraph</text:p>
+</office:text></office:body></office:document>
