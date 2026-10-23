@@ -86,6 +86,9 @@ def main() -> int:
     if not args.source.exists():
         print(f"no such file: {args.source}", file=sys.stderr); return 2
 
+    outdir = REPO / "build" / "pixelcompare"
+    outdir.mkdir(parents=True, exist_ok=True)
+
     with tempfile.TemporaryDirectory(prefix="doccraft-pc-") as td:
         tdp = Path(td)
         a_dir, b_dir = tdp / "a", tdp / "b"
@@ -112,7 +115,7 @@ def main() -> int:
 
         report, all_ok = [], True
         for i, (pa, pb) in enumerate(zip(a_pngs, b_pngs), 1):
-            m = compare_pages(pa, pb, Path("build/pixelcompare"), i)
+            m = compare_pages(pa, pb, outdir, i)
             report.append(m)
             ok = (not m["size_mismatch"]) and m["bad_ratio"] < args.threshold
             all_ok &= ok
@@ -120,10 +123,10 @@ def main() -> int:
             print(f"{status} page {i}: rms={m['rms']:.2f} max={m['max']} "
                   f"bad_px={m['bad_px']} ({m['bad_ratio']*100:.3f}%)"
                   + (" SIZE-MISMATCH" if m["size_mismatch"] else ""))
-        Path("build/pixelcompare/report.tsv").write_text(
+        (outdir / "report.tsv").write_text(
             "\n".join(f"{m['page']}\t{m['rms']:.4f}\t{m['max']}\t{m['bad_px']}\t{m['bad_ratio']:.6f}" for m in report))
         print(f"\n{'PASS' if all_ok else 'FAIL'} ({len(report)} pages, threshold {args.threshold*100:.1f}%)"
-              f" — heatmaps: build/pixelcompare/")
+              f" — heatmaps: {outdir.relative_to(REPO)}/")
         return 0 if all_ok else 1
 
 if __name__ == "__main__":
