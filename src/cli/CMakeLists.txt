@@ -1,0 +1,3 @@
+add_executable(doccraft main.cc)
+target_link_libraries(doccraft PRIVATE doccraft_cfb doccraft_doc doccraft_model doccraft_docx)
+target_compile_features(doccraft PUBLIC cxx_std_23)

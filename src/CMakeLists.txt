@@ -1,0 +1,5 @@
+add_subdirectory(cfb)
+add_subdirectory(doc)
+add_subdirectory(model)
+add_subdirectory(docx)
+add_subdirectory(cli)

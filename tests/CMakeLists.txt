@@ -1,0 +1,5 @@
+add_executable(cfb_reader_test cfb_reader_test.cc cfb_test_util.cc cfb_test_util.h)
+target_link_libraries(cfb_reader_test PRIVATE doccraft_cfb gtest_main)
+target_compile_features(cfb_reader_test PUBLIC cxx_std_23)
+include(GoogleTest)
+gtest_discover_tests(cfb_reader_test)
