@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <limits>
 #include <utility>
 
 namespace doccraft::cfb {
@@ -57,11 +56,14 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
   const uint32_t unit = mini ? mini_sector_size_ : sector_size_;
   const uint64_t count = size / unit + (size % unit != 0);
   const auto& table = mini ? mini_fat_ : fat_;
-  if (count > table.size() || size > std::numeric_limits<size_t>::max()) {
+  if (count > table.size()) {
     return std::unexpected(Fail(ErrorCode::kCorruptFat, "chain exceeds allocation table"));
   }
   std::vector<uint8_t> result;
-  result.reserve(static_cast<size_t>(size));
+  // A valid chain cannot return more bytes than its backing container. Start
+  // small and let vector grow geometrically as verified sectors are copied.
+  const uint64_t backing_size = mini ? mini_stream_.size() : data_.size();
+  result.reserve(static_cast<size_t>(std::min({size, backing_size, uint64_t{65536}})));
   std::vector<uint8_t> seen(table.size(), 0);
   uint32_t at = start;
   for (uint64_t i = 0; i < count; ++i) {
@@ -105,7 +107,6 @@ std::expected<CfbReader, Error> CfbReader::Open(std::span<const uint8_t> bytes) 
   if (bytes.size() < 512) return std::unexpected(Fail(ErrorCode::kTruncated, "header truncated"));
   CfbReader out;
   out.major_version_ = U16(bytes.data() + 26);
-  out.minor_version_ = U16(bytes.data() + 24);
   if (out.major_version_ != 3 && out.major_version_ != 4) {
     return std::unexpected(Fail(ErrorCode::kUnsupportedRevision, "unsupported CFB version"));
   }
@@ -142,7 +143,9 @@ std::expected<CfbReader, Error> CfbReader::Open(std::span<const uint8_t> bytes) 
       return std::unexpected(Fail(ErrorCode::kCorruptFat, "invalid DIFAT chain"));
     }
     difat_seen[difat_at] = 1;
-    const uint8_t* p = *out.SectorBytes(difat_at);
+    auto sector = out.SectorBytes(difat_at);
+    if (!sector) return std::unexpected(sector.error());
+    const uint8_t* p = *sector;
     for (uint32_t j = 0; j < out.sector_size_ / 4 - 1 && out.difat_.size() < fat_count; ++j) {
       uint32_t id = U32(p + j * 4);
       if (id != kFree) out.difat_.push_back(id);
@@ -158,7 +161,9 @@ std::expected<CfbReader, Error> CfbReader::Open(std::span<const uint8_t> bytes) 
       return std::unexpected(Fail(ErrorCode::kCorruptFat, "invalid FAT sector"));
     }
     fat_seen[id] = 1;
-    const uint8_t* p = *out.SectorBytes(id);
+    auto sector = out.SectorBytes(id);
+    if (!sector) return std::unexpected(sector.error());
+    const uint8_t* p = *sector;
     for (uint32_t j = 0; j < out.sector_size_ / 4; ++j) out.fat_.push_back(U32(p + j * 4));
   }
   if (out.fat_.size() < total_sectors) {
@@ -180,7 +185,9 @@ std::expected<CfbReader, Error> CfbReader::Open(std::span<const uint8_t> bytes) 
       return std::unexpected(Fail(ErrorCode::kCorruptDirectory, "invalid directory chain"));
     }
     dir_seen[dir_at] = 1;
-    const uint8_t* p = *out.SectorBytes(dir_at);
+    auto sector = out.SectorBytes(dir_at);
+    if (!sector) return std::unexpected(sector.error());
+    const uint8_t* p = *sector;
     directory.insert(directory.end(), p, p + out.sector_size_);
     dir_at = out.fat_[dir_at];
   }
@@ -219,6 +226,10 @@ std::expected<CfbReader, Error> CfbReader::Open(std::span<const uint8_t> bytes) 
   if (out.entries_[0].type != EntryType::kRoot) {
     return std::unexpected(Fail(ErrorCode::kCorruptDirectory, "first entry is not root"));
   }
+  if (out.entries_[0].left != DirEntry::kNoFollow ||
+      out.entries_[0].right != DirEntry::kNoFollow) {
+    return std::unexpected(Fail(ErrorCode::kCorruptDirectory, "root has sibling"));
+  }
   auto visited = out.Visit([](const DirEntry&, std::string_view, bool) { return true; });
   if (!visited) return std::unexpected(visited.error());
   if (out.num_mini_fat_) {
@@ -240,7 +251,13 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadStream(std::string_vie
       std::unexpected(Fail(ErrorCode::kStreamNotFound, "stream not found"));
   auto visited = Visit([&](const DirEntry& entry, std::string_view path, bool) {
     if (entry.type != EntryType::kStream) return true;
-    const std::string_view relative = path.substr(entries_[0].name.size() + 1);
+    const size_t prefix_length = entries_[0].name.size() + 1;
+    if (path.size() <= prefix_length) {
+      result = std::unexpected(Fail(ErrorCode::kCorruptDirectory,
+                                    "stream path lacks root prefix"));
+      return false;
+    }
+    const std::string_view relative = path.substr(prefix_length);
     if (path != name && relative != name && entry.name != name) return true;
     result = ReadChain(entry.start_sector, entry.size, entry.size < 4096);
     return false;
