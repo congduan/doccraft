@@ -9,15 +9,13 @@
 
 namespace doccraft::cfb::test {
 
-// Builder for minimal-but-valid CFB containers (v3, 512-byte sectors).
-// Supports: N regular streams (>= 4096 bytes -> regular FAT chain),
-// plus the required Root Entry. Mini-stream support is exercised via a
-// dedicated small-stream builder flag.
+// Builder for CFB v3 (512-byte sectors) and v4 (4096-byte sectors).
+// Slash-separated stream names create nested storages. Streams below 4096
+// bytes are stored in the root mini stream.
 class CfbBuilder {
  public:
   CfbBuilder& AddStream(const std::string& name, std::vector<uint8_t> data);
-  // Sets the number of reserved FAT sectors (exercises DIFAT extension when
-  // > 109 FAT sectors are needed).
+  CfbBuilder& SetSectorSize(uint32_t sector_size);
   std::vector<uint8_t> Build();
 
  private:
@@ -26,6 +24,7 @@ class CfbBuilder {
     std::vector<uint8_t> data;
   };
   std::vector<StreamSpec> streams_;
+  uint32_t sector_size_ = 512;
 };
 
 // A few fixed well-known payloads used by golden assertions.

@@ -13,7 +13,10 @@
 // limitations under the License.
 
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <string>
+#include <vector>
 
 #include "cfb/cfb_reader.h"
 
@@ -28,9 +31,30 @@ int main(int argc, char** argv) {
   }
   const std::string cmd = argv[1];
   if (cmd == "inspect" && argc >= 3) {
-    // M1: open CFB and dump directory tree.
-    std::fprintf(stderr, "inspect: not implemented yet (M1)\n");
-    return 1;
+    std::ifstream file(argv[2], std::ios::binary);
+    if (!file) {
+      std::fprintf(stderr, "inspect: cannot open %s\n", argv[2]);
+      return 1;
+    }
+    std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
+    auto reader = doccraft::cfb::CfbReader::Open(bytes);
+    if (!reader) {
+      std::fprintf(stderr, "inspect: %s\n", reader.error().message.c_str());
+      return 1;
+    }
+    std::printf("CFB version %u, sector size %u\n", reader->major_version(),
+                reader->sector_size());
+    auto visited = reader->Visit([](const doccraft::cfb::DirEntry& entry,
+                                    std::string_view path, bool) {
+      std::printf("%.*s (%llu bytes)\n", static_cast<int>(path.size()), path.data(),
+                  static_cast<unsigned long long>(entry.size));
+      return true;
+    });
+    if (!visited) {
+      std::fprintf(stderr, "inspect: %s\n", visited.error().message.c_str());
+      return 1;
+    }
+    return 0;
   }
   if (cmd == "convert" && argc >= 3) {
     std::fprintf(stderr, "convert: not implemented yet (M2)\n");

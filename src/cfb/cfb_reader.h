@@ -17,9 +17,11 @@
 
 #include <cstdint>
 #include <expected>
+#include <concepts>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace doccraft::cfb {
@@ -77,8 +79,8 @@ class CfbReader {
       std::string_view name) const;
 
   // Depth-first visit of the directory tree. `visitor` receives each entry
-  // with its full path ("root/storage/stream"); returning false stops the
-  // walk. Path separator is '/'.
+  // with its full path ("root/storage/stream") and a flag indicating a
+  // storage/root entry; returning false stops the walk. Path separator is '/'.
   template <typename F>
     requires std::invocable<F, const DirEntry&, std::string_view, bool>
   std::expected<void, Error> Visit(F&& visitor) const;
@@ -105,7 +107,62 @@ class CfbReader {
   std::vector<uint32_t> difat_;       // Sector numbers of FAT sectors
   std::vector<uint32_t> mini_fat_;
   std::vector<DirEntry> entries_;
+  std::vector<uint8_t> mini_stream_;
 };
+
+template <typename F>
+  requires std::invocable<F, const DirEntry&, std::string_view, bool>
+std::expected<void, Error> CfbReader::Visit(F&& visitor) const {
+  if (entries_.empty()) {
+    return std::unexpected(Error{ErrorCode::kCorruptDirectory, "missing root"});
+  }
+  std::vector<uint8_t> seen(entries_.size(), 0);
+  struct Task {
+    uint32_t index;
+    std::string parent;
+    bool emit;
+  };
+  std::vector<Task> tasks{{0, "", false}};
+  while (!tasks.empty()) {
+    Task task = std::move(tasks.back());
+    tasks.pop_back();
+    if (task.index == DirEntry::kNoFollow) continue;
+    if (task.index >= entries_.size()) {
+      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
+                                   "directory link is invalid or cyclic"});
+    }
+    const DirEntry& entry = entries_[task.index];
+    if (task.emit) {
+      const std::string path = task.parent.empty() ? entry.name
+                                                   : task.parent + "/" + entry.name;
+      if (!static_cast<bool>(visitor(entry, path,
+                                     entry.type == EntryType::kRoot ||
+                                         entry.type == EntryType::kStorage))) return {};
+      if (entry.child != DirEntry::kNoFollow) {
+        if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage) {
+          return std::unexpected(Error{ErrorCode::kCorruptDirectory,
+                                       "stream has children"});
+        }
+        tasks.push_back({entry.child, path, false});
+      }
+      continue;
+    }
+    if (seen[task.index]) {
+      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
+                                   "directory link is invalid or cyclic"});
+    }
+    seen[task.index] = 1;
+    if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage &&
+        entry.type != EntryType::kStream) {
+      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
+                                   "directory link points to empty entry"});
+    }
+    tasks.push_back({entry.right, task.parent, false});
+    tasks.push_back({task.index, task.parent, true});
+    tasks.push_back({entry.left, task.parent, false});
+  }
+  return {};
+}
 
 }  // namespace doccraft::cfb
 
