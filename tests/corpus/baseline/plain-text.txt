@@ -1,0 +1,2 @@
+﻿Hello doccraft. Plain single paragraph.
+Second paragraph with more text.

@@ -1,0 +1,2 @@
+﻿Centered paragraph
+Justified indented paragraph

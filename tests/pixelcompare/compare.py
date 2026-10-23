@@ -77,7 +77,7 @@ def main() -> int:
     ap.add_argument("source", type=Path)
     ap.add_argument("--docx", type=Path, default=None,
                     help="被测 docx（缺省走 doccraft convert；M2 前可用 LibreOffice 生成的 docx 自检管线）")
-    ap.add_argument("--engine", type=Path, default=REPO / "build" / "cli" / "doccraft")
+    ap.add_argument("--engine", type=Path, default=REPO / "build" / "src" / "cli" / "doccraft")
     ap.add_argument("--dpi", type=int, default=150)
     ap.add_argument("--threshold", type=float, default=0.001,
                     help="单页 bad_ratio 阈值（默认 0.1%%）")
