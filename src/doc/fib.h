@@ -16,6 +16,8 @@ struct Fib {
   uint32_t ccp_text = 0, ccp_ftn = 0, ccp_hdd = 0, ccp_atn = 0;
   uint32_t ccp_edn = 0, ccp_txbx = 0, ccp_hdr_txbx = 0;
   uint32_t fc_clx = 0, lcb_clx = 0;
+  struct Range { uint32_t offset = 0, size = 0; };
+  Range stsh, chpx_bte, papx_bte, sed, fonts, lists, list_overrides, headers;
   std::string table_stream() const { return which_table ? "1Table" : "0Table"; }
 };
 std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word);

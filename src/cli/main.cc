@@ -20,6 +20,7 @@
 
 #include "cfb/cfb_reader.h"
 #include "doc/fib.h"
+#include "doc/format.h"
 #include "doc/text.h"
 #include "docx/writer.h"
 #include "model/document.h"
@@ -99,12 +100,14 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "convert: %s\n", table.error().message.c_str());
       return 1;
     }
-    auto extracted = doccraft::doc::ExtractText(*word, *table, *fib);
+    auto data = cfb->ReadStream("Data");
+    auto extracted = data ? doccraft::doc::ParseFormatted(*word, *table, *fib, *data)
+                          : doccraft::doc::ParseFormatted(*word, *table, *fib);
     if (!extracted) {
       std::fprintf(stderr, "convert: %s\n", extracted.error().message.c_str());
       return 1;
     }
-    auto archive = doccraft::docx::Write(doccraft::model::FromText(*extracted));
+    auto archive = doccraft::docx::Write(*extracted);
     if (!archive) {
       std::fprintf(stderr, "convert: %s\n", archive.error().message.c_str());
       return 1;

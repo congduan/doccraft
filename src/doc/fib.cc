@@ -47,6 +47,19 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
     return std::unexpected(Error{"truncated FIB fc/lcb pairs"});
   f.fc_clx = U32(word, pair_start + 33 * 8);
   f.lcb_clx = U32(word, pair_start + 33 * 8 + 4);
+  auto pair = [&](size_t i) -> Fib::Range {
+    if (i >= pairs) return {};
+    return {U32(word, pair_start + i * 8),
+            U32(word, pair_start + i * 8 + 4)};
+  };
+  f.stsh = pair(0);
+  f.sed = pair(6);
+  f.chpx_bte = pair(12);
+  f.papx_bte = pair(13);
+  f.fonts = pair(15);
+  f.headers = pair(11);
+  f.lists = pair(73);
+  f.list_overrides = pair(74);
   const size_t new_pos = pair_start + size_t(pairs) * 8;
   if (new_pos + 2 <= word.size()) {
     const size_t csw_new = U16(word, new_pos);
