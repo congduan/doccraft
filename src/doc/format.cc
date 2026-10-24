@@ -232,6 +232,20 @@ bool ApplyTable(model::Table& table,model::RowProperties& row,uint16_t op,Bytes 
     if(U16(v,0)>2)return false;
     table.align=U16(v,0);return true;
   }
+  if(op==0x9601) {table.left_origin=S16(v,0);table.indent=table.left_origin-table.gap_half;return true;}
+  if(op==0x9602) {
+    if(S16(v,0)<0)return false;
+    table.gap_half=S16(v,0);
+    if(table.left_origin>=0)table.indent=table.left_origin-table.gap_half;
+    return true;
+  }
+  if(op==0xD633) {
+    if(v.size()!=7 || v[0]!=6 || v[1]!=0 || v[2]!=1 || v[3]!=15 ||
+       (v[4]!=3 && v[4]!=0 && v[4]!=0x13) || S16(v,5)<0 || S16(v,5)>15840)
+      return false;
+    table.cell_spacing=v[4]==0?0:S16(v,5);
+    return true;
+  }
   if(op==0x560B || op==0x5664) {table.bidi=U16(v,0)!=0;return true;}
   if(op==0xD660) {
     return ReadShade(table.shade,table.shade_fore,table.shade_pattern,v);
@@ -361,6 +375,11 @@ void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& 
     case 0x0858:flag(r.emboss,r.emboss_set);break;
     case 0x2A3E:r.underline=v[0];r.underline_set=true;break;
     case 0x4A43:r.size=U16(v,0);break;
+    case 0x4A61:r.size_cs=U16(v,0);break;
+    case 0x085C:flag(r.bold_cs,r.bold_cs_set);break;
+    case 0x085D:flag(r.italic_cs,r.italic_cs_set);break;
+    case 0x484B:r.kern=S16(v,0);break;
+    case 0x4845:r.position=S16(v,0);r.position_set=true;break;
     case 0x2A48:r.super_sub=v[0];r.super_sub_set=true;break;
     case 0x8840:r.spacing=S16(v,0);r.spacing_set=true;break;
     case 0x4852:r.scale=U16(v,0);r.scale_set=true;break;
@@ -420,14 +439,26 @@ void ApplyPara(model::Paragraph& p,uint16_t op,Bytes v) {
     case 0x2640:p.outline=v[0];break;
     case 0x460B:p.list_id=U16(v,0);break;
     case 0x260A:p.list_level=v[0];break;
+    case 0x2423:if(v[0]<=5)p.frame_wrap=v[0];break;
+    case 0x261B:p.frame_anchor=v[0];break;
     default:break;
   }
 }
-void ApplySection(model::Section& s,uint16_t op,Bytes v) {
+bool ApplySection(model::Section& s,uint16_t op,Bytes v) {
   switch(op) {
     case 0x3009:s.break_type=v[0];s.break_specified=true;break;
     case 0x301D:s.orientation=v[0];break;
     case 0x300A:s.first_page_different=v[0]!=0;break;
+    case 0x3005:s.columns_even=v[0]!=0;break;
+    case 0x500B:if(U16(v,0)>43)return false;s.columns=U16(v,0)+1;break;
+    case 0x900C:s.column_space=U16(v,0);break;
+    case 0x3011:s.page_restart=v[0]!=0;break;
+    case 0x501C:s.page_start=U16(v,0);break;
+    case 0x7044:if(U32(v,0)>2147483646u)return false;s.page_start=static_cast<int>(U32(v,0));break;
+    case 0x300E:s.page_format=v[0];break;
+    case 0x9031:if(U16(v,0)<1 || U16(v,0)>31680)return false;s.grid_line_pitch=U16(v,0);break;
+    case 0x5032:if(U16(v,0)>3)return false;s.grid_mode=U16(v,0);break;
+    case 0x5033:s.text_flow=U16(v,0);break;
     case 0x3013:s.line_restart=v[0];break;
     case 0x5015:s.line_count_by=U16(v,0);break;
     case 0x9016:s.line_distance=U16(v,0);break;
@@ -443,6 +474,7 @@ void ApplySection(model::Section& s,uint16_t op,Bytes v) {
     case 0x9023:s.top=std::abs(S16(v,0));break;case 0x9024:s.bottom=std::abs(S16(v,0));break;
     case 0xB025:s.gutter=U16(v,0);break;default:break;
   }
+  return true;
 }
 std::vector<std::string> ReadFonts(Bytes table,Fib::Range r) {
   std::vector<std::string> out;
@@ -691,7 +723,8 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
         if(fc>word.size() || word.size()-fc<2)return std::unexpected(Error{"SEPX outside WordDocument"});
         size_t len=U16(word,fc);
         if(len>word.size()-fc-2)return std::unexpected(Error{"truncated SEPX"});
-        if(!Walk(word.subspan(fc+2,len),[&](uint16_t op,Bytes v){ApplySection(section,op,v);}))
+        bool valid=true;
+        if(!Walk(word.subspan(fc+2,len),[&](uint16_t op,Bytes v){valid&=ApplySection(section,op,v);}) || !valid)
           return std::unexpected(Error{"invalid SEPX sprm"});
       }
       sections.emplace_back(end,std::move(section));

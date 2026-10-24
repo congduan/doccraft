@@ -108,4 +108,12 @@ TEST(M3Batch2, TabStopAlignmentAndLeader) {
     EXPECT_NE(xml.find("<w:tab w:val=\"right\" w:pos=\"720\" w:leader=\"heavy\""),std::string::npos);
   }
 }
+TEST(M3Batch2, FloatingParagraphWrapAndAnchors) {
+  std::vector<uint8_t> pap;
+  auto wrap=Prl(0x2423,{2});pap.insert(pap.end(),wrap.begin(),wrap.end());
+  auto anchor=Prl(0x261B,{0x90});pap.insert(pap.end(),anchor.begin(),anchor.end());
+  auto d=Synthetic(pap,{});ASSERT_TRUE(d.has_value()) << d.error().message;
+  auto xml=Xml(*d);
+  EXPECT_NE(xml.find("<w:framePr w:wrap=\"around\" w:hAnchor=\"page\" w:vAnchor=\"page\""),std::string::npos);
+}
 }

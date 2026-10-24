@@ -58,7 +58,11 @@ void RunPr(pugi::xml_node parent,const model::Run& r) {
   if(r.style>=0)Attr(n.append_child("w:rStyle"),"w:val",Id(r.style));
   if(!r.font.empty()) {auto f=n.append_child("w:rFonts");Attr(f,"w:ascii",r.font);Attr(f,"w:hAnsi",r.font);}
   if(r.size>0)Value(n,"w:sz",r.size);
+  if(r.size_cs>0)Value(n,"w:szCs",r.size_cs);
   SpecBool(n,"w:b",r.bold,r.bold_set);SpecBool(n,"w:i",r.italic,r.italic_set);
+  SpecBool(n,"w:bCs",r.bold_cs,r.bold_cs_set);SpecBool(n,"w:iCs",r.italic_cs,r.italic_cs_set);
+  if(r.kern>=0)Value(n,"w:kern",r.kern);
+  if(r.position_set)Value(n,"w:position",r.position);
   SpecBool(n,"w:strike",r.strike,r.strike_set);
   SpecBool(n,"w:dstrike",r.double_strike,r.double_strike_set);
   SpecBool(n,"w:vanish",r.hidden,r.hidden_set);
@@ -96,6 +100,18 @@ void RunPr(pugi::xml_node parent,const model::Run& r) {
 void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=false) {
   auto n=parent.append_child("w:pPr");
   if(!style_props && p.style>=0)Attr(n.append_child("w:pStyle"),"w:val",Id(p.style));
+  if(p.frame_wrap>=0 || p.frame_anchor>=0) {
+    auto frame=n.append_child("w:framePr");
+    if(p.frame_wrap>=0) {
+      const char* wraps[]={"auto","notBeside","around","none","tight","through"};
+      Attr(frame,"w:wrap",wraps[p.frame_wrap]);
+    }
+    if(p.frame_anchor>=0) {
+      int vertical=(p.frame_anchor>>4)&3,horizontal=(p.frame_anchor>>6)&3;
+      if(horizontal<3)Attr(frame,"w:hAnchor",horizontal==0?"text":horizontal==1?"margin":"page");
+      if(vertical<3)Attr(frame,"w:vAnchor",vertical==0?"margin":vertical==1?"page":"text");
+    }
+  }
   if(p.align>=0) {
     const char* align[]={"left","center","right","both","distribute"};
     Attr(n.append_child("w:jc"),"w:val",p.align<5?align[p.align]:"left");
@@ -169,6 +185,29 @@ void SectionPr(pugi::xml_node sec,const model::Section& section) {
   if(section.gutter)IntAttr(mar,"w:gutter",section.gutter);
   if(section.header_distance>=0)IntAttr(mar,"w:header",section.header_distance);
   if(section.footer_distance>=0)IntAttr(mar,"w:footer",section.footer_distance);
+  if(section.columns>1 || section.column_space>=0) {
+    auto cols=sec.append_child("w:cols");
+    IntAttr(cols,"w:num",section.columns);
+    if(section.column_space>=0)IntAttr(cols,"w:space",section.column_space);
+    if(!section.columns_even)Attr(cols,"w:equalWidth","0");
+  }
+  if(section.page_restart || section.page_format>=0) {
+    auto pages=sec.append_child("w:pgNumType");
+    if(section.page_restart)IntAttr(pages,"w:start",section.page_start>=0?section.page_start:0);
+    if(section.page_format>=0) {
+      const char* formats[]={"decimal","upperRoman","lowerRoman","upperLetter","lowerLetter"};
+      Attr(pages,"w:fmt",section.page_format<5?formats[section.page_format]:"decimal");
+    }
+  }
+  if(section.grid_mode>0 || section.grid_line_pitch>0) {
+    auto grid=sec.append_child("w:docGrid");
+    if(section.grid_mode>0)Attr(grid,"w:type",section.grid_mode==2?"lines":section.grid_mode==3?"snapToChars":"linesAndChars");
+    if(section.grid_line_pitch>0)IntAttr(grid,"w:linePitch",section.grid_line_pitch);
+  }
+  if(section.text_flow>=0) {
+    const char* directions[]={"lrTb","tbRl","btLr","tbRl","lrTb","tbRl"};
+    Attr(sec.append_child("w:textDirection"),"w:val",section.text_flow<6?directions[section.text_flow]:"lrTb");
+  }
   if(section.line_count_by>0) {
     auto line=sec.append_child("w:lnNumType");
     IntAttr(line,"w:countBy",section.line_count_by);
@@ -225,6 +264,10 @@ std::expected<std::vector<uint8_t>,Error> Write(const model::Document& document)
     auto width=pr.append_child("w:tblW");IntAttr(width,"w:w",t.width);
     Attr(width,"w:type",t.width_type==3?"dxa":t.width_type==2?"pct":"auto");
     Attr(pr.append_child("w:tblLayout"),"w:type",t.auto_fit?"autofit":"fixed");
+    if(t.cell_spacing>=0) {
+      auto spacing=pr.append_child("w:tblCellSpacing");
+      IntAttr(spacing,"w:w",t.cell_spacing);Attr(spacing,"w:type","dxa");
+    }
     int indent=t.indent;bool has_indent=indent>=0;
     if(!has_indent) {
       const model::Border* left=&t.borders[1];

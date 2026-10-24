@@ -14,6 +14,10 @@ struct Run {
   bool page_field = false;
   std::string font;
   int size = 0;
+  int size_cs = 0, kern = -1, position = 0;
+  bool position_set = false;
+  bool bold_cs = false, italic_cs = false;
+  bool bold_cs_set = false, italic_cs_set = false;
   bool bold = false, italic = false, strike = false, double_strike = false;
   bool hidden = false;
   bool bold_set = false, italic_set = false, strike_set = false;
@@ -45,6 +49,7 @@ struct Paragraph {
   bool keep_next = false, keep_lines = false, page_break_before = false;
   bool keep_next_set = false, keep_lines_set = false, page_break_before_set = false;
   int outline = -1, list_id = -1, list_level = 0;
+  int frame_wrap = -1, frame_anchor = -1;
   std::vector<TabStop> tabs;
   std::array<Border,4> borders;
   std::array<Border,3> extra_borders;
@@ -67,6 +72,11 @@ struct Section {
   bool break_specified = false;
   int header_distance = -1, footer_distance = -1;
   bool first_page_different = false, odd_even_different = false;
+  int columns = 1, column_space = -1;
+  bool columns_even = true;
+  int page_start = -1, page_format = -1;
+  bool page_restart = false;
+  int grid_line_pitch = -1, grid_mode = -1, text_flow = -1;
   int line_count_by = 0, line_restart = 0, line_start = 0, line_distance = -1;
   int footnote_position = -1, footnote_restart = -1, footnote_start = -1, footnote_format = -1;
   std::array<std::vector<Paragraph>,6> headers;
@@ -102,6 +112,7 @@ struct Table {
   int width = 5000, width_type = 2;
   bool auto_fit = false;
   int indent = -1, align = -1;
+  int cell_spacing = -1, left_origin = -1, gap_half = 0;
   bool bidi = false;
   int shade = -1, shade_fore = -1, shade_pattern = 0;
 };

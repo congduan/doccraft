@@ -118,7 +118,7 @@ TEST(M3Batch3, TableSetBorderShadingPaddingMergeAndDirection) {
        "<w:tcMar>","<w:hMerge w:val=\"restart\"",
        "<w:vMerge w:val=\"restart\"","<w:textDirection w:val=\"tbRl\"",
        "<w:cantSplit/>","<w:tblHeader/>"})
-    EXPECT_NE(xml.find(fragment),std::string::npos) << fragment;
+    EXPECT_NE(xml.find(fragment),std::string::npos) << fragment << "\n" << xml;
   EXPECT_NE(xml.find("<w:top w:w=\"120\""),std::string::npos);
 }
 TEST(M3Batch3, TableInsertDeleteSplitAndDefaultShading) {
@@ -230,6 +230,18 @@ TEST(M3Batch3, TableShadingIndentAlignmentAndBidi) {
     EXPECT_NE(xml.find("<w:bidiVisual/>"),std::string::npos);
   }
 }
+TEST(M3Batch3, TableSpacingAndGapOffset) {
+  std::vector<uint8_t> sprms;
+  Add(sprms,0x9601,{0xF4,1}); // origin 500 twips
+  Add(sprms,0x9602,{0x64,0}); // gap offset 100 twips
+  Add(sprms,0xD633,{6,0,1,15,3,120,0});
+  auto d=SyntheticTable(sprms);ASSERT_TRUE(d.has_value()) << d.error().message;
+  auto xml=Xml(*d);
+  EXPECT_NE(xml.find("<w:tblInd w:w=\"400\""),std::string::npos);
+  EXPECT_NE(xml.find("<w:tblCellSpacing w:w=\"120\" w:type=\"dxa\""),std::string::npos);
+  auto bad=SyntheticTable(Prl(0xD633,{6,0,1,15,3,0xFF,0x7F}));
+  EXPECT_FALSE(bad.has_value());
+}
 TEST(M3Batch3, SectionBreakCarriesPrecedingSectionProperties) {
   doccraft::model::Document d;
   d.paragraphs.resize(2);
@@ -271,6 +283,55 @@ TEST(M3Batch3, ParsesSectionBoundaryIntoPrecedingParagraph) {
   auto xml=Xml(*d);
   EXPECT_NE(xml.find("<w:pgSz w:w=\"15840\" w:h=\"12240\""),std::string::npos);
   EXPECT_NE(xml.find("<w:pgSz w:w=\"12240\" w:h=\"15840\""),std::string::npos);
+}
+TEST(M3Batch3, SectionColumnsPageNumberAndGrid) {
+  std::vector<uint8_t> word(1536),table(128);
+  word[1024]='A';word[1025]=0x0c;word[1026]='B';word[1027]='\r';
+  table[0]=2;U32(table,1,16);U32(table,5,0);U32(table,9,4);
+  U32(table,15,0x40000000u+2048);
+  U32(table,64,0);U32(table,68,2);U32(table,72,4);
+  U32(table,78,600);U32(table,90,680);
+  std::vector<uint8_t> first;
+  Add(first,0x500B,{1,0});Add(first,0x900C,{0x68,1});
+  Add(first,0x3011,{1});Add(first,0x501C,{5,0});
+  Add(first,0x5032,{2,0});Add(first,0x9031,{0x68,1});
+  Add(first,0x5033,{1,0});
+  U16(word,600,first.size());std::copy(first.begin(),first.end(),word.begin()+602);
+  std::vector<uint8_t> second;
+  Add(second,0x500B,{2,0});Add(second,0x900C,{0xD0,2});
+  Add(second,0x3011,{1});Add(second,0x7044,{9,0,0,0});
+  U16(word,680,second.size());std::copy(second.begin(),second.end(),word.begin()+682);
+  doccraft::doc::Fib fib;fib.ccp_text=4;fib.fc_clx=0;fib.lcb_clx=21;fib.sed={64,36};
+  auto d=doccraft::doc::ParseFormatted(word,table,fib);
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  auto xml=Xml(*d);
+  EXPECT_NE(xml.find("<w:cols w:num=\"2\" w:space=\"360\""),std::string::npos);
+  EXPECT_NE(xml.find("<w:cols w:num=\"3\" w:space=\"720\""),std::string::npos);
+  EXPECT_NE(xml.find("<w:pgNumType w:start=\"5\""),std::string::npos);
+  EXPECT_NE(xml.find("<w:pgNumType w:start=\"9\""),std::string::npos);
+  EXPECT_NE(xml.find("<w:docGrid w:type=\"lines\" w:linePitch=\"360\""),std::string::npos);
+  EXPECT_NE(xml.find("<w:textDirection w:val=\"tbRl\""),std::string::npos);
+}
+TEST(M3Batch3, ComplexScriptKerningAndPosition) {
+  std::vector<uint8_t> word(1536),table(64);
+  word[1024]='X';word[1025]='\r';
+  table[0]=2;U32(table,1,16);U32(table,5,0);U32(table,9,2);
+  U32(table,15,0x40000000u+2048);
+  U32(table,32,1024);U32(table,36,1026);U32(table,40,1);
+  U32(word,512,1024);U32(word,516,1026);word[520]=20;word[1023]=1;
+  std::vector<uint8_t> sprms;
+  Add(sprms,0x4A61,{28,0});Add(sprms,0x085C,{1});Add(sprms,0x085D,{1});
+  Add(sprms,0x484B,{24,0});Add(sprms,0x4845,{0xFC,0xFF});
+  if(sprms.size()&1)sprms.push_back(0);
+  word[552]=uint8_t(sprms.size());
+  std::copy(sprms.begin(),sprms.end(),word.begin()+553);
+  doccraft::doc::Fib fib;fib.ccp_text=2;fib.fc_clx=0;fib.lcb_clx=21;fib.chpx_bte={32,12};
+  auto d=doccraft::doc::ParseFormatted(word,table,fib);
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  auto xml=Xml(*d);
+  for(const auto& fragment:{"<w:szCs w:val=\"28\"", "<w:bCs/>","<w:iCs/>",
+       "<w:kern w:val=\"24\"", "<w:position w:val=\"-4\""})
+    EXPECT_NE(xml.find(fragment),std::string::npos) << fragment << "\n" << xml;
 }
 TEST(M3Batch3, CharacterSymbolEmitsSymElement) {
   std::vector<uint8_t> word(1536),table(160);
