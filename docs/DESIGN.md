@@ -88,9 +88,23 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 - **Google C++ Style Guide**：2 空格缩进、`kConstantName`、`.h/.cc` 后缀、
   header guard `DOCCRAFT_PATH_FILE_H_`、include 分组
-- C++20，`-Wall -Wextra -Wpedantic -Werror`；clang-format/.clang-tidy 强制
-- 零第三方核心依赖；测试用 googletest（FetchContent）；zlib 可选
+- C++23，`-Wall -Wextra -Wpedantic -Werror`；clang-format/.clang-tidy 强制
+- 测试用 googletest（FetchContent）
 - 命名：`doccraft::cfb`、`doccraft::doc`、`doccraft::model`、`doccraft::docx`
+
+### 2.1 依赖策略（2026-10-23 定案）
+
+**领域核心自研，通用基础设施用业界顶尖开源库。**
+
+- **自研**（项目差异化，无现成库可对标）：DOC/CFB 语义解析、sprm→OOXML
+  映射、文档 IR、还原度逻辑
+- **用库**（成熟基础设施，不重复造轮子）：
+  - ZIP 容器：**miniz**（M3 起，替换 M2 手写 store+CRC32；deflate 支持顺带获得）
+  - XML 生成：**pugixml**（M3 起，样式表生成与转义）
+  - 加密原语（M6 RC4 等）：用成熟实现，密码学不自造
+  - 测试：googletest、libFuzzer
+- 选库标准：业界广泛使用、license 宽松（public domain/MIT/Apache）、
+  可 FetchContent 单一来源引入、不引入传递依赖
 
 ## 3. 测试策略（TDD）
 
