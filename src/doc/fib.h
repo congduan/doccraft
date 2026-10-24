@@ -13,7 +13,6 @@ struct Fib {
   bool complex = false;
   bool encrypted = false;
   bool which_table = false;
-  uint32_t fc_min = 0, fc_mac = 0;
   uint32_t ccp_text = 0, ccp_ftn = 0, ccp_hdd = 0, ccp_atn = 0;
   uint32_t ccp_edn = 0, ccp_txbx = 0, ccp_hdr_txbx = 0;
   uint32_t fc_clx = 0, lcb_clx = 0;

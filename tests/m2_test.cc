@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "cfb/cfb_reader.h"
+#include "cfb_test_util.h"
 #include "doc/fib.h"
 #include "doc/text.h"
 #include "docx/writer.h"
@@ -107,6 +109,40 @@ TEST(PieceTableTest, ReplacesNonXmlCharsWithReplacementChar) {
             "\xEF\xBF\xBD"
             "\xEF\xBF\xBD"
             "\nEF");
+}
+TEST(PieceTableTest, RejectsOverlappingPiecesThatOverCoverWordDocument) {
+  constexpr uint32_t kPieces = 9;
+  constexpr uint32_t kPieceLength = 1024;
+  std::vector<uint8_t> word = Fib();
+  word.resize(8192, 'A');
+  Put32(word, 64 + 3 * 4, kPieces * kPieceLength);
+  Put32(word, 154 + 33 * 8, 0);
+  Put32(word, 158 + 33 * 8, 5 + 4 + 12 * kPieces);
+
+  std::vector<uint8_t> table(5 + 4 + 12 * kPieces);
+  table[0] = 2;
+  Put32(table, 1, 4 + 12 * kPieces);
+  const size_t pcd = 5 + 4 * (kPieces + 1);
+  for (uint32_t i = 0; i <= kPieces; ++i)
+    Put32(table, 5 + 4 * i, i * kPieceLength);
+  for (uint32_t i = 0; i < kPieces; ++i)
+    Put32(table, pcd + 8 * i + 2, 0x40000000u | (512u * 2));
+
+  doccraft::cfb::test::CfbBuilder builder;
+  auto container = builder.AddStream("WordDocument", std::move(word))
+                       .AddStream("0Table", std::move(table))
+                       .Build();
+  auto cfb = doccraft::cfb::CfbReader::Open(container);
+  ASSERT_TRUE(cfb);
+  auto word_stream = cfb->ReadStream("WordDocument");
+  auto table_stream = cfb->ReadStream("0Table");
+  ASSERT_TRUE(word_stream);
+  ASSERT_TRUE(table_stream);
+  auto fib = doccraft::doc::ParseFib(*word_stream);
+  ASSERT_TRUE(fib);
+  auto text = doccraft::doc::ExtractText(*word_stream, *table_stream, *fib);
+  ASSERT_FALSE(text);
+  EXPECT_EQ(text.error().message, "piece table over-covers WordDocument");
 }
 TEST(ZipTest, CrcKnownVector) {
   EXPECT_EQ(doccraft::docx::Crc32("123456789"), 0xCBF43926u);

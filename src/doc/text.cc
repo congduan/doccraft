@@ -71,12 +71,16 @@ std::expected<std::string, Error> ExtractText(std::span<const uint8_t> word,
   const size_t count = (size - 4) / 12;
   const size_t pcd = pos + 4 * (count + 1);
   std::string out;
+  size_t emitted = 0;
   for (size_t i = 0; i < count; ++i) {
     const uint32_t cp0 = U32(clx, pos + 4 * i),
                    cp1 = U32(clx, pos + 4 * (i + 1));
     if (cp1 <= cp0) return std::unexpected(Error{"invalid piece CP order"});
     if (cp0 >= fib.ccp_text) break;
     const uint32_t length = std::min(cp1, fib.ccp_text) - cp0;
+    if (length > word.size() - emitted)
+      return std::unexpected(Error{"piece table over-covers WordDocument"});
+    emitted += length;
     const uint32_t raw = U32(clx, pcd + 8 * i + 2);
     const bool compressed = raw & 0x40000000u;
     const uint64_t start =

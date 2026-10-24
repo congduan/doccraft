@@ -5,7 +5,6 @@
 namespace doccraft::model {
 struct Run {
   std::string text;
-  std::vector<size_t> special_offsets;
 };
 struct Paragraph {
   std::vector<Run> runs;

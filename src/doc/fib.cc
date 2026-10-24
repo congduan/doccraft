@@ -24,8 +24,6 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.which_table = flags & 0x0200;
   if (f.encrypted)
     return std::unexpected(Error{"encrypted document unsupported (M6)"});
-  f.fc_min = U32(word, 24);
-  f.fc_mac = U32(word, 28);
   const size_t lw_count_pos = 34u + size_t(U16(word, 32)) * 2;
   if (lw_count_pos + 2 > word.size())
     return std::unexpected(Error{"truncated FIB csw"});
