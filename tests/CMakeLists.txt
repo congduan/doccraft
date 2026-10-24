@@ -14,6 +14,10 @@ gtest_discover_tests(m3_test)
 add_executable(m3_batch2_test m3_batch2_test.cc)
 target_link_libraries(m3_batch2_test PRIVATE doccraft_doc doccraft_docx gtest_main)
 gtest_discover_tests(m3_batch2_test)
+add_executable(m3_batch3_test m3_batch3_test.cc)
+target_link_libraries(m3_batch3_test PRIVATE doccraft_cfb doccraft_doc doccraft_docx gtest_main)
+target_compile_definitions(m3_batch3_test PRIVATE DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(m3_batch3_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME docx_zip_validate COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/docx/validate_zip.py

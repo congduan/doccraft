@@ -30,6 +30,8 @@ struct Run {
   int shade_fore = -1, shade_pattern = 0;
   Border border;
   bool color_rgb = false;
+  int symbol_character = -1;
+  std::string symbol_font;
   int style = -1;
 };
 struct TabStop { int position = 0, align = 0, leader = 0; };
@@ -78,9 +80,30 @@ struct List {
   int id = 0;
   std::vector<ListLevel> levels;
 };
+struct CellProperties {
+  int width = -1, width_type = 3;
+  std::array<Border,6> borders;
+  int shade = -1, shade_fore = -1, shade_pattern = 0;
+  std::array<int,4> margins{{-1,-1,-1,-1}};
+  int vertical_merge = 0, horizontal_merge = 0, text_direction = -1;
+  int vertical_align = -1;
+  bool no_wrap = false, fit_text = false, hide_mark = false;
+};
+struct RowProperties {
+  std::vector<CellProperties> cells;
+  bool cant_split = false, header = false;
+  int height = 0;
+};
 struct Table {
   std::vector<int> columns;
   std::vector<std::vector<Paragraph>> rows;
+  std::vector<RowProperties> row_properties;
+  std::array<Border,6> borders;
+  int width = 5000, width_type = 2;
+  bool auto_fit = false;
+  int indent = -1, align = -1;
+  bool bidi = false;
+  int shade = -1, shade_fore = -1, shade_pattern = 0;
 };
 struct Block {
   bool table = false;

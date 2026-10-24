@@ -212,24 +212,95 @@ std::expected<std::vector<uint8_t>,Error> Write(const model::Document& document)
       } else if(r.page_field) {
         owner=pn.append_child("w:fldSimple");Attr(owner,"w:instr","PAGE");
       }
-      auto rn=owner.append_child("w:r");RunPr(rn,r);Text(rn,r.text);
+      auto rn=owner.append_child("w:r");RunPr(rn,r);
+      if(r.symbol_character>=0 && !r.symbol_font.empty()) {
+        auto sym=rn.append_child("w:sym");Attr(sym,"w:font",r.symbol_font);
+        char code[5];std::snprintf(code,sizeof(code),"%04X",r.symbol_character&0xffff);
+        Attr(sym,"w:char",code);
+      } else Text(rn,r.text);
     }
   };
   auto table=[&](const model::Table& t) {
     auto tn=body.append_child("w:tbl");auto pr=tn.append_child("w:tblPr");
-    auto width=pr.append_child("w:tblW");IntAttr(width,"w:w",5000);Attr(width,"w:type","pct");
-    Attr(pr.append_child("w:tblLayout"),"w:type","fixed");
+    auto width=pr.append_child("w:tblW");IntAttr(width,"w:w",t.width);
+    Attr(width,"w:type",t.width_type==3?"dxa":t.width_type==2?"pct":"auto");
+    Attr(pr.append_child("w:tblLayout"),"w:type",t.auto_fit?"autofit":"fixed");
+    int indent=t.indent;bool has_indent=indent>=0;
+    if(!has_indent) {
+      const model::Border* left=&t.borders[1];
+      if(!left->set && !t.row_properties.empty() && !t.row_properties[0].cells.empty())
+        left=&t.row_properties[0].cells[0].borders[1];
+      if(left->set && left->type && left->width>0) {
+        indent=-(left->width*5+2)/4;has_indent=true; // half the outer border width, in twips
+      }
+    }
+    if(has_indent) {auto ind=pr.append_child("w:tblInd");IntAttr(ind,"w:w",indent);Attr(ind,"w:type","dxa");}
+    if(t.align>=0) {
+      const char* aligns[]={"left","center","right"};
+      Attr(pr.append_child("w:jc"),"w:val",t.align<3?aligns[t.align]:"left");
+    }
+    if(t.bidi)One(pr,"w:bidiVisual");
+    ShadePr(pr,t.shade,t.shade_fore,t.shade_pattern);
+    bool any_table_border=false;for(const auto& b:t.borders)any_table_border|=b.set;
+    if(any_table_border) {
+      auto bd=pr.append_child("w:tblBorders");
+      const char* sides[]={"w:top","w:left","w:bottom","w:right","w:insideH","w:insideV"};
+      for(size_t k=0;k<6;k++)BorderPr(bd,sides[k],t.borders[k]);
+    }
     auto margins=pr.append_child("w:tblCellMar");
     for(const char* side:{"w:top","w:left","w:bottom","w:right"}) {
       auto m=margins.append_child(side);IntAttr(m,"w:w",0);Attr(m,"w:type","dxa");
     }
     auto grid=tn.append_child("w:tblGrid");
     for(int c:t.columns)IntAttr(grid.append_child("w:gridCol"),"w:w",c);
-    for(const auto& row:t.rows) {
+    for(size_t i=0;i<t.rows.size();i++) {
+      const auto& row=t.rows[i];
+      const model::RowProperties* rp=i<t.row_properties.size()?&t.row_properties[i]:nullptr;
       auto tr=tn.append_child("w:tr");
+      if(rp && (rp->cant_split || rp->header || rp->height)) {
+        auto trp=tr.append_child("w:trPr");
+        if(rp->cant_split)One(trp,"w:cantSplit");
+        if(rp->header)One(trp,"w:tblHeader");
+        if(rp->height) {
+          auto h=trp.append_child("w:trHeight");IntAttr(h,"w:val",std::abs(rp->height));
+          Attr(h,"w:hRule",rp->height<0?"exact":"atLeast");
+        }
+      }
       for(size_t j=0;j<row.size();j++) {
         auto tc=tr.append_child("w:tc");auto tcp=tc.append_child("w:tcPr");
-        if(j<t.columns.size()) {auto cw=tcp.append_child("w:tcW");IntAttr(cw,"w:w",t.columns[j]);Attr(cw,"w:type","dxa");}
+        const model::CellProperties* cp=rp && j<rp->cells.size()?&rp->cells[j]:nullptr;
+        int cell_width=cp && cp->width>=0?cp->width:j<t.columns.size()?t.columns[j]:-1;
+        if(cell_width>=0) {auto cw=tcp.append_child("w:tcW");IntAttr(cw,"w:w",cell_width);Attr(cw,"w:type",cp && cp->width_type==2?"pct":"dxa");}
+        if(cp) {
+          bool any_border=false;for(const auto& b:cp->borders)any_border|=b.set;
+          if(any_border) {
+            auto bd=tcp.append_child("w:tcBorders");
+            const char* sides[]={"w:top","w:left","w:bottom","w:right","w:tl2br","w:tr2bl"};
+            for(size_t k=0;k<6;k++)BorderPr(bd,sides[k],cp->borders[k]);
+          }
+          ShadePr(tcp,cp->shade,cp->shade_fore,cp->shade_pattern);
+          bool any_margin=false;for(int m:cp->margins)any_margin|=m>=0;
+          if(any_margin) {
+            auto mar=tcp.append_child("w:tcMar");
+            const char* sides[]={"w:top","w:left","w:bottom","w:right"};
+            for(size_t k=0;k<4;k++)if(cp->margins[k]>=0) {
+              auto m=mar.append_child(sides[k]);IntAttr(m,"w:w",cp->margins[k]);Attr(m,"w:type","dxa");
+            }
+          }
+          if(cp->vertical_merge)Attr(tcp.append_child("w:vMerge"),"w:val",cp->vertical_merge==2?"restart":"continue");
+          if(cp->horizontal_merge)Attr(tcp.append_child("w:hMerge"),"w:val",cp->horizontal_merge==2?"restart":"continue");
+          if(cp->vertical_align>=0) {
+            const char* aligns[]={"top","center","bottom"};
+            Attr(tcp.append_child("w:vAlign"),"w:val",cp->vertical_align<3?aligns[cp->vertical_align]:"top");
+          }
+          if(cp->no_wrap)One(tcp,"w:noWrap");
+          if(cp->fit_text)One(tcp,"w:tcFitText");
+          if(cp->hide_mark)One(tcp,"w:hideMark");
+          if(cp->text_direction>=0) {
+            const char* directions[]={"lrTb","tbRl","lrTb","btLr","lrTbV","tbRlV"};
+            Attr(tcp.append_child("w:textDirection"),"w:val",cp->text_direction<6?directions[cp->text_direction]:"lrTb");
+          }
+        }
         paragraph(tc,row[j]);
       }
     }

@@ -99,4 +99,13 @@ TEST(M3Batch2, UnderlineStyles) {
     EXPECT_NE(Xml(*d).find("<w:u w:val=\""+name+"\""),std::string::npos);
   }
 }
+TEST(M3Batch2, TabStopAlignmentAndLeader) {
+  for(uint16_t op:{uint16_t(0xC615),uint16_t(0xC60D)}) {
+    SCOPED_TRACE(op);
+    auto d=Synthetic(Prl(op,{5,0,1,0xD0,0x02,0x22}),{});
+    ASSERT_TRUE(d.has_value()) << d.error().message;
+    auto xml=Xml(*d);
+    EXPECT_NE(xml.find("<w:tab w:val=\"right\" w:pos=\"720\" w:leader=\"heavy\""),std::string::npos);
+  }
+}
 }

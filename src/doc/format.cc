@@ -116,6 +116,7 @@ const FormatRange* Find(const std::vector<FormatRange>& a,uint32_t fc) {
 // later modifiers in the same grpprl remain reachable.
 template<class F> bool Walk(Bytes b,F fn) {
   for(size_t p=0;p<b.size();) {
+    if(b.size()-p==1 && b[p]==0)return true; // PAPX word alignment byte
     if(p+2>b.size()) return false;
     uint16_t op=U16(b,p);p+=2; size_t len=0;
     switch(op>>13) {
@@ -126,7 +127,7 @@ template<class F> bool Walk(Bytes b,F fn) {
       case 6:
         if(p>=b.size()) return false;
         len=1+b[p];
-        if(op==0xD608 || op==0xD606) { if(p+2>b.size()) return false;len=2+U16(b,p); }
+        if(op==0xD608 || op==0xD606) { if(p+2>b.size()) return false;len=1+U16(b,p); }
         break;
     }
     if(len>b.size()-p) return false;
@@ -134,16 +135,19 @@ template<class F> bool Walk(Bytes b,F fn) {
   }
   return true;
 }
-template<class F> void WalkParagraph(Bytes b,Bytes data,F fn,int depth=0) {
-  Walk(b,[&](uint16_t op,Bytes v){
+template<class F> bool WalkParagraph(Bytes b,Bytes data,F fn,int depth=0) {
+  bool valid=true;
+  bool walked=Walk(b,[&](uint16_t op,Bytes v){
     if((op==0x6646 || op==0x646B) && depth<4 && v.size()==4) {
       uint32_t pos=U32(v,0);
       if(pos<=data.size() && data.size()-pos>=2) {
         size_t len=U16(data,pos);
-        if(len<=data.size()-pos-2)WalkParagraph(data.subspan(pos+2,len),data,fn,depth+1);
-      }
+        if(len<=data.size()-pos-2)valid&=WalkParagraph(data.subspan(pos+2,len),data,fn,depth+1);
+        else valid=false;
+      } else valid=false;
     } else fn(op,v);
   });
+  return walked && valid;
 }
 bool Toggle(bool old,uint8_t v) { return v==0x80?old:v==0x81?!old:v!=0; }
 bool ReadBorder(model::Border& b,Bytes v,bool old) {
@@ -158,6 +162,189 @@ bool ReadBorder(model::Border& b,Bytes v,bool old) {
 bool ReadShade(int& back,int& fore,int& pattern,Bytes v) {
   if(v.size()!=11 || v[0]!=10)return false;
   fore=static_cast<int>(U32(v,1));back=static_cast<int>(U32(v,5));pattern=U16(v,9);
+  return true;
+}
+bool TableBorder(model::Border& b,Bytes v,bool old) {
+  if(v.size()==(old?4u:8u) && U32(v,0)==0xffffffffu &&
+     (old || U32(v,4)==0xffffffffu)) {b={};b.set=true;return true;}
+  if(old)return ReadBorder(b,v,true);
+  if(v.size()!=8)return false;
+  b.set=true;b.color=static_cast<int>(U32(v,0));b.width=v[4];b.type=v[5];
+  b.space=v[6]&31;b.shadow=(v[6]&32)!=0;b.frame=(v[6]&64)!=0;
+  return true;
+}
+bool TableShade(model::CellProperties& c,Bytes v) {
+  if(v.size()!=10)return false;
+  c.shade_fore=static_cast<int>(U32(v,0));c.shade=static_cast<int>(U32(v,4));
+  c.shade_pattern=U16(v,8);return true;
+}
+bool TableRange(model::RowProperties& row,Bytes v,size_t offset,size_t& first,size_t& limit) {
+  if(v.size()<offset+2)return false;
+  first=v[offset];limit=v[offset+1];
+  return first<limit && limit<=row.cells.size();
+}
+bool ApplyTable(model::Table& table,model::RowProperties& row,uint16_t op,Bytes v) {
+  auto& cells=row.cells;
+  if(op==0xD608 || op==0xD606) {
+    if(v.size()<5)return false;
+    size_t count=v[2];
+    if(count>63 || 3+2*(count+1)>v.size())return false;
+    row.cells.assign(count,{});table.columns.clear();
+    for(size_t i=0;i<count;i++) {
+      int width=S16(v,3+2*(i+1))-S16(v,3+2*i);
+      if(width<0)return false;
+      table.columns.push_back(width);
+    }
+    if(op==0xD606)return true; // obsolete BRC10 cells are not TC80 cells
+    size_t start=3+2*(count+1);
+    if((v.size()-start)%20)return false;
+    for(size_t i=0;i<count && start+20<=v.size();i++,start+=20) {
+      auto& c=cells[i];uint16_t flags=U16(v,start);
+      c.width=U16(v,start+2)?U16(v,start+2):-1;
+      c.width_type=(flags>>9)&7;
+      unsigned horizontal=flags&3;
+      c.horizontal_merge=horizontal>=2?2:horizontal;
+      unsigned vertical=(flags>>5)&3;
+      c.vertical_merge=vertical==3?2:vertical;
+      unsigned flow=(flags>>2)&7;
+      if(flow==0 || flow==1 || flow==3 || flow==4 || flow==5)
+        c.text_direction=flow?int(flow):-1;
+      for(size_t side=0;side<4;side++) {
+        Bytes brc=v.subspan(start+4+side*4,4);
+        if(U32(brc,0)!=0xffffffffu && U32(brc,0)!=0)TableBorder(c.borders[side],brc,true);
+      }
+    }
+    return true;
+  }
+  if(op==0x3403 || op==0x3466) {row.cant_split=v[0]!=0;return true;}
+  if(op==0x3404) {row.header=v[0]!=0;return true;}
+  if(op==0x9407) {row.height=S16(v,0);return true;}
+  if(op==0xF614) {
+    if(v.size()!=3 || (v[0]!=0 && v[0]!=2 && v[0]!=3))return false;
+    table.width_type=v[0];table.width=U16(v,1);return true;
+  }
+  if(op==0x3615) {table.auto_fit=v[0]!=0;return true;}
+  if(op==0xF661) {
+    if(v.size()!=3 || v[0]!=3)return false;
+    table.indent=U16(v,1);return true;
+  }
+  if(op==0x548A) {
+    if(U16(v,0)>2)return false;
+    table.align=U16(v,0);return true;
+  }
+  if(op==0x560B || op==0x5664) {table.bidi=U16(v,0)!=0;return true;}
+  if(op==0xD660) {
+    return ReadShade(table.shade,table.shade_fore,table.shade_pattern,v);
+  }
+  if(op==0xD605 || op==0xD613) {
+    bool old=op==0xD605;size_t size=old?4:8;
+    if(v.size()!=1+6*size || v[0]!=6*size)return false;
+    for(size_t i=0;i<6;i++) {
+      Bytes b=v.subspan(1+i*size,size);
+      if(!old || U32(b,0)!=0xffffffffu)
+        if(!TableBorder(table.borders[i],b,old))return false;
+    }
+    return true;
+  }
+  if(op==0x7621) {
+    if(v.size()!=4 || !v[1] || v[0]>cells.size() || cells.size()+v[1]>63)return false;
+    cells.insert(cells.begin()+v[0],v[1],model::CellProperties{});
+    table.columns.insert(table.columns.begin()+std::min<size_t>(v[0],table.columns.size()),v[1],U16(v,2));
+    return true;
+  }
+  if(op==0x5622) {
+    size_t first,limit;if(!TableRange(row,v,0,first,limit) || limit-first==cells.size())return false;
+    cells.erase(cells.begin()+first,cells.begin()+limit);
+    if(limit<=table.columns.size())table.columns.erase(table.columns.begin()+first,table.columns.begin()+limit);
+    return true;
+  }
+  if(op==0x7623) {
+    size_t first,limit;
+    if(v.size()!=4 || !TableRange(row,v,0,first,limit))return false;
+    for(size_t i=first;i<limit;i++) {
+      cells[i].width=U16(v,2);
+      if(i<table.columns.size())table.columns[i]=U16(v,2);
+    }
+    return true;
+  }
+  if(op==0xD635) {
+    size_t first,limit;
+    if(v.size()!=6 || v[0]!=5 || !TableRange(row,v,1,first,limit) ||
+       (v[3]!=0 && v[3]!=2 && v[3]!=3))return false;
+    for(size_t i=first;i<limit;i++) {
+      cells[i].width_type=v[3];cells[i].width=U16(v,4);
+    }
+    return true;
+  }
+  if(op==0x5624 || op==0x5625) {
+    size_t first,limit;if(!TableRange(row,v,0,first,limit))return false;
+    for(size_t i=first;i<limit;i++)cells[i].horizontal_merge=op==0x5625?0:i==first?2:1;
+    return true;
+  }
+  if(op==0xD62B) {
+    if(v.size()!=3 || v[0]!=2 || v[1]>=cells.size() || (v[2]!=0 && v[2]!=1 && v[2]!=3))return false;
+    cells[v[1]].vertical_merge=v[2]==3?2:v[2];return true;
+  }
+  if(op==0x7629) {
+    size_t first,limit;if(!TableRange(row,v,0,first,limit) || v.size()!=4 || U16(v,2)>5 || U16(v,2)==2)return false;
+    for(size_t i=first;i<limit;i++)cells[i].text_direction=U16(v,2);
+    return true;
+  }
+  if(op==0xD62C || op==0xD639 || op==0xD642) {
+    size_t first,limit;
+    if(v.size()!=4 || v[0]!=3 || !TableRange(row,v,1,first,limit))return false;
+    if(op==0xD62C && v[3]>2)return false;
+    for(size_t i=first;i<limit;i++) {
+      if(op==0xD62C)cells[i].vertical_align=v[3];
+      else if(op==0xD639)cells[i].no_wrap=v[3]!=0;
+      else cells[i].hide_mark=v[3]!=0;
+    }
+    return true;
+  }
+  if(op==0xF636) {
+    size_t first,limit;
+    if(v.size()!=3 || !TableRange(row,v,0,first,limit))return false;
+    for(size_t i=first;i<limit;i++)cells[i].fit_text=v[2]!=0;
+    return true;
+  }
+  if(op==0xD632 || op==0xD634) {
+    if(v.size()!=7 || v[0]!=6 || (v[3]&~15) || (v[4]!=0 && v[4]!=3))return false;
+    if(op==0xD634 && (v[1]!=0 || v[2]!=1))return false;
+    size_t first=0,limit=cells.size();
+    if(op==0xD632 && !TableRange(row,v,1,first,limit))return false;
+    int width=v[4]==3?U16(v,5):0;
+    if(width>31680)return false;
+    for(size_t i=first;i<limit;i++)for(size_t side=0;side<4;side++)
+      if(v[3]&(1<<side))cells[i].margins[side]=width;
+    return true;
+  }
+  if(op==0xD62D || op==0xD62E) {
+    size_t first,limit;if(v.size()!=13 || v[0]!=12 || !TableRange(row,v,1,first,limit))return false;
+    for(size_t i=first;i<limit;i++)if(op==0xD62D || ((i-first)&1)==0)
+      if(!TableShade(cells[i],v.subspan(3,10)))return false;
+    return true;
+  }
+  if(op==0xD609) {
+    if(v.empty() || size_t(v[0])+1!=v.size() || v[0]%2)return false;
+    // SHD80 has palette colors; modern SHD values later in the grpprl override it.
+    return true;
+  }
+  if(op==0xD612 || op==0xD616 || op==0xD60C || op==0xD670 || op==0xD671 || op==0xD672) {
+    size_t first=(op==0xD616 || op==0xD671)?22:(op==0xD60C || op==0xD672)?44:0;
+    if(v.empty() || size_t(v[0])+1!=v.size() || v[0]%10)return false;
+    for(size_t i=0;i<v[0]/10 && first+i<cells.size();i++)
+      if(!TableShade(cells[first+i],v.subspan(1+i*10,10)))return false;
+    return true;
+  }
+  if(op==0xD62F || op==0xD620) {
+    size_t first,limit;
+    if(v.size()!=(op==0xD62F?12u:8u) || v[0]!=v.size()-1 ||
+       !TableRange(row,v,1,first,limit) || (v[3]&~63))return false;
+    bool old=op==0xD620;
+    for(size_t i=first;i<limit;i++)for(size_t side=0;side<6;side++)
+      if(v[3]&(1<<side))if(!TableBorder(cells[i].borders[side],v.subspan(4,old?4:8),old))return false;
+    return true;
+  }
   return true;
 }
 void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& fonts) {
@@ -186,6 +373,11 @@ void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& 
     case 0x4A30:r.style=U16(v,0);break;
     case 0x4A4F: {
       unsigned n=U16(v,0);if(n<fonts.size()) r.font=fonts[n];break;
+    }
+    case 0x6A09: {
+      unsigned n=U16(v,0);
+      if(n<fonts.size()) {r.symbol_font=fonts[n];r.symbol_character=U16(v,2);}
+      break;
     }
     default:break;
   }
@@ -520,7 +712,7 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
   };
   auto add_table=[&]() {
     if(!in_table)return;
-    if(!row.empty()){current_table.rows.push_back(std::move(row));row.clear();}
+    if(!row.empty()){current_table.rows.push_back(std::move(row));current_table.row_properties.emplace_back();row.clear();}
     doc.blocks.push_back({true,doc.tables.size()});
     doc.tables.push_back(std::move(current_table));current_table={};in_table=false;
   };
@@ -552,15 +744,15 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
     if(ch.text=="\x07") {
       if(!in_table)in_table=true;
       if(row_end) {
-        if(pap)WalkParagraph(pap->sprms,data,[&](uint16_t op,Bytes v){
-          if(op==0xD608 && v.size()>=5) {
-            size_t count=v[2];
-            if(count>0 && 3+2*(count+1)<=v.size()) {
-              current_table.columns.clear();
-              for(size_t k=0;k<count;k++)current_table.columns.push_back(U16(v,3+2*(k+1))-U16(v,3+2*k));
-            }
-          }
-        });
+        model::RowProperties properties;
+        bool valid=true;uint16_t invalid_op=0;
+        if(pap)valid=WalkParagraph(pap->sprms,data,[&](uint16_t op,Bytes v){
+          if(valid && (op==0xD608 || op==0xD606 || (op>>10&7)==5))
+            if(!(valid=ApplyTable(current_table,properties,op,v)))invalid_op=op;
+        }) && valid;
+        if(!valid)return std::unexpected(Error{"invalid TAPX operand " + std::to_string(invalid_op)});
+        if(properties.cells.empty())properties.cells.resize(row.size());
+        current_table.row_properties.push_back(std::move(properties));
         current_table.rows.push_back(std::move(row));row.clear();para={};
       } else {
         if(pap) {para.style=pap->style;WalkParagraph(pap->sprms,data,[&](uint16_t op,Bytes v){ApplyPara(para,op,v);});}
@@ -594,7 +786,7 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
     if(!para.runs.empty()) {
       auto& back=para.runs.back();
       model::Run prior=back;prior.text.clear();
-      if(prior.hyperlink==r.hyperlink && prior.page_field==r.page_field && prior.font==r.font && prior.size==r.size && prior.bold==r.bold && prior.italic==r.italic && prior.strike==r.strike && prior.double_strike==r.double_strike && prior.hidden==r.hidden && prior.bold_set==r.bold_set && prior.italic_set==r.italic_set && prior.strike_set==r.strike_set && prior.double_strike_set==r.double_strike_set && prior.hidden_set==r.hidden_set && prior.shadow==r.shadow && prior.shadow_set==r.shadow_set && prior.emboss==r.emboss && prior.emboss_set==r.emboss_set && prior.imprint==r.imprint && prior.imprint_set==r.imprint_set && prior.outline==r.outline && prior.outline_set==r.outline_set && prior.small_caps==r.small_caps && prior.small_caps_set==r.small_caps_set && prior.caps==r.caps && prior.caps_set==r.caps_set && prior.underline==r.underline && prior.underline_set==r.underline_set && prior.super_sub==r.super_sub && prior.super_sub_set==r.super_sub_set && prior.spacing==r.spacing && prior.spacing_set==r.spacing_set && prior.scale==r.scale && prior.scale_set==r.scale_set && prior.color==r.color && prior.color_rgb==r.color_rgb && prior.highlight==r.highlight && prior.shade==r.shade && prior.shade_fore==r.shade_fore && prior.shade_pattern==r.shade_pattern && prior.border.set==r.border.set && prior.border.type==r.border.type && prior.border.width==r.border.width && prior.border.space==r.border.space && prior.border.color==r.border.color && prior.border.shadow==r.border.shadow && prior.border.frame==r.border.frame && prior.style==r.style) {back.text+=ch.text;continue;}
+      if(r.symbol_character<0 && prior.hyperlink==r.hyperlink && prior.page_field==r.page_field && prior.font==r.font && prior.size==r.size && prior.bold==r.bold && prior.italic==r.italic && prior.strike==r.strike && prior.double_strike==r.double_strike && prior.hidden==r.hidden && prior.bold_set==r.bold_set && prior.italic_set==r.italic_set && prior.strike_set==r.strike_set && prior.double_strike_set==r.double_strike_set && prior.hidden_set==r.hidden_set && prior.shadow==r.shadow && prior.shadow_set==r.shadow_set && prior.emboss==r.emboss && prior.emboss_set==r.emboss_set && prior.imprint==r.imprint && prior.imprint_set==r.imprint_set && prior.outline==r.outline && prior.outline_set==r.outline_set && prior.small_caps==r.small_caps && prior.small_caps_set==r.small_caps_set && prior.caps==r.caps && prior.caps_set==r.caps_set && prior.underline==r.underline && prior.underline_set==r.underline_set && prior.super_sub==r.super_sub && prior.super_sub_set==r.super_sub_set && prior.spacing==r.spacing && prior.spacing_set==r.spacing_set && prior.scale==r.scale && prior.scale_set==r.scale_set && prior.color==r.color && prior.color_rgb==r.color_rgb && prior.highlight==r.highlight && prior.shade==r.shade && prior.shade_fore==r.shade_fore && prior.shade_pattern==r.shade_pattern && prior.border.set==r.border.set && prior.border.type==r.border.type && prior.border.width==r.border.width && prior.border.space==r.border.space && prior.border.color==r.border.color && prior.border.shadow==r.border.shadow && prior.border.frame==r.border.frame && prior.symbol_character==r.symbol_character && prior.symbol_font==r.symbol_font && prior.style==r.style) {back.text+=ch.text;continue;}
     }
     r.text=ch.text;para.runs.push_back(std::move(r));
   }
