@@ -4,11 +4,28 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <cstdio>
 #include <string>
 #include <vector>
 #include <utility>
 
 namespace doccraft::doc::detail {
+std::string LanguageTag(uint16_t lid) {
+  // Common Windows LIDs; retain uncommon IDs as a private BCP 47 tag.
+  switch(lid) {
+    case 0x0409:return "en-US"; case 0x0809:return "en-GB";
+    case 0x0404:return "zh-TW"; case 0x0804:return "zh-CN";
+    case 0x0C04:return "zh-HK"; case 0x0411:return "ja-JP";
+    case 0x0412:return "ko-KR"; case 0x0407:return "de-DE";
+    case 0x040C:return "fr-FR"; case 0x040A:return "es-ES";
+    case 0x0410:return "it-IT"; case 0x0419:return "ru-RU";
+    case 0x0416:return "pt-BR"; case 0x0816:return "pt-PT";
+    case 0x0401:return "ar-SA"; case 0x040D:return "he-IL";
+    case 0x0439:return "hi-IN";
+  }
+  char tag[16];std::snprintf(tag,sizeof(tag),"x-lcid-%04x",lid);
+  return tag;
+}
 bool Toggle(bool old,uint8_t v) { return v==0x80?old:v==0x81?!old:v!=0; }
 bool ReadBorder(model::Border& b,Bytes v,bool old) {
   size_t start=old?0:1;
@@ -224,9 +241,28 @@ bool ApplyTable(model::Table& table,model::RowProperties& row,uint16_t op,Bytes 
 void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& fonts) {
   auto flag=[&](bool& x,bool& set){ x=Toggle(x,v[0]);set=true; };
   switch(op) {
+    case 0x0800:r.revision_delete=Toggle(r.revision_delete,v[0]);break;
+    case 0x0801:r.revision_insert=Toggle(r.revision_insert,v[0]);break;
+    case 0xCA89:if(v.size()>1)r.property_revision=v[1]!=0;break;
+    case 0x6A03:r.object_offset=static_cast<int>(U32(v,0));break;
+    case 0x0806:r.binary_data=v[0]!=0;break;
+    case 0x080A:r.ole_object=v[0]!=0;break;
+    case 0x0856:r.embedded_object=v[0]!=0;break;
     case 0x0835:flag(r.bold,r.bold_set);break; case 0x0836:flag(r.italic,r.italic_set);break;
     case 0x0837:flag(r.strike,r.strike_set);break; case 0x2A53:flag(r.double_strike,r.double_strike_set);break;
     case 0x083C:flag(r.hidden,r.hidden_set);break;
+    case 0x0811:flag(r.web_hidden,r.web_hidden_set);break;
+    case 0x0818:flag(r.spec_vanish,r.spec_vanish_set);break;
+    case 0x085A:flag(r.rtl,r.rtl_set);break;
+    case 0x0868:flag(r.snap_to_grid,r.snap_to_grid_set);break;
+    case 0x0875:flag(r.no_proof,r.no_proof_set);break;
+    case 0x0882:flag(r.complex_script,r.complex_script_set);break;
+    case 0x2859:r.text_effect=v[0];break;
+    case 0x286F:r.font_hint=v[0];break;
+    case 0x6877:r.underline_color=static_cast<int>(U32(v,0));break;
+    case 0x485F:r.lang_cs=LanguageTag(U16(v,0));break;
+    case 0x486D:case 0x4873:r.lang=LanguageTag(U16(v,0));break;
+    case 0x486E:case 0x4874:r.lang_east_asia=LanguageTag(U16(v,0));break;
     case 0x0838:flag(r.outline,r.outline_set);break;
     case 0x0839:flag(r.shadow,r.shadow_set);break;
     case 0x083A:flag(r.small_caps,r.small_caps_set);break;
@@ -250,8 +286,15 @@ void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& 
     case 0x6865:ReadBorder(r.border,v,true);break;
     case 0xCA72:ReadBorder(r.border,v,false);break;
     case 0x4A30:r.style=U16(v,0);break;
-    case 0x4A4F: {
-      unsigned n=U16(v,0);if(n<fonts.size()) r.font=fonts[n];break;
+    case 0x4A4F:case 0x4A50:case 0x4A51:case 0x4A5E: {
+      unsigned n=U16(v,0);
+      if(n<fonts.size()) {
+        if(op==0x4A50)r.font_east_asia=fonts[n];
+        else if(op==0x4A51)r.font_hansi=fonts[n];
+        else if(op==0x4A5E)r.font_cs=fonts[n];
+        else r.font=fonts[n];
+      }
+      break;
     }
     case 0x6A09: {
       unsigned n=U16(v,0);
@@ -310,6 +353,10 @@ bool ApplySection(model::Section& s,uint16_t op,Bytes v) {
     case 0x301D:s.orientation=v[0];break;
     case 0x300A:s.first_page_different=v[0]!=0;break;
     case 0x3005:s.columns_even=v[0]!=0;break;
+    case 0x3019:s.columns_separator=v[0]!=0;break;
+    case 0x301A:if(v[0]>3)return false;s.vertical_justify=v[0];break;
+    case 0x3228:s.bidi=v[0]!=0;break;
+    case 0x322A:s.rtl_gutter=v[0]!=0;break;
     case 0x500B:if(U16(v,0)>43)return false;s.columns=U16(v,0)+1;break;
     case 0x900C:s.column_space=U16(v,0);break;
     case 0x3011:s.page_restart=v[0]!=0;break;

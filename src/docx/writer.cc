@@ -1,4 +1,5 @@
 #include "docx/writer.h"
+#include "docx/writer_run.h"
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -53,50 +54,6 @@ void ShadePr(pugi::xml_node parent,int back,int fore,int pattern) {
   auto shd=parent.append_child("w:shd");
   Attr(shd,"w:val",pattern>=0 && size_t(pattern)<std::size(patterns)?patterns[pattern]:"clear");
   Attr(shd,"w:fill",Color(back));Attr(shd,"w:color",Color(fore));
-}
-void RunPr(pugi::xml_node parent,const model::Run& r) {
-  pugi::xml_node n=parent.append_child("w:rPr");
-  if(r.style>=0)Attr(n.append_child("w:rStyle"),"w:val",Id(r.style));
-  if(!r.font.empty()) {auto f=n.append_child("w:rFonts");Attr(f,"w:ascii",r.font);Attr(f,"w:hAnsi",r.font);}
-  if(r.size>0)Value(n,"w:sz",r.size);
-  if(r.size_cs>0)Value(n,"w:szCs",r.size_cs);
-  SpecBool(n,"w:b",r.bold,r.bold_set);SpecBool(n,"w:i",r.italic,r.italic_set);
-  SpecBool(n,"w:bCs",r.bold_cs,r.bold_cs_set);SpecBool(n,"w:iCs",r.italic_cs,r.italic_cs_set);
-  if(r.kern>=0)Value(n,"w:kern",r.kern);
-  if(r.position_set)Value(n,"w:position",r.position);
-  SpecBool(n,"w:strike",r.strike,r.strike_set);
-  SpecBool(n,"w:dstrike",r.double_strike,r.double_strike_set);
-  SpecBool(n,"w:vanish",r.hidden,r.hidden_set);
-  SpecBool(n,"w:shadow",r.shadow,r.shadow_set);SpecBool(n,"w:emboss",r.emboss,r.emboss_set);
-  SpecBool(n,"w:imprint",r.imprint,r.imprint_set);SpecBool(n,"w:outline",r.outline,r.outline_set);
-  SpecBool(n,"w:smallCaps",r.small_caps,r.small_caps_set);SpecBool(n,"w:caps",r.caps,r.caps_set);
-  if(r.underline_set) {
-    const char* kind="single";
-    switch(r.underline) {
-      case 0:kind="none";break;case 1:kind="single";break;case 2:kind="words";break;
-      case 3:kind="double";break;case 4:kind="dotted";break;case 6:kind="thick";break;
-      case 7:kind="dash";break;case 9:kind="dotDash";break;case 10:kind="dotDotDash";break;
-      case 11:kind="wave";break;case 0x14:kind="dottedHeavy";break;
-      case 0x17:kind="dashedHeavy";break;case 0x19:kind="dotDashHeavy";break;
-      case 0x1A:kind="dotDotDashHeavy";break;case 0x1B:kind="wavyHeavy";break;
-      case 0x27:kind="dashLong";break;case 0x2B:kind="wavyDouble";break;
-      case 0x37:kind="dashLongHeavy";break;
-    }
-    auto u=n.append_child("w:u");Attr(u,"w:val",kind);
-  }
-  if(r.super_sub_set)Attr(n.append_child("w:vertAlign"),"w:val",r.super_sub==1?"superscript":r.super_sub==2?"subscript":"baseline");
-  if(r.spacing_set)IntAttr(n.append_child("w:spacing"),"w:val",r.spacing);
-  if(r.scale_set)IntAttr(n.append_child("w:w"),"w:val",r.scale);
-  if(r.color>=0) {
-    constexpr const char* colors[]={"auto","000000","0000FF","00FFFF","008000","FF00FF","FF0000","FFFF00","FFFFFF","000080","008080","008000","800080","800000","808000","808080"};
-    Attr(n.append_child("w:color"),"w:val",r.color_rgb?Color(r.color):r.color<16?colors[r.color]:"auto");
-  }
-  if(r.highlight>=0) {
-    constexpr const char* colors[]={"none","black","blue","cyan","green","magenta","red","yellow","white","darkBlue","darkCyan","darkGreen","darkMagenta","darkRed","darkYellow","darkGray"};
-    Attr(n.append_child("w:highlight"),"w:val",r.highlight<16?colors[r.highlight]:"none");
-  }
-  ShadePr(n,r.shade,r.shade_fore,r.shade_pattern);
-  BorderPr(n,"w:bdr",r.border);
 }
 void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=false) {
   auto n=parent.append_child("w:pPr");
@@ -191,7 +148,14 @@ void SectionPr(pugi::xml_node sec,const model::Section& section) {
     IntAttr(cols,"w:num",section.columns);
     if(section.column_space>=0)IntAttr(cols,"w:space",section.column_space);
     if(!section.columns_even)Attr(cols,"w:equalWidth","0");
+    if(section.columns_separator)Attr(cols,"w:sep","1");
   }
+  if(section.vertical_justify>=0) {
+    const char* align[]={"top","center","both","bottom"};
+    Attr(sec.append_child("w:vAlign"),"w:val",align[section.vertical_justify]);
+  }
+  if(section.bidi)sec.append_child("w:bidi");
+  if(section.rtl_gutter)sec.append_child("w:rtlGutter");
   if(section.page_restart || section.page_format>=0) {
     auto pages=sec.append_child("w:pgNumType");
     if(section.page_restart)IntAttr(pages,"w:start",section.page_start>=0?section.page_start:0);

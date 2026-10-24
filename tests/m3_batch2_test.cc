@@ -4,6 +4,7 @@
 #include <vector>
 #include <gtest/gtest.h>
 #include "doc/format.h"
+#include "doc/format/sprm.h"
 #include "docx/writer.h"
 #include "miniz.h"
 
@@ -115,5 +116,64 @@ TEST(M3Batch2, FloatingParagraphWrapAndAnchors) {
   auto d=Synthetic(pap,{});ASSERT_TRUE(d.has_value()) << d.error().message;
   auto xml=Xml(*d);
   EXPECT_NE(xml.find("<w:framePr w:wrap=\"around\" w:hAnchor=\"page\" w:vAnchor=\"page\""),std::string::npos);
+}
+TEST(M3Batch5, CharacterLanguageAndScriptOpcodes) {
+  using doccraft::doc::detail::ApplyRun;
+  using doccraft::doc::detail::Bytes;
+  struct Case {uint16_t op;std::vector<uint8_t> value;std::string expected;};
+  const std::vector<Case> cases={
+    {0x486D,{0x09,0x04},"w:val=\"en-US\""},
+    {0x4873,{0x07,0x04},"w:val=\"de-DE\""},
+    {0x486E,{0x04,0x08},"w:eastAsia=\"zh-CN\""},
+    {0x4874,{0x11,0x04},"w:eastAsia=\"ja-JP\""},
+    {0x485F,{0x01,0x04},"w:bidi=\"ar-SA\""},
+    {0x0811,{1},"<w:webHidden/"},
+    {0x0818,{1},"<w:specVanish/"},
+    {0x085A,{1},"<w:rtl/"},
+    {0x0868,{1},"<w:snapToGrid/"},
+    {0x0875,{1},"<w:noProof/"},
+    {0x0882,{1},"<w:cs/"},
+    {0x2859,{4},"w:val=\"antsBlack\""},
+    {0x286F,{1},"w:hint=\"eastAsia\""},
+    {0x4A50,{0,0},"w:eastAsia=\"Fixture Font\""},
+    {0x4A51,{0,0},"w:hAnsi=\"Fixture Font\""},
+    {0x4A5E,{0,0},"w:cs=\"Fixture Font\""},
+  };
+  for(const auto& c:cases) {
+    SCOPED_TRACE(c.op);
+    doccraft::model::Run run;run.text="X";
+    ApplyRun(run,c.op,Bytes(c.value),{"Fixture Font"});
+    doccraft::model::Document d;doccraft::model::Paragraph p;p.runs.push_back(run);d.paragraphs.push_back(p);
+    EXPECT_NE(Xml(d).find(c.expected),std::string::npos);
+  }
+  doccraft::model::Run run;run.text="X";run.underline=1;run.underline_set=true;
+  const std::vector<uint8_t> color={255,0,0,0};
+  ApplyRun(run,0x6877,Bytes(color),{});
+  doccraft::model::Document d;doccraft::model::Paragraph p;p.runs.push_back(run);d.paragraphs.push_back(p);
+  EXPECT_NE(Xml(d).find("w:color=\"FF0000\""),std::string::npos);
+}
+TEST(M3Batch5, ObjectAndRevisionSkeletons) {
+  using doccraft::doc::detail::ApplyRun;
+  using doccraft::doc::detail::Bytes;
+  doccraft::model::Run r;r.text="X";
+  const std::vector<uint8_t> offset={0x34,0x12,0,0};
+  const std::vector<uint8_t> yes={1};
+  const std::vector<uint8_t> mark={1,1};
+  ApplyRun(r,0x6A03,Bytes(offset),{});
+  ApplyRun(r,0x0806,Bytes(yes),{});
+  ApplyRun(r,0x080A,Bytes(yes),{});
+  ApplyRun(r,0x0856,Bytes(yes),{});
+  ApplyRun(r,0x0800,Bytes(yes),{});
+  ApplyRun(r,0x0801,Bytes(yes),{});
+  ApplyRun(r,0xCA89,Bytes(mark),{});
+  EXPECT_EQ(r.object_offset,0x1234);
+  EXPECT_TRUE(r.binary_data);
+  EXPECT_TRUE(r.ole_object);
+  EXPECT_TRUE(r.embedded_object);
+  EXPECT_TRUE(r.revision_insert);
+  EXPECT_TRUE(r.revision_delete);
+  EXPECT_TRUE(r.property_revision);
+  doccraft::model::Document d;doccraft::model::Paragraph p;p.runs.push_back(r);d.paragraphs.push_back(p);
+  EXPECT_NE(Xml(d).find("<w:rPrChange w:id=\"0\""),std::string::npos);
 }
 }

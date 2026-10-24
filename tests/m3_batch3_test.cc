@@ -9,6 +9,7 @@
 #include "cfb/cfb_reader.h"
 #include "doc/fib.h"
 #include "doc/format.h"
+#include "doc/format/sprm.h"
 #include "docx/writer.h"
 #include "miniz.h"
 #include "pugixml.hpp"
@@ -313,6 +314,47 @@ TEST(M3Batch3, SectionColumnsPageNumberAndGrid) {
   EXPECT_NE(xml.find("<w:pgNumType w:start=\"9\""),std::string::npos);
   EXPECT_NE(xml.find("<w:docGrid w:type=\"lines\" w:linePitch=\"360\""),std::string::npos);
   EXPECT_NE(xml.find("<w:textDirection w:val=\"tbRl\""),std::string::npos);
+}
+TEST(M3Batch5, SectionModifiersPreviouslyUnasserted) {
+  using doccraft::doc::detail::ApplySection;
+  using doccraft::doc::detail::Bytes;
+  struct Case {uint16_t op;std::vector<uint8_t> value;int expected;};
+  const std::vector<Case> cases={
+    {0x300E,{2},2}, {0x3013,{1},1}, {0x5015,{5,0},5},
+    {0x9016,{120,0},120}, {0xB017,{80,1},336},
+    {0xB018,{90,1},346}, {0x501B,{3,0},3},
+    {0x303B,{2},2}, {0x303C,{1},1},
+    {0x503F,{4,0},4}, {0x5040,{2,0},2},
+    {0x3019,{1},1}, {0x301A,{1},1},
+    {0x3228,{1},1}, {0x322A,{1},1},
+  };
+  for(const auto& c:cases) {
+    SCOPED_TRACE(c.op);
+    doccraft::model::Section s;
+    ASSERT_TRUE(ApplySection(s,c.op,Bytes(c.value)));
+    int actual=0;
+    switch(c.op) {
+      case 0x300E:actual=s.page_format;break;
+      case 0x3013:actual=s.line_restart;break;
+      case 0x5015:actual=s.line_count_by;break;
+      case 0x9016:actual=s.line_distance;break;
+      case 0xB017:actual=s.header_distance;break;
+      case 0xB018:actual=s.footer_distance;break;
+      case 0x501B:actual=s.line_start;break;
+      case 0x303B:actual=s.footnote_position;break;
+      case 0x303C:actual=s.footnote_restart;break;
+      case 0x503F:actual=s.footnote_start;break;
+      case 0x5040:actual=s.footnote_format;break;
+      case 0x3019:actual=s.columns_separator;break;
+      case 0x301A:actual=s.vertical_justify;break;
+      case 0x3228:actual=s.bidi;break;
+      case 0x322A:actual=s.rtl_gutter;break;
+    }
+    EXPECT_EQ(actual,c.expected);
+  }
+  doccraft::model::Section s;
+  const std::vector<uint8_t> invalid={4};
+  EXPECT_FALSE(ApplySection(s,0x301A,Bytes(invalid)));
 }
 TEST(M3Batch3, ComplexScriptKerningAndPosition) {
   std::vector<uint8_t> word(1536),table(64);

@@ -1,215 +1,362 @@
 # doccraft SPRM 全量覆盖清单
 
-> 目标：[MS-DOC] 全部 sprm 逐项验收。状态：✅ 实现且测试断言 / ◐ 部分实现（网格级或骨架）/ ☐ 未实现 / N/A 不适用（废弃/内部）。
-> 计数口径：✅ = 有对应合成断言或 fixture 测试。每完成一项打勾并在括号内补测试名。
-> 本文件是 M3 验收的覆盖事实源，随实现增长更新。
-> 核账（M3 第四批）：原文宣称 240 项，但只列出 151 行；本批新增 1 行后为 152 行，其中 SEP 已列 33 行，超过原小节标题的 27 行。原统计 147 个 ✅ 无法由逐项状态复算。下表把未列出的 88 项单列为待盘点，不把它们算作已覆盖。
+> 来源：[MS-DOC] v20260217 §2.6.1–2.6.4 四张 sprm opcode 表（[Microsoft PDF](https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-DOC/%5bMS-DOC%5d.pdf)）。按每个规范表行独立计数；同一属性的旧版和新版 opcode 分开记账。
+> ✅ = 有对应合成样本断言；◐ = 部分实现；☐ = 待实现；N/A = 废弃、内部或修订范围外，附理由。
+> 规范 §2.6 是完整 sprm 列表；§2.9 是数据类型定义。旧账的「240 = 已列 152 + 未列 88」未经核实，现按规范重建。
 
-## 1. 字符 sprm（CHPX）— 已列 50 项
+## 1. 字符 CHP（§2.6.1，84 项）
 
-### 1.1 字体与字形
-- [x] sprmCRgFtc0-2 (0x4A4F) 字体族索引 → w:rFonts（FormatTest.ReadsDirectCharacterFormatting）
-- [x] sprmCSize (0x4A43) 字号半点 → w:sz（FormatTest.ReadsDirectCharacterFormatting）
-- [x] sprmCHpsBi (0x4A61) 复杂脚本字号 → w:szCs ✅（M3Batch3.ComplexScriptKerningAndPosition）
-- [x] sprmCItalic (0x0836) 斜体 → w:i（FormatTest.ReadsDirectCharacterFormatting）
-- [x] sprmCBold (0x0835) 加粗 → w:b（FormatTest.DirectFormattingCanTurnBoldOff）
-- [x] sprmCFItalicBi (0x085D) → w:iCs ✅（M3Batch3.ComplexScriptKerningAndPosition）
-- [x] sprmCFBoldBi (0x085C) → w:bCs ✅（M3Batch3.ComplexScriptKerningAndPosition）
+| 状态 | opcode | sprm | 语义（规范摘要） | 归类 |
+|---|---|---|---|---|
+| ◐ | `0x0800` | sprmCFRMarkDel | A ToggleOperand that specifies whether the text is formatted as deleted revision mark text, which is text that was deleted while revision marking was on.；仅保留操作数/输出修订属性空壳，完整载荷与作者时间戳留 M4/M5（M3Batch5.ObjectAndRevisionSkeletons） | 字符 CHP §2.6.1 |
+| ◐ | `0x0801` | sprmCFRMarkIns | A ToggleOperand that specifies whether the text is formatted as inserted revision mark text, which is text that was inserted while revision marking was on.；仅保留操作数/输出修订属性空壳，完整载荷与作者时间戳留 M4/M5（M3Batch5.ObjectAndRevisionSkeletons） | 字符 CHP §2.6.1 |
+| ☐ | `0x0802` | sprmCFFldVanish | A ToggleOperand that specifies whether the field text is hidden. | 字符 CHP §2.6.1 |
+| ◐ | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage.；仅保留操作数/输出修订属性空壳，完整载荷与作者时间戳留 M4/M5（M3Batch5.ObjectAndRevisionSkeletons） | 字符 CHP §2.6.1 |
+| N/A | `0x4804` | sprmCIbstRMark | A signed 16-bit integer that specifies a zero-based index into SttbfRMark.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| N/A | `0x6805` | sprmCDttmRMark | A DTTM that specifies the date and time at which the text was inserted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ◐ | `0x0806` | sprmCFData | A Bool8 that specifies whether the picture character in the text represents binary data.；仅保留操作数/输出修订属性空壳，完整载荷与作者时间戳留 M4/M5（M3Batch5.ObjectAndRevisionSkeletons） | 字符 CHP §2.6.1 |
+| N/A | `0x4807` | sprmCIdslRMark | An unsigned 16-bit integer that specifies the reason value of the inserted or modified revision mark text.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ✅ | `0x6A09` | sprmCSymbol | A CSymbolOperand structure that designates the character as a symbol and specifies the font and character code for the symbol. | 字符 CHP §2.6.1 |
+| ◐ | `0x080A` | sprmCFOle2 | A Bool8 value that specifies whether the character is a placeholder for an OLE object.；仅保留操作数/输出修订属性空壳，完整载荷与作者时间戳留 M4/M5（M3Batch5.ObjectAndRevisionSkeletons） | 字符 CHP §2.6.1 |
+| ✅ | `0x2A0C` | sprmCHighlight | An Ico value that specifies the highlighting color of the text. | 字符 CHP §2.6.1 |
+| ✅ | `0x0811` | sprmCFWebHidden | A ToggleOperand value that specifies whether the text is hidden in Web Layout view of the document.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| N/A | `0x6815` | sprmCRsidProp | An integer value that specifies a revision save ID, as specified in [ECMA-376] Part 1, Section 17.15.1.70 rsid (Single Session Revision Save ID), associated with character formatting.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| N/A | `0x6816` | sprmCRsidText | An integer that specifies a revision save ID, as specified in [ECMA-376] Part 1, Section 17.15.1.70 rsid (Single Session Revision Save ID), associated with insertion of text.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| N/A | `0x6817` | sprmCRsidRMDel | An integer that specifies a revision save ID, as specified in [ECMA-376] Part 1, Section 17.15.1.70 rsid (Single Session Revision Save ID), associated with tracked deletion of text.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ✅ | `0x0818` | sprmCFSpecVanish | A ToggleOperand that specifies that this line break does not indicate a line break but serves as a style separator.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ☐ | `0xC81A` | sprmCFMathPr | A MathPrOperand that specifies the justification of equations in the paragraph. | 字符 CHP §2.6.1 |
+| ☐ | `0x4A30` | sprmCIstd | An unsigned integer that specifies the istd of a character style to apply. | 字符 CHP §2.6.1 |
+| ☐ | `0xCA31` | sprmCIstdPermute | Character style permutation mapping; changes the applied character style when the current style is in the map. | 字符 CHP §2.6.1 |
+| ☐ | `0x2A33` | sprmCPlain | Presence resets character properties to the underlying paragraph style; only its operand is ignored. | 字符 CHP §2.6.1 |
+| ☐ | `0x2A34` | sprmCKcd | MUST be one of the following values. 0x00 - No emphasis 0x01 - Solid circle 0x02 - Comma above 0x03 - Circle above 0x04 - Solid circle below The operands map to Unicode characters as shown… | 字符 CHP §2.6.1 |
+| ✅ | `0x0835` | sprmCFBold | A ToggleOperand value that specifies whether the text is bold. | 字符 CHP §2.6.1 |
+| ✅ | `0x0836` | sprmCFItalic | A ToggleOperand value that specifies whether the text is italicized. | 字符 CHP §2.6.1 |
+| ✅ | `0x0837` | sprmCFStrike | A ToggleOperand value that specifies whether the text is formatted with strikethrough. | 字符 CHP §2.6.1 |
+| ✅ | `0x0838` | sprmCFOutline | A ToggleOperand value that specifies whether only the outline contour of the characters in the text is rendered, with the inside of each character left empty. | 字符 CHP §2.6.1 |
+| ✅ | `0x0839` | sprmCFShadow | A ToggleOperand value that specifies whether the text is formatted with a shadow. | 字符 CHP §2.6.1 |
+| ✅ | `0x083A` | sprmCFSmallCaps | A ToggleOperand value that specifies whether the text characters are displayed as their capital letter equivalents, in a font size that is smaller than the actual font size that is specified… | 字符 CHP §2.6.1 |
+| ✅ | `0x083B` | sprmCFCaps | A ToggleOperand value that specifies whether the text characters are displayed as their capital letter equivalents. | 字符 CHP §2.6.1 |
+| ✅ | `0x083C` | sprmCFVanish | A ToggleOperand value that specifies whether the text is formatted as hidden. | 字符 CHP §2.6.1 |
+| ✅ | `0x2A3E` | sprmCKul | A Kul value that specifies the underlining style of the text. | 字符 CHP §2.6.1 |
+| ✅ | `0x8840` | sprmCDxaSpace | An XAS value that specifies the extra space, in twips, between a character and the one to its right. | 字符 CHP §2.6.1 |
+| ✅ | `0x2A42` | sprmCIco | An Ico value that specifies the color of the text. | 字符 CHP §2.6.1 |
+| ✅ | `0x4A43` | sprmCHps | An unsigned 2-byte integer that specifies the size of the text, except for text that meets the qualifications for sprmCHpsBi. | 字符 CHP §2.6.1 |
+| ✅ | `0x4845` | sprmCHpsPos | A signed integer value that specifies the vertical position, in half-points, of text relative to the normal position. | 字符 CHP §2.6.1 |
+| ☐ | `0xCA47` | sprmCMajority | A CMajorityOperand value that specifies which of the character properties of the text to reset to match the properties of the underlying paragraph style, taking the style hierarchy into account. | 字符 CHP §2.6.1 |
+| ✅ | `0x2A48` | sprmCIss | Subscript or superscript formatting of the text. | 字符 CHP §2.6.1 |
+| ✅ | `0x484B` | sprmCHpsKern | Minimum text size in half-points above which kerning is applied. | 字符 CHP §2.6.1 |
+| ☐ | `0x484E` | sprmCHresi | An HresiOperand value that specifies the word-breaking behavior for the text. | 字符 CHP §2.6.1 |
+| ✅ | `0x4A4F` | sprmCRgFtc0 | A 2-byte signed integer value that is an index into the font table (SttbfFfn). | 字符 CHP §2.6.1 |
+| ✅ | `0x4A50` | sprmCRgFtc1 | A 2-byte signed integer value that is an index into the font table (SttbfFfn).；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x4A51` | sprmCRgFtc2 | Font table index for the remaining non-ASCII text range.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x4852` | sprmCCharScale | A 2-byte unsigned integer that specifies the percentage by which to horizontally scale the text, thereby changing the shape of the characters. | 字符 CHP §2.6.1 |
+| ✅ | `0x2A53` | sprmCFDStrike | A ToggleOperand value that specifies whether the text is formatted with the double strikethrough effect. | 字符 CHP §2.6.1 |
+| ✅ | `0x0854` | sprmCFImprint | A ToggleOperand value that specifies whether the text is formatted with the imprint effect. | 字符 CHP §2.6.1 |
+| ☐ | `0x0855` | sprmCFSpec | A ToggleOperand value that specifies whether the current text has a meaning that differs or displays differently than the underlying character to which it is applied. | 字符 CHP §2.6.1 |
+| ◐ | `0x0856` | sprmCFObj | A Bool8 value that specifies whether the current text represents an embedded object.；仅保留操作数/输出修订属性空壳，完整载荷与作者时间戳留 M4/M5（M3Batch5.ObjectAndRevisionSkeletons） | 字符 CHP §2.6.1 |
+| N/A | `0xCA57` | sprmCPropRMark90 | A PropRMarkOperand value that specifies whether the character run has an associated property revision mark, as well as its author and date/time.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ✅ | `0x0858` | sprmCFEmboss | A ToggleOperand value that specifies whether the text is embossed. | 字符 CHP §2.6.1 |
+| ✅ | `0x2859` | sprmCSfxText | A byte that specifies a text effect to apply to the text.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x085A` | sprmCFBiDi | Specifies right-to-left text layout.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x085C` | sprmCFBoldBi | A ToggleOperand value that specifies whether the text is formatted bold when displayed right-to-left or determined to be complex script. | 字符 CHP §2.6.1 |
+| ✅ | `0x085D` | sprmCFItalicBi | A ToggleOperand value that specifies whether the text is italicized when displayed right-to-left or determined to be complex script. | 字符 CHP §2.6.1 |
+| ✅ | `0x4A5E` | sprmCFtcBi | A 2-byte signed index into the font table (SttbfFfn).；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x485F` | sprmCLidBi | A LID value that specifies the language of the text when the text is displayed right-to-left or if the text is complex script.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ☐ | `0x4A60` | sprmCIcoBi | An ICO value that specifies the color of text when displayed right-to-left or determined to be complex script.<147> | 字符 CHP §2.6.1 |
+| ✅ | `0x4A61` | sprmCHpsBi | An unsigned 2-byte integer value that specifies the size of the text, for text that is displayed right-to-left or text that is a complex script. | 字符 CHP §2.6.1 |
+| N/A | `0xCA62` | sprmCDispFldRMark | A DispFldRmOperand value that indicates a revision within the result of a display field.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| N/A | `0x4863` | sprmCIbstRMarkDel | A signed 16-bit integer value that specifies a zero-based index into SttbfRMark.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| N/A | `0x6864` | sprmCDttmRMarkDel | A DTTM value that specifies the date and time at which the text was deleted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ✅ | `0x6865` | sprmCBrc80 | A Brc80 value that specifies the border of all four sides of the text. | 字符 CHP §2.6.1 |
+| ☐ | `0x4866` | sprmCShd80 | A Shd80 structure that specifies the background shading for the text. | 字符 CHP §2.6.1 |
+| N/A | `0x4867` | sprmCIdslRMarkDel | An unsigned 16-bit integer that specifies the reason why the text under revision was deleted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ✅ | `0x0868` | sprmCFUsePgsuSettings | A ToggleOperand value that specifies whether the text is to be displayed according to the document grid.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x486D` | sprmCRgLid0_80 | A LID value that specifies the language of the text, except for East Asian languages.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x486E` | sprmCRgLid1_80 | A LID value that specifies the language of the text if it is an East Asian language.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x286F` | sprmCIdctHint | An 8-bit unsigned integer value that specifies which of the language, font, size, bold, and italic properties is to be used for handling the text, in the case where this cannot be derived…；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x6870` | sprmCCv | COLORREF value specifying text color. | 字符 CHP §2.6.1 |
+| ✅ | `0xCA71` | sprmCShd | A SHDOperand value that specifies the background shading for the text. | 字符 CHP §2.6.1 |
+| ✅ | `0xCA72` | sprmCBrc | A BrcOperand value that specifies the border on all four sides of the text. | 字符 CHP §2.6.1 |
+| ✅ | `0x4873` | sprmCRgLid0 | A LID value that specifies the language of the text, except for East Asian languages.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x4874` | sprmCRgLid1 | A LID value that specifies the language of the text if it is an East Asian language.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ✅ | `0x0875` | sprmCFNoProof | A ToggleOperand value that specifies whether the text is excluded from the proofing analysis.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ☐ | `0xCA76` | sprmCFitText | A CFitTextOperand value that specifies a width, in twips, to which text is expanded or condensed to fit. | 字符 CHP §2.6.1 |
+| ✅ | `0x6877` | sprmCCvUl | A COLORREF value that specifies the color of the text underline.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| ☐ | `0xCA78` | sprmCFELayout | A FarEastLayoutOperand value that specifies text layout information for East Asian languages. | 字符 CHP §2.6.1 |
+| ☐ | `0x2879` | sprmCLbcCRJ | An LBCOperand value that specifies that this character is a special character representing a line break of the given type. | 字符 CHP §2.6.1 |
+| ✅ | `0x0882` | sprmCFComplexScripts | A ToggleOperand value that specifies whether complex script formatting (for example, see sprmCFBoldBi) is applied to the text regardless of the Unicode characters themselves.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
+| N/A | `0x2A83` | sprmCWall | A Bool8 value that specifies whether the values of character properties are preserved for revision-marking purposes until the modifications are accepted or rejected by the user.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ☐ | `0xCA85` | sprmCCnf | A CNFOperand that specifies conditional character formatting for a specific condition of a table style. | 字符 CHP §2.6.1 |
+| ☐ | `0x2A86` | sprmCNeedFontFixup | An FFM that specifies the type of font substitution that is needed for the associated text. | 字符 CHP §2.6.1 |
+| ☐ | `0x6887` | sprmCPbiIBullet | A CP value in the Bullet Pictures document that specifies which picture is used as a bullet character when rendering the bullet. | 字符 CHP §2.6.1 |
+| ☐ | `0x4888` | sprmCPbiGrf | A PbiGrfOperand value that specifies whether a picture is used as a bullet character when rendering the bullet. | 字符 CHP §2.6.1 |
+| ◐ | `0xCA89` | sprmCPropRMark | A PropRMarkOperand value that specifies whether the text has an associated property revision mark, as well as its author and the date and time.；仅保留操作数/输出修订属性空壳，完整载荷与作者时间戳留 M4/M5（M3Batch5.ObjectAndRevisionSkeletons） | 字符 CHP §2.6.1 |
+| ☐ | `0x2A90` | sprmCFSdtVanish | A Bool8 value that specifies whether the text is hidden from display when the option to hide arbitrary XML delimiters is enabled. | 字符 CHP §2.6.1 |
 
-### 1.2 下划线与删除线
-- [x] sprmCKul (0x2A3E) 下划线线型 17 值 → w:u（M3Batch2.UnderlineStyles / M3Batch3 扩展）
-- [ ] sprmCFSpecVanish (0x0818) ☐
-- [x] sprmCFCaps (0x083B) 全大写 → w:caps ✅
-- [x] sprmCFSmallCaps (0x083A) 小型大写 → w:smallCaps ✅
-- [x] sprmCFStrike (0x0837) 删除线 → w:strike ✅
-- [x] sprmCFDStrike (0x2A53) 双删除线 → w:dstrike ✅
+## 2. 段落 PAP（§2.6.2，91 项）
 
-### 1.3 特殊效果
-- [ ] sprmCFOle2 (0x080A) ☐
-- [ ] sprmCFObjOffset 未实现 ☐
-- [x] sprmCFEmboss (0x0858) 浮雕 → w:emboss ✅
-- [x] sprmCFImprint (0x0854) 凹印 → w:imprint ✅
-- [x] sprmCFShadow (0x0839) 阴影 → w:shadow ✅
-- [x] sprmCFOutline (0x0838) → w:outline ✅
-- [ ] sprmCFData (0x0806) ☐
-- [ ] sprmCFLanguage (0x083F) ☐
-- [x] sprmCSpacing (0x8840) 字距 → w:spacing ✅
-- [ ] sprmCCondTable 未实现 ☐
-- [x] sprmCHpsKern (0x484B) 字偶距阈值 → w:kern ✅（M3Batch3.ComplexScriptKerningAndPosition）
-- [ ] sprmCKern (0x8455) 旧清单操作码；[MS-DOC] 字偶距阈值为 0x484B，待核实 N/A
-- [x] sprmCCharScale (0x4852) 缩放 → w:w ✅
-- [ ] sprmCFtcDefault ☐
-- [x] sprmCHpsPos (0x4845) 升降 → w:position ✅（M3Batch3.ComplexScriptKerningAndPosition）
-- [x] sprmCSymbol (0x6A09) SYM 字符 → w:sym ✅（M3Batch3.CharacterSymbolEmitsSymElement）
+| 状态 | opcode | sprm | 语义（规范摘要） | 归类 |
+|---|---|---|---|---|
+| ✅ | `0x4600` | sprmPIstd | An unsigned integer that specifies the istd of a paragraph style to apply. | 段落 PAP §2.6.2 |
+| ☐ | `0xC601` | sprmPIstdPermute | Paragraph style permutation mapping; changes the applied paragraph style when the current style is in the map. | 段落 PAP §2.6.2 |
+| ☐ | `0x2602` | sprmPIncLvl | A signed 8-bit integer value. | 段落 PAP §2.6.2 |
+| ✅ | `0x2403` | sprmPJc80 | An unsigned 8-bit integer that specifies the physical justification of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x2405` | sprmPFKeep | A Bool8 value that specifies whether an application SHOULD<148> keep this paragraph on a single page. | 段落 PAP §2.6.2 |
+| ✅ | `0x2406` | sprmPFKeepFollow | A Bool8 value that specifies whether an application SHOULD<149> keep the end of this paragraph on the same page as the beginning of the next paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x2407` | sprmPFPageBreakBefore | A Bool8 value that specifies whether this paragraph has a page break before it. | 段落 PAP §2.6.2 |
+| ✅ | `0x260A` | sprmPIlvl | An unsigned 8-bit integer that specifies the list level of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x460B` | sprmPIlfo | A 16-bit signed integer value that is used to determine which list contains the paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x240C` | sprmPFNoLineNumb | A Bool8 value that specifies whether this paragraph is ignored when the application counts or displays line numbers. | 段落 PAP §2.6.2 |
+| ✅ | `0xC60D` | sprmPChgTabsPapx | A PChgTabsPapxOperand value that specifies custom tab stops to be added or ignored. | 段落 PAP §2.6.2 |
+| ✅ | `0x840E` | sprmPDxaRight80 | An XAS value that specifies the physical right indent of the paragraph, in twips. | 段落 PAP §2.6.2 |
+| ✅ | `0x840F` | sprmPDxaLeft80 | An XAS value that specifies the physical left indent of the paragraph, in twips. | 段落 PAP §2.6.2 |
+| ☐ | `0x4610` | sprmPNest80 | An XAS value that is added to sprmPDxaLeft80 to specify the final indent of a paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x8411` | sprmPDxaLeft180 | An XAS value that specifies the logical left indent of the first line of the paragraph, in twips, relative to the rest of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x6412` | sprmPDyaLine | An LSPD value that specifies the spacing between lines in this paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0xA413` | sprmPDyaBefore | A two-byte unsigned integer value that specifies the size, in twips, of the spacing before this paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0xA414` | sprmPDyaAfter | A two-byte unsigned integer value that specifies the size, in twips, of the spacing after this paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0xC615` | sprmPChgTabs | A PChgTabsOperand value that specifies custom tab stops that are added or ignored. | 段落 PAP §2.6.2 |
+| ✅ | `0x2416` | sprmPFInTable | A Bool8 value that specifies whether this paragraph is in a table.；M3Batch3.TDefTableCellWidthBorderAndMerge | 段落 PAP §2.6.2 |
+| ✅ | `0x2417` | sprmPFTtp | A Bool8 that, when set to 1, specifies that the cell mark it is applied to is a Table Terminating Paragraph (TTP) mark.；M3Batch3.TDefTableCellWidthBorderAndMerge | 段落 PAP §2.6.2 |
+| ☐ | `0x8418` | sprmPDxaAbs | Horizontal absolute position of the paragraph frame relative to its anchor. | 段落 PAP §2.6.2 |
+| ☐ | `0x8419` | sprmPDyaAbs | A YAS_plusOne value that specifies downward vertical position relative to the vertical anchor of the frame. | 段落 PAP §2.6.2 |
+| ☐ | `0x841A` | sprmPDxaWidth | A XAS_nonNeg value that specifies the width of the frame. | 段落 PAP §2.6.2 |
+| ✅ | `0x261B` | sprmPPc | Frame anchor used to calculate its position. | 段落 PAP §2.6.2 |
+| ✅ | `0x2423` | sprmPWr | A 1-byte integer that specifies how text is wrapped around a frame. | 段落 PAP §2.6.2 |
+| ✅ | `0x6424` | sprmPBrcTop80 | A Brc80 value that specifies the top border of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x6425` | sprmPBrcLeft80 | A Brc80 value that specifies the logical left border of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x6426` | sprmPBrcBottom80 | A Brc80 value that specifies the bottom border of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x6427` | sprmPBrcRight80 | A Brc80 value that specifies the logical right border of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x6428` | sprmPBrcBetween80 | A Brc80 value that specifies the border between this paragraph and the next. | 段落 PAP §2.6.2 |
+| ✅ | `0x6629` | sprmPBrcBar80 | A Brc80 value that has no effect. | 段落 PAP §2.6.2 |
+| ☐ | `0x242A` | sprmPFNoAutoHyph | A Bool8 value that specifies whether this paragraph is auto- hyphenated when hyphenation is enabled for the document. | 段落 PAP §2.6.2 |
+| ☐ | `0x442B` | sprmPWHeightAbs | A WHeightAbs value that specifies the height of the frame. | 段落 PAP §2.6.2 |
+| ☐ | `0x442C` | sprmPDcs | A DCS value that specifies the properties, if any, of the drop cap for this paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x442D` | sprmPShd80 | A Shd80 structure that specifies the background shading for the paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x842E` | sprmPDyaFromText | A YAS_nonNeg value that specifies the minimum vertical distance between the edge of the frame and the edge of main document text that wraps around the frame. | 段落 PAP §2.6.2 |
+| ☐ | `0x842F` | sprmPDxaFromText | A XAS_nonNeg value that specifies the minimum horizontal distance between the edge of the frame and the edge of main document text that wraps around the frame. | 段落 PAP §2.6.2 |
+| ☐ | `0x2430` | sprmPFLocked | A Bool8 value that specifies whether the anchor of the frame which contains this paragraph is locked to its current location. | 段落 PAP §2.6.2 |
+| ☐ | `0x2431` | sprmPFWidowControl | A Bool8 value that specifies whether widow and orphan control is enabled for this paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x2433` | sprmPFKinsoku | A Bool8 value that specifies whether this paragraph uses East Asian typography and line-breaking rules to determine the valid characters that are allowed to begin and end each line of East… | 段落 PAP §2.6.2 |
+| ☐ | `0x2434` | sprmPFWordWrap | A Bool8 value that, when equal to 0, specifies a preference to break Latin text that exceeds text line limits by breaking a word across two lines (breaking on the character level). | 段落 PAP §2.6.2 |
+| ☐ | `0x2435` | sprmPFOverflowPunct | A Bool8 value that, when equal to 0, specifies a preference against allowing a punctuation character that follows a word at the end of a line to appear beyond the extent of that line of text. | 段落 PAP §2.6.2 |
+| ☐ | `0x2436` | sprmPFTopLinePunct | A Bool8 value that specifies a preference to render punctuation characters at the beginning of a line so that they appear to be closer to both the beginning of the line and to the next… | 段落 PAP §2.6.2 |
+| ☐ | `0x2437` | sprmPFAutoSpaceDE | A Bool8 value that specifies whether space is automatically inserted between East Asian and Latin text. | 段落 PAP §2.6.2 |
+| ☐ | `0x2438` | sprmPFAutoSpaceDN | A Bool8 value that specifies whether space is automatically inserted between East Asian text and numbers. | 段落 PAP §2.6.2 |
+| ☐ | `0x4439` | sprmPWAlignFont | A 16-bit unsigned integer that specifies vertical font alignment for East Asian languages. | 段落 PAP §2.6.2 |
+| ☐ | `0x443A` | sprmPFrameTextFlow | A FrameTextFlowOperand that specifies the direction of text flow in the frame. | 段落 PAP §2.6.2 |
+| ✅ | `0x2640` | sprmPOutLvl | An unsigned 8-bit integer value that specifies the outline level of the paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x2441` | sprmPFBiDi | A Bool8 value that specifies whether the paragraph uses right-to-left layout. | 段落 PAP §2.6.2 |
+| N/A | `0x2443` | sprmPFNumRMIns | A Bool8 value that specifies whether a numbered list was applied to this paragraph after the previous revision.；修订元数据留 M4；不影响当前格式值 | 段落 PAP §2.6.2 |
+| N/A | `0xC645` | sprmPNumRM | A NumRMOperand value that specifies a numbering revision mark for this paragraph.；修订元数据留 M4；不影响当前格式值 | 段落 PAP §2.6.2 |
+| ☐ | `0x6646` | sprmPHugePapx | A 4-byte unsigned integer that specifies a location in the Data Stream. | 段落 PAP §2.6.2 |
+| ☐ | `0x2447` | sprmPFUsePgsuSettings | A Bool8 value that specifies whether the paragraph adheres to the vertical components of the document grid. | 段落 PAP §2.6.2 |
+| ☐ | `0x2448` | sprmPFAdjustRight | A Bool8 value that specifies whether this paragraph is set to automatically adjust the right indent when a document grid for East Asian characters is defined. | 段落 PAP §2.6.2 |
+| ☐ | `0x6649` | sprmPItap | An integer value that specifies the table depth of this paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x664A` | sprmPDtap | A signed integer that specifies an addition or subtraction to the existing table depth of this paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x244B` | sprmPFInnerTableCell | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table cell. | 段落 PAP §2.6.2 |
+| ☐ | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2 |
+| ✅ | `0xC64D` | sprmPShd | A SHDOperand value that specifies the background shading for the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0xC64E` | sprmPBrcTop | A BrcOperand value which specifies the top border of the paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0xC64F` | sprmPBrcLeft | A BrcOperand value that specifies the logical left border of the paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0xC650` | sprmPBrcBottom | A BrcOperand value that specifies the bottom border of the paragraph This border is hidden if the next paragraph is identical to this one in terms of its top, bottom, left, and right borders;… | 段落 PAP §2.6.2 |
+| ✅ | `0xC651` | sprmPBrcRight | A BrcOperand value that specifies the logical right border of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0xC652` | sprmPBrcBetween | Border between adjacent paragraphs. | 段落 PAP §2.6.2 |
+| ✅ | `0xC653` | sprmPBrcBar | A BrcOperand value that has no effect. | 段落 PAP §2.6.2 |
+| ☐ | `0x4455` | sprmPDxcRight | A signed 16-bit integer value that specifies the logical right indent of the paragraph in hundredths of character units. | 段落 PAP §2.6.2 |
+| ☐ | `0x4456` | sprmPDxcLeft | A signed 16-bit integer value that specifies the logical left indent of the paragraph in hundredths of character units. | 段落 PAP §2.6.2 |
+| ☐ | `0x4457` | sprmPDxcLeft1 | A signed 16-bit integer value that specifies the logical left indent of the first line of the paragraph, in hundredths of character units, relative to the rest of the paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x4458` | sprmPDylBefore | A signed 16-bit integer value that specifies the spacing before the paragraph, in 1/100 line units. | 段落 PAP §2.6.2 |
+| ☐ | `0x4459` | sprmPDylAfter | A signed 16-bit integer that specifies the spacing after the paragraph, in 1/100 line units. | 段落 PAP §2.6.2 |
+| ☐ | `0x245A` | sprmPFOpenTch | A Bool8 value that specifies whether this table cell mark was being displayed when this file was last saved, even though it immediately follows a nested table. | 段落 PAP §2.6.2 |
+| ☐ | `0x245B` | sprmPFDyaBeforeAuto | A Bool8 value that specifies whether the space displayed before this paragraph uses auto spacing. | 段落 PAP §2.6.2 |
+| ☐ | `0x245C` | sprmPFDyaAfterAuto | A Bool8 value that specifies whether the space displayed after this paragraph uses auto spacing. | 段落 PAP §2.6.2 |
+| ✅ | `0x845D` | sprmPDxaRight | An XAS value that specifies the logical right indent of the paragraph, in twips. | 段落 PAP §2.6.2 |
+| ✅ | `0x845E` | sprmPDxaLeft | An XAS value that specifies the logical left indent of the paragraph, in twips. | 段落 PAP §2.6.2 |
+| ☐ | `0x465F` | sprmPNest | An XAS value that is added to the sprmPDxaLeft value to determine the final indent of a paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x8460` | sprmPDxaLeft1 | An XAS value that specifies the logical left indent of the first line of the paragraph, in twips, relative to the rest of the paragraph. | 段落 PAP §2.6.2 |
+| ✅ | `0x2461` | sprmPJc | An unsigned 8-bit integer value that specifies the logical justification of the paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x2462` | sprmPFNoAllowOverlap | Prevents overlap of the paragraph frame with other frames. | 段落 PAP §2.6.2 |
+| N/A | `0x2664` | sprmPWall | Preserves previous paragraph properties for revision marking.；修订元数据留 M4；不影响当前格式值 | 段落 PAP §2.6.2 |
+| ☐ | `0x6465` | sprmPIpgp | An unsigned integer value that specifies the PGPInfo.ipgpSelf value of the PGPInfo data that is applied to this paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0xC666` | sprmPCnf | A CNFOperand value that specifies conditional paragraph formatting for a specific condition of a table style. | 段落 PAP §2.6.2 |
+| N/A | `0x6467` | sprmPRsid | An integer value that specifies a revision save ID, as specified in [ECMA-376] Part 1, Section 17.15.1.70 rsid (Single Session Revision Save ID), associated with paragraph formatting.；修订元数据留 M4；不影响当前格式值 | 段落 PAP §2.6.2 |
+| N/A | `0xC669` | sprmPIstdListPermute | An SPPOperand value that has no effect and MUST be ignored.；规范注明废弃或仅用于旧版，当前转换不适用 | 段落 PAP §2.6.2 |
+| ☐ | `0x646B` | sprmPTableProps | An unsigned integer value that specifies a location in the Data Stream. | 段落 PAP §2.6.2 |
+| ☐ | `0xC66C` | sprmPTIstdInfo | Table style information associated with a paragraph. | 段落 PAP §2.6.2 |
+| ☐ | `0x246D` | sprmPFContextualSpacing | A Bool8 value that specifies whether contextual spacing is enabled for this paragraph. | 段落 PAP §2.6.2 |
+| N/A | `0xC66F` | sprmPPropRMark | A PropRMarkOperand value that specifies whether the paragraph has an associated property revision mark, as well as its author and the date and time.；修订元数据留 M4；不影响当前格式值 | 段落 PAP §2.6.2 |
+| ☐ | `0x2470` | sprmPFMirrorIndents | A Bool8 value that specifies whether the left and right indents that are set for this paragraph are interpreted as inside and outside margins for odd and even numbered pages. | 段落 PAP §2.6.2 |
+| ☐ | `0x2471` | sprmPTtwo | A 1-byte integer that specifies text wrapping options for a text box when tight wrapping is set for the text box. | 段落 PAP §2.6.2 |
 
-### 1.4 颜色与高亮
-- [x] sprmCIco (0x2A42) 调色板色 → w:color ✅
-- [x] sprmCCv (0x6870) RGB 色 → w:color ✅
-- [x] sprmCHighlight (0x2A0C) 高亮 → w:highlight ✅
-- [x] sprmCShd (0xCA71) 字符底纹 → w:shd ✅
-- [x] sprmCBrc (0xCA72/0x6865) 字符边框 → w:bdr ✅
-- [ ] sprmCCvHighlight ☐
+## 3. 表格 TAP（§2.6.3，80 项）
 
-### 1.5 上下标与隐藏
-- [ ] sprmCDispFld RVC ☐
-- [ ] sprmCIbstRField ☐
-- [ ] sprmCFrvrtDisp ☐
-- [ ] sprmCFSelectFld ☐
-- [ ] sprmCObjOffset ☐
-- [x] sprmCIVertAlign (0x2A48) 上下标 → w:vertAlign ✅
-- [x] sprmCFHidden (0x083C) 隐藏 → w:vanish ✅
-- [ ] sprmCFRMarkDel ☐
-- [ ] sprmCFRMark ☐
-- [ ] sprmCFrc (0x0863) ☐
+| 状态 | opcode | sprm | 语义（规范摘要） | 归类 |
+|---|---|---|---|---|
+| ☐ | `0x5400` | sprmTJc90 | An unsigned 16-bit integer value that specifies the physical justification of the table. | 表格 TAP §2.6.3 |
+| ☐ | `0x9601` | sprmTDxaLeft | Table horizontal origin relative to the logical left margin. | 表格 TAP §2.6.3 |
+| ✅ | `0x9602` | sprmTDxaGapHalf | An XAS value that specifies the average width, in twips, between the left and right default cell margins for the first cell in the row. | 表格 TAP §2.6.3 |
+| ✅ | `0x3403` | sprmTFCantSplit90 | A Bool8 value. | 表格 TAP §2.6.3 |
+| ✅ | `0x3404` | sprmTTableHeader | A Bool8 value that specifies that the current table row is a header row. | 表格 TAP §2.6.3 |
+| ✅ | `0xD605` | sprmTTableBorders80 | A TableBordersOperand80 value that specifies border information for the cells in a table row. | 表格 TAP §2.6.3 |
+| ✅ | `0x9407` | sprmTDyaRowHeight | A YAS value that specifies the height of the row. | 表格 TAP §2.6.3 |
+| ✅ | `0xD608` | sprmTDefTable | A TDefTableOperand value that specifies the number of columns in the table row, the width of each column, border attributes, and a variety of other settings. | 表格 TAP §2.6.3 |
+| ☐ | `0xD609` | sprmTDefTableShd80 | A DefTableShd80Operand value that specifies the default shading applied to each cell in a row. | 表格 TAP §2.6.3 |
+| ☐ | `0x740A` | sprmTTlp | A TLP structure that specifies the table style options for this table. | 表格 TAP §2.6.3 |
+| ✅ | `0x560B` | sprmTFBiDi | A Bool16 value that specifies whether this table is right-to-left. | 表格 TAP §2.6.3 |
+| ✅ | `0xD60C` | sprmTDefTableShd3rd | A DefTableShdOperand that specifies the default shading for cells 45 to 63 in the row, or all remaining cells in the row beginning with cell 45 if the row contains fewer than 63 cells. cb… | 表格 TAP §2.6.3 |
+| ☐ | `0x360D` | sprmTPc | A PositionCodeOperand structure that specifies the origin that is used to calculate the table position when it is absolutely positioned. | 表格 TAP §2.6.3 |
+| ☐ | `0x940E` | sprmTDxaAbs | A XAS_plusOne value that specifies the horizontal position of the table relative to the horizontal anchor of the table. | 表格 TAP §2.6.3 |
+| ☐ | `0x940F` | sprmTDyaAbs | A YAS_plusOne value that specifies downward vertical position relative to the vertical anchor of the table. | 表格 TAP §2.6.3 |
+| ☐ | `0x9410` | sprmTDxaFromText | An XAS_nonNeg value that specifies the minimum horizontal distance between the physical left edge of the table and the physical right edge of the text that wraps around the table. | 表格 TAP §2.6.3 |
+| ☐ | `0x9411` | sprmTDyaFromText | A YAS_nonNeg value that specifies the minimum vertical distance between the top edge of the table and the bottom edge of text that wraps around the table. | 表格 TAP §2.6.3 |
+| ✅ | `0xD612` | sprmTDefTableShd | A DefTableShdOperand value that specifies the default shading for cells 1 – 22 in the row, or all cells in the row if the row contains fewer than 22 cells. | 表格 TAP §2.6.3 |
+| ✅ | `0xD613` | sprmTTableBorders | A TableBordersOperand value that specifies the borders for this row unless modified by other Sprms applied to the cells. | 表格 TAP §2.6.3 |
+| ✅ | `0xF614` | sprmTTableWidth | An FtsWWidth_Table structure that specifies the preferred total width of the table of which this row is a part. | 表格 TAP §2.6.3 |
+| ✅ | `0x3615` | sprmTFAutofit | A Bool8 value that specifies whether the table column widths are to be automatically resized to best fit the contents of the whole table. | 表格 TAP §2.6.3 |
+| ✅ | `0xD616` | sprmTDefTableShd2nd | A DefTableShdOperand that specifies the default shading for cells 23 – 44 in the row, or all remaining cells in the row beginning with cell 23 if the row contains fewer than 44 cells. | 表格 TAP §2.6.3 |
+| ☐ | `0xF617` | sprmTWidthBefore | An FtsWWidth_TablePart structure that specifies the preferred additional leading indent of the first cell of the row, relative to the leading edge of the table as a whole. | 表格 TAP §2.6.3 |
+| ☐ | `0xF618` | sprmTWidthAfter | An FtsWWidth_TablePart structure that specifies the preferred trailing indent following the last cell of the row. | 表格 TAP §2.6.3 |
+| ☐ | `0x3619` | sprmTFKeepFollow | A Bool8 value that specifies whether page breaks are avoided between the rows of this table, if possible. | 表格 TAP §2.6.3 |
+| ☐ | `0xD61A` | sprmTBrcTopCv | Top border color for cells in a table row. | 表格 TAP §2.6.3 |
+| ☐ | `0xD61B` | sprmTBrcLeftCv | A BrcCvOperand value that specifies the color of the logical left border for each cell in a table row. | 表格 TAP §2.6.3 |
+| ☐ | `0xD61C` | sprmTBrcBottomCv | A BrcCvOperand value that specifies the color of the bottom border for each cell in a table row. | 表格 TAP §2.6.3 |
+| ☐ | `0xD61D` | sprmTBrcRightCv | A BrcCvOperand value that specifies the color of the logical right border for each cell in a table row. | 表格 TAP §2.6.3 |
+| ☐ | `0x941E` | sprmTDxaFromTextRight | An XAS_nonNeg value that specifies the minimum horizontal distance between the physical right edge of the table and the physical left edge of the text that wraps around the table. | 表格 TAP §2.6.3 |
+| ☐ | `0x941F` | sprmTDyaFromTextBottom | A YAS_nonNeg value that specifies the minimum vertical distance between the bottom edge of the table and the top edge of text that wraps around the table. | 表格 TAP §2.6.3 |
+| ✅ | `0xD620` | sprmTSetBrc80 | A TableBrc80Operand value that specifies the borders of a set of cells in the table row. | 表格 TAP §2.6.3 |
+| ✅ | `0x7621` | sprmTInsert | A TInsertOperand value that specifies a range of new table cell definitions to insert into the table row. | 表格 TAP §2.6.3 |
+| ✅ | `0x5622` | sprmTDelete | An ItcFirstLim value that specifies a range of table cell definitions to delete from the table row. | 表格 TAP §2.6.3 |
+| ✅ | `0x7623` | sprmTDxaCol | A TDxaColOperand value that specifies the width of a range of cells in this table. | 表格 TAP §2.6.3 |
+| ✅ | `0x5624` | sprmTMerge | An ItcFirstLim structure that specifies a set of cells in the current table row that are to be merged. | 表格 TAP §2.6.3 |
+| ✅ | `0x5625` | sprmTSplit | An ItcFirstLim structure that specifies a set of cells in the current table row that are not to be merged. | 表格 TAP §2.6.3 |
+| ✅ | `0x7629` | sprmTTextFlow | A CellRangeTextFlow value that specifies a set of cells in the current table row and the text flow model for each cell. | 表格 TAP §2.6.3 |
+| ✅ | `0xD62B` | sprmTVertMerge | A VertMergeOperand value that specifies a cell in the current row, and whether that cell is vertically merged with the cell above or below it. | 表格 TAP §2.6.3 |
+| ✅ | `0xD62C` | sprmTVertAlign | A CellRangeVertAlign value that specifies a set of cells in the current table row and the vertical alignment of cell contents in each cell. | 表格 TAP §2.6.3 |
+| ✅ | `0xD62D` | sprmTSetShd | A TableShadeOperand value that specifies a set of cells in a table row and the background shading for each cell. | 表格 TAP §2.6.3 |
+| ✅ | `0xD62E` | sprmTSetShdOdd | A TableShadeOperand value that specifies a set of cells in a table row and the background shading for odd numbered cells in that set. | 表格 TAP §2.6.3 |
+| ✅ | `0xD62F` | sprmTSetBrc | A TableBrcOperand value that specifies the border type of a set of cells in a table row. | 表格 TAP §2.6.3 |
+| ✅ | `0xD632` | sprmTCellPadding | A CSSAOperand value that specifies the cell margin for one or more cell sides. cssa.ftsWidth MUST be ftsNil (0x00) or ftsDxa (0x03). | 表格 TAP §2.6.3 |
+| ✅ | `0xD633` | sprmTCellSpacingDefault | A CSSAOperand that specifies the cell spacing for each cell in the entire row. cssa.itc.itcFirst MUST be 0, cssa.itc.itcLim MUST be 1, cssa.grfbrc MUST be fbrcSidesOnly (0x0F), cssa.ftsWidth… | 表格 TAP §2.6.3 |
+| ✅ | `0xD634` | sprmTCellPaddingDefault | A CSSAOperand that specifies the cell margin for one or more cell sides for each cell in the entire row. cssa.itc.itcFirst MUST be 0, cssa.itc.itcLim MUST be 1, cssa.ftsWidth MUST be ftsNil… | 表格 TAP §2.6.3 |
+| ✅ | `0xD635` | sprmTCellWidth | Preferred width of one or more table cells. | 表格 TAP §2.6.3 |
+| ✅ | `0xF636` | sprmTFitText | A CellRangeFitText value that specifies a set of cells in a table row and whether their contents are to be stretched or compressed to exactly fill their widths. | 表格 TAP §2.6.3 |
+| ✅ | `0xD639` | sprmTFCellNoWrap | A CellRangeNoWrap value that specifies a set of cells in a table row and whether their contents wrap over multiple lines. | 表格 TAP §2.6.3 |
+| ☐ | `0x563A` | sprmTIstd | An unsigned integer value that specifies the istd value of a table style to apply. | 表格 TAP §2.6.3 |
+| ☐ | `0xD63E` | sprmTCellPaddingStyle | Default cell padding for a table style. | 表格 TAP §2.6.3 |
+| ✅ | `0xD642` | sprmTCellFHideMark | A CellHideMarkOperand that specifies that table cell content is rendered with no height if all cells in the row are empty; however, cells have a visible height if they have nonzero cell… | 表格 TAP §2.6.3 |
+| ✅ | `0xD660` | sprmTSetShdTable | A SHDOperand value that specifies the background shading for the entire table. | 表格 TAP §2.6.3 |
+| ✅ | `0xF661` | sprmTWidthIndent | An FtsWWidth_Indent structure that specifies the preferred leading indent of the table where the row resides. | 表格 TAP §2.6.3 |
+| ☐ | `0xD662` | sprmTCellBrcType | A TCellBrcTypeOperand value that specifies the border type for the first several consecutive cells in a table row. | 表格 TAP §2.6.3 |
+| ✅ | `0x5664` | sprmTFBiDi90 | A Bool16 value that specifies whether this table is right-to-left. | 表格 TAP §2.6.3 |
+| ☐ | `0x3465` | sprmTFNoAllowOverlap | A Bool8 value that specifies whether the table is allowed to overlap other tables. | 表格 TAP §2.6.3 |
+| ✅ | `0x3466` | sprmTFCantSplit | A Bool8 value. | 表格 TAP §2.6.3 |
+| N/A | `0xD667` | sprmTPropRMark | A PropRMarkOperand that specifies whether the table row has an associated property revision mark, as well as its author and date/time.；修订元数据留 M4；不影响当前格式值 | 表格 TAP §2.6.3 |
+| N/A | `0x3668` | sprmTWall | A Bool8 value that specifies whether the values of table properties are preserved for revision marking purposes until the modifications are accepted or rejected by the user.；修订元数据留 M4；不影响当前格式值 | 表格 TAP §2.6.3 |
+| ☐ | `0x7469` | sprmTIpgp | An unsigned integer value that specifies the PGPInfo.ipgpSelf value of the PGPInfo data to be applied to this table row. | 表格 TAP §2.6.3 |
+| ☐ | `0xD66A` | sprmTCnf | A CNFOperand that specifies conditional table formatting for a specific condition of a table style. | 表格 TAP §2.6.3 |
+| ✅ | `0xD670` | sprmTDefTableShdRaw | A DefTableShdOperand value that specifies the default shading for cells 1 to 22 in the row, or all cells in the row if the row contains fewer than 22 cells. | 表格 TAP §2.6.3 |
+| ☐ | `0xD671` | sprmTDefTableShdRaw2nd | A DefTableShdOperand value that specifies the default shading for cells 23 to 44 in the row, or all remaining cells in the row beginning with cell 23 if the row contains fewer than 44 cells. | 表格 TAP §2.6.3 |
+| ☐ | `0xD672` | sprmTDefTableShdRaw3rd | A DefTableShdOperand that specifies the default shading for cells 45 to 63 in the row, or all remaining cells in the row beginning with cell 45 if the row contains fewer than 63 cells. cb… | 表格 TAP §2.6.3 |
+| N/A | `0x7479` | sprmTRsid | An integer value that specifies a revision save ID, as specified in [ECMA- 376] Part 1, Section 17.15.1.70 rsid (Single Session Revision Save ID), associated with table formatting.；修订元数据留 M4；不影响当前格式值 | 表格 TAP §2.6.3 |
+| ☐ | `0x347C` | sprmTCellVertAlignStyle | A VerticalAlign value that specifies the vertical alignment of content within cells as defined by a Table style. | 表格 TAP §2.6.3 |
+| ☐ | `0x347D` | sprmTCellNoWrapStyle | A Bool8 value that specifies whether content within cells MAY<154> word wrap. | 表格 TAP §2.6.3 |
+| ☐ | `0xD47F` | sprmTCellBrcTopStyle | A BrcOperand value that specifies the top border for cells that are affected by a CNFOperand value. | 表格 TAP §2.6.3 |
+| ☐ | `0xD680` | sprmTCellBrcBottomStyle | A BrcOperand value that specifies the bottom border for cells that are affected by a CNFOperand value. | 表格 TAP §2.6.3 |
+| ☐ | `0xD681` | sprmTCellBrcLeftStyle | A BrcOperand value that specifies the logical left border for cells that are affected by a CNFOperand value. | 表格 TAP §2.6.3 |
+| ☐ | `0xD682` | sprmTCellBrcRightStyle | A BrcOperand value that specifies the logical right border for cells that are affected by a CNFOperand value. | 表格 TAP §2.6.3 |
+| ☐ | `0xD683` | sprmTCellBrcInsideHStyle | A BrcOperand value that specifies the border between a table row that is affected by a CNFOperand value and the following table row. | 表格 TAP §2.6.3 |
+| ☐ | `0xD684` | sprmTCellBrcInsideVStyle | A BrcOperand value that specifies the border between cells of a table row that are affected by a CNFOperand. | 表格 TAP §2.6.3 |
+| ☐ | `0xD685` | sprmTCellBrcTL2BRStyle | A BrcOperand value that specifies a diagonal border from the top, logical left corner to the bottom, logical right corner of each cell that is affected by a CNFOperand. | 表格 TAP §2.6.3 |
+| ☐ | `0xD686` | sprmTCellBrcTR2BLStyle | A BrcOperand value that specifies a diagonal border from the top, logical right corner to the bottom, logical left corner of each cell that is affected by a CNFOperand. | 表格 TAP §2.6.3 |
+| ☐ | `0xD687` | sprmTCellShdStyle | A SHDOperand value that specifies the background shading to be applied to an entire table defined by a Table style. | 表格 TAP §2.6.3 |
+| ☐ | `0x3488` | sprmTCHorzBands | An unsigned 8-bit integer value that specifies the number of rows in a horizontal band that is used for conditional formatting as defined by a Table style. | 表格 TAP §2.6.3 |
+| ☐ | `0x3489` | sprmTCVertBands | An unsigned 8-bit integer value that specifies the number of columns in a vertical band that is used for conditional formatting as defined by a Table style. | 表格 TAP §2.6.3 |
+| ✅ | `0x548A` | sprmTJc | An unsigned 16-bit integer value that specifies the logical justification of the table. | 表格 TAP §2.6.3 |
 
-### 1.6 修订与域（M4 域域相关，本里程碑不强制）
-- [ ] sprmCFSpecsym ☐
-- [ ] sprmCRmf (0x4875) 保留格式 ☐
-- [ ] sprmCFFldVanish ☐
-- [ ] sprmCPicLocation (0x6A03) 图片位置 ☐（M5 图片）
-- [ ] sprmCPropRMark (0xCA89；旧版 0xCA57) ☐
+## 4. 节 SEP（§2.6.4，59 项）
 
-## 2. 段落 sprm（PAPX）— 已列 34 项
-
-### 2.1 缩进对齐
-- [x] sprmPDxaLeft (0x840F/0x845E) → w:ind left ✅
-- [x] sprmPDxaRight (0x840E/0x845D) → w:ind right ✅
-- [x] sprmPDxaLeft1 (0x8460/0x845F) 首行/悬挂 → w:ind firstLine/hanging ✅
-- [x] sprmPJc (0x2403/0x2461) 对齐 → w:jc ✅
-- [ ] sprmPDxaAbs ☐
-- [ ] sprmPDxaRel ☐
-- [ ] sprmPDyaAbs ☐
-- [ ] sprmPDyaRel ☐
-
-### 2.2 间距行距
-- [x] sprmPDyaBefore (0xA413) 段前 → w:spacing before ✅
-- [x] sprmPDyaAfter (0xA414) 段后 → w:spacing after ✅
-- [x] sprmPDyaLine (0x6412) 行距 → w:spacing line/lineRule ✅
-
-### 2.3 边框底纹
-- [x] sprmPBrcTop1/2 (0x6424/0x6425) → w:pBdr top ✅
-- [x] sprmPBrcLeft1/2 (0x6426/0x6427) → w:pBdr left ✅
-- [x] sprmPBrcBottom1/2 (0x6428) → w:pBdr bottom ✅
-- [x] sprmPBrcRight (0x6629/0x6426) → w:pBdr right ✅
-- [x] sprmPBrcBetween (0xC64E-0xC651) → w:pBdr between ✅
-- [x] sprmPBrcBar (0xC652/0xC653) → w:pBdr bar ✅
-- [x] sprmPShd (0xC64D) 段落底纹 → w:shd ✅
-- [ ] sprmPShdTable ☐
-
-### 2.4 列表编号
-- [x] sprmPIlvl (0x260A) 列表级别 ✅
-- [x] sprmPIlfo (0x460B) 列表 ID ✅
-- [ ] sprmPFInTable (0x2416) ☐ 部分实现（表格检测用）
-- [ ] sprmPFTtp (0x2417) 行尾标记 ☐ 部分实现
-- [x] sprmPWr (0x2423) 环绕 → w:framePr wrap ✅（M3Batch2.FloatingParagraphWrapAndAnchors）
-- [x] sprmPPc (0x261B) 定位锚点 → w:framePr hAnchor/vAnchor ✅（M3Batch2.FloatingParagraphWrapAndAnchors）
-
-### 2.5 段落属性杂项
-- [x] sprmPKeep (0x2405) keepLines ✅
-- [x] sprmPKeepNext (0x2406) keepNext ✅
-- [x] sprmPPageBreakBefore (0x2407) ✅
-- [x] sprmPOutLvl (0x2640) 大纲级别 ✅
-- [x] sprmPChgTabsPapx (0xC615/0xC60D) 制表位 → w:tabs ✅（含 leader）
-- [ ] sprmPFNoAllowOverlap ☐
-- [ ] sprmPWatermark (0x6422) 水印 ☐
-- [ ] sprmPRsid ☐
-- [ ] sprmPFrameId ☐
-
-## 3. 节 sprm（SEPX）— 已列 33 项
-
-- [x] sprmSBkc (0x3009) 分节符类型 ✅
-- [x] sprmSFTitlePage (0x300A) 首页不同 ✅
-- [ ] sprmSDmBinFirst ☐
-- [ ] sprmSDmBinOther ☐
-- [ ] sprmSDmPaperType (0x5007) ☐
-- [ ] sprmSFBiDi ☐
-- [x] sprmSFacePg (0x301D) 方向 → w:pgSz orient ✅
-- [x] sprmSXaPage (0xB01F) 页宽 ✅
-- [x] sprmSYaPage (0xB020) 页高 ✅
-- [x] sprmSDxaLeft (0xB021) 左边距 ✅
-- [x] sprmSDxaRight (0xB022) 右边距 ✅
-- [x] sprmSDyaTop (0x9023) 上边距 ✅
-- [x] sprmSDyaBottom (0x9024) 下边距 ✅
-- [x] sprmSDzaGutter (0xB025) 装订线 ✅
-- [ ] sprmSDmBinFirst ☐
-- [ ] sprmSFAutoPgn ☐
-- [ ] sprmSFEvenlyDvd ☐
-- [ ] sprmSFTextFlow (0x3615) ☐ 部分实现（表格 autofit 复用）
-- [x] sprmSCcolumns (0x500B) 分栏数 → w:cols ✅（M3Batch3.SectionColumnsPageNumberAndGrid）
-- [x] sprmSDxaColumns (0x900C) 栏间距 → w:cols ✅（M3Batch3.SectionColumnsPageNumberAndGrid）
-- [ ] sprmSFAutoPgnDxa ☐
-- [ ] sprmSFEvenlySpaced (0x3005) 等宽栏 ◐（已解析；非等宽栏宽度尚未输出）
-- [ ] sprmSFBiDi ☐
-- [x] sprmSFLandscape 已含 (0x301D) ✅
-- [ ] sprmSBOption 段落栏平衡 ☐
-- [x] sprmSDyaLinePitch (0x9031) 网格行高 → w:docGrid ✅（M3Batch3.SectionColumnsPageNumberAndGrid）
-- [x] sprmSClm (0x5032) 网格模式 → w:docGrid ✅（M3Batch3.SectionColumnsPageNumberAndGrid）
-- [x] sprmSTextFlow (0x5033) → w:textDirection ✅（M3Batch3.SectionColumnsPageNumberAndGrid）
-
-### 3.1 页眉页脚（docx 侧已实现，sprm 映射验证于 header-footer.doc）
-- [x] sprmSPgnStart97/Start (0x501C/0x7044) 页码起始 → w:pgNumType ✅（M3Batch3.SectionColumnsPageNumberAndGrid）
-- [x] sprmSFPgnRestart (0x3011) → w:pgNumType ✅（M3Batch3.SectionColumnsPageNumberAndGrid）
-- [ ] sprmSFEndnote ☐
-- [ ] sprmPgnCharType ☐
-- [ ] sprmPgnLvl ☐
-
-## 4. 表格 sprm（TAPX）— 已列 31 项
-
-### 4.1 表格定义
-- [x] sprmTDefTable (0xD608) 表格定义主结构 ✅（增强后）
-- [ ] sprmTDefTable10 (0xD606) 旧版 ◐（仅网格，BRC10 未完整）
-- [x] sprmTInsert (0x7621) 插入单元格 ✅
-- [x] sprmTDelete (0x5622) 删除单元格 ✅
-- [x] sprmTMerge (0x5625) 水平合并 ✅
-- [x] sprmTSplit (0x5624) 拆分 ✅
-- [x] sprmTMerge VC 合并 (0xD62B) → w:vMerge ✅
-
-### 4.2 单元格边框底纹
-- [x] sprmTTableBrc (0xD605/0xD613) 整表边框 ✅
-- [x] sprmTCellBrc (0xD620/0xD62F) 单元格边框 → w:tcBorders ✅
-- [x] sprmTCellShd (0xD612/0xD616/0xD60C/0xD670-72) 单元格底纹 → w:shd ✅
-- [x] sprmTCellShdRange (0xD62D/0xD62E) 范围/隔列 ✅
-- [x] sprmTTableShd (0xD660) 整表底纹 ✅
-
-### 4.3 单元格几何
-- [x] sprmTCellPadding (0xD632/0xD634) 边距 → w:tcMar ✅
-- [x] sprmTCellWidth (0xD635/0x7623) 列宽 ✅
-- [x] sprmTTextWidth (0x7629) 文字方向 → w:textDirection ✅
-- [x] sprmTDxaCol (0x9407) 行高 ✅
-- [x] sprmTTableWidth (0xF614) 表宽 ✅
-- [x] sprmTFAutofit (0x3615) 自适应 ✅
-- [x] sprmTDyaRowHeight (0x9407) ✅
-
-### 4.4 表格杂项
-- [x] sprmTFCantSplit (0x3403/0x3466) 禁拆 ✅
-- [x] sprmTFHeader (0x3404) 表头行 ✅
-- [x] sprmTVertAlign (0xD62C) 垂直对齐 ✅
-- [x] sprmTCellNoWrap (0xD639) 不换行 ✅
-- [x] sprmTFitText (0xF636) 适配文字 ✅
-- [x] sprmTFCellBitMask (0xD642) 隐藏 ✅
-- [x] sprmTTableInd (0xF661/0x548A) 表缩进 ✅
-- [x] sprmTJc (0x560B/0x5664) 表对齐 ✅
-- [x] sprmTBiDi (0x560B) 双向 ✅
-- [x] sprmTDxaGapHalf (0x9602) 表格左缘偏移 → w:tblInd ✅（M3Batch3.TableSpacingAndGapOffset）
-- [x] sprmTCellSpacingDefault (0xD633) 单元格间距 → w:tblCellSpacing ✅（M3Batch3.TableSpacingAndGapOffset）
-- [ ] sprmTCellFtlr 未实现 ☐
-
-## 5. 样式/编号 sprm（STSH/LSTF 内 PRL）
-- [x] sprmPStyle (0x4600) 样式 ID ✅
-- [x] sprmCStyleChp 已含在继承链 ✅
-- [ ] sprmTStyle 条件格式 ☐
-- [ ] sprmPIprop 编号继承 ☐
+| 状态 | opcode | sprm | 语义（规范摘要） | 归类 |
+|---|---|---|---|---|
+| ☐ | `0x3000` | sprmScnsPgn | A CNS indicating the number separator used between the chapter number and the page number for purpose of chapter numbering in page number fields (that is, when sprmSiHeadingPgn specifies a… | 节 SEP §2.6.4 |
+| ☐ | `0x3001` | sprmSiHeadingPgn | An unsigned 8-bit integer value that specifies which heading level starts new chapters for the purposes of chapter numbering in page number fields. | 节 SEP §2.6.4 |
+| ☐ | `0xF203` | sprmSDxaColWidth | An SDxaColWidthOperand that specifies the width of a particular column, in case columns are not evenly spaced as specified by sprmSFEvenlySpaced. | 节 SEP §2.6.4 |
+| ☐ | `0xF204` | sprmSDxaColSpacing | An SDxaColSpacingOperand that specifies the spacing between two columns in case columns are not evenly spaced (as instructed by sprmSFEvenlySpaced). | 节 SEP §2.6.4 |
+| ◐ | `0x3005` | sprmSFEvenlySpaced | A Bool8 value that specifies whether the space between page margins is distributed evenly between all columns (after subtracting the space between columns, as instructed by sprmSDxaColumns).；已解析，非等宽栏宽度未输出 | 节 SEP §2.6.4 |
+| ☐ | `0x3006` | sprmSFProtected | A Bool8 value that specifies whether the section is unprotected in case document editing is restricted to form fields only (see DopBase.fProtEnabled). | 节 SEP §2.6.4 |
+| ☐ | `0x5007` | sprmSDmBinFirst | A SDmBinOperand that specifies the paper source used by the printer for the first page of the section. | 节 SEP §2.6.4 |
+| ☐ | `0x5008` | sprmSDmBinOther | An SDmBinOperand that specifies the paper source used by the printer for all pages in the section except the first. | 节 SEP §2.6.4 |
+| ✅ | `0x3009` | sprmSBkc | An SBkcOperand that specifies what kind of section break terminates the section. | 节 SEP §2.6.4 |
+| ✅ | `0x300A` | sprmSFTitlePage | A Bool8 value that specifies whether the section has a different first page (a "title page"). | 节 SEP §2.6.4 |
+| ✅ | `0x500B` | sprmSCcolumns | An unsigned 16-bit integer whose value is one less than the number of columns in this section. | 节 SEP §2.6.4 |
+| ✅ | `0x900C` | sprmSDxaColumns | An XAS_nonNeg that specifies the space between columns, in case columns are evenly spaced (as instructed by sprmSFEvenlySpaced). | 节 SEP §2.6.4 |
+| ✅ | `0x300E` | sprmSNfcPgn | Page number format for the section.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x3011` | sprmSFPgnRestart | A Bool8 value that specifies whether the section starts with a new page number. | 节 SEP §2.6.4 |
+| ☐ | `0x3012` | sprmSFEndnote | A Bool8 value that specifies whether endnotes are shown at the end of the section. | 节 SEP §2.6.4 |
+| ✅ | `0x3013` | sprmSLnc | An SLncOperand that specifies the line numbering mode to use in case line numbers are enabled (see sprmSNLnnMod).；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x5015` | sprmSNLnnMod | An unsigned 16-bit integer that specifies the distance in the number of lines between line number labels.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x9016` | sprmSDxaLnn | An XAS_nonNeg that specifies the distance between line numbers and the lines of text to which they apply.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0xB017` | sprmSDyaHdrTop | A YAS_nonNeg that specifies the header distance, in twips, from the top edge of the page.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0xB018` | sprmSDyaHdrBottom | Footer distance in twips from the bottom page edge.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x3019` | sprmSLBetween | A Bool8 value that specifies whether lines are drawn between columns of text.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x301A` | sprmSVjc | A Vjc value that specifies the vertical justification of the section.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x501B` | sprmSLnnMin | An unsigned 16-bit integer whose value is one less than the starting value for line numbers.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x501C` | sprmSPgnStart97 | An unsigned 16-bit integer that specifies the starting value for page numbers when the section has page number restart enabled (as specified by sprmSFPgnRestart). | 节 SEP §2.6.4 |
+| ✅ | `0x301D` | sprmSBOrientation | An SBOrientationOperand that specifies the page orientation of the section. | 节 SEP §2.6.4 |
+| ✅ | `0xB01F` | sprmSXaPage | An unsigned 16-bit integer that specifies the page width of the section in twips. | 节 SEP §2.6.4 |
+| ✅ | `0xB020` | sprmSYaPage | An unsigned 16-bit integer that specifies the page height of the section, in twips. | 节 SEP §2.6.4 |
+| ✅ | `0xB021` | sprmSDxaLeft | An XAS_nonNeg that specifies the width, in twips, of the left margin. | 节 SEP §2.6.4 |
+| ✅ | `0xB022` | sprmSDxaRight | An XAS_nonNeg that specifies the width, in twips, of the right margin. | 节 SEP §2.6.4 |
+| ✅ | `0x9023` | sprmSDyaTop | A YAS that specifies the height of the top margin, in twips. | 节 SEP §2.6.4 |
+| ✅ | `0x9024` | sprmSDyaBottom | A YAS that specifies the height of the bottom margin, in twips. | 节 SEP §2.6.4 |
+| ✅ | `0xB025` | sprmSDzaGutter | An unsigned 16-bit integer that specifies the size of the gutter margin, in twips. | 节 SEP §2.6.4 |
+| ☐ | `0x5026` | sprmSDmPaperReq | A 16-bit unsigned integer that specifies a tie-breaker value to be used when more than one available paper format ("Letter Matte", "Letter Gloss", "Letter w/ Letterhead", "Letter Pink", and… | 节 SEP §2.6.4 |
+| ✅ | `0x3228` | sprmSFBiDi | A Bool8 value that specifies whether the section uses right-to-left layout; that is, line numbers are displayed on the right side of text and columns are populated from right to left.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x322A` | sprmSFRTLGutter | A Bool8 value that specifies whether the gutter margin requires right-to-left layout.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ☐ | `0x702B` | sprmSBrcTop80 | A Brc80 that specifies the top page border. | 节 SEP §2.6.4 |
+| ☐ | `0x702C` | sprmSBrcLeft80 | A Brc80 that specifies the left page border. | 节 SEP §2.6.4 |
+| ☐ | `0x702D` | sprmSBrcBottom80 | A Brc80 that specifies the bottom page border. | 节 SEP §2.6.4 |
+| ☐ | `0x702E` | sprmSBrcRight80 | A Brc80 that specifies the right page border. | 节 SEP §2.6.4 |
+| ☐ | `0x522F` | sprmSPgbProp | An SPgbPropOperand that specifies page border properties. | 节 SEP §2.6.4 |
+| ☐ | `0x7030` | sprmSDxtCharSpace | A signed 32-bit integer that specifies the difference between the desired character pitch for the document grid, if enabled (see sprmSClm), and the pitch of the font that is specified by the… | 节 SEP §2.6.4 |
+| ✅ | `0x9031` | sprmSDyaLinePitch | A YAS that specifies, in twips, the line height that is used for document grid, if enabled (see sprmSClm). | 节 SEP §2.6.4 |
+| ✅ | `0x5032` | sprmSClm | An SClmOperand that specifies the document grid mode that is in use for the section. | 节 SEP §2.6.4 |
+| ✅ | `0x5033` | sprmSTextFlow | A MSOTXFL that specifies the text flow of the section, as specified in [MS- ODRAW] section 2.4.5. | 节 SEP §2.6.4 |
+| ☐ | `0xD234` | sprmSBrcTop | A BrcOperand that specifies the top page border. | 节 SEP §2.6.4 |
+| ☐ | `0xD235` | sprmSBrcLeft | A BrcOperand that specifies the left page border. | 节 SEP §2.6.4 |
+| ☐ | `0xD236` | sprmSBrcBottom | A BrcOperand that specifies the bottom page border. | 节 SEP §2.6.4 |
+| ☐ | `0xD237` | sprmSBrcRight | A BrcOperand that specifies the right page border. | 节 SEP §2.6.4 |
+| N/A | `0x3239` | sprmSWall | A Bool8 value that specifies whether the values of section properties are preserved for revision marking purposes until the modifications are accepted or rejected by the user.；修订元数据留 M4；不影响当前格式值 | 节 SEP §2.6.4 |
+| N/A | `0x703A` | sprmSRsid | An integer that specifies a revision save ID, as specified in [ECMA-376] Part 1, Section 17.15.1.70 rsid (Single Session Revision Save ID), associated with section formatting.；修订元数据留 M4；不影响当前格式值 | 节 SEP §2.6.4 |
+| ✅ | `0x303B` | sprmSFpc | An SFpcOperand that specifies the footnote positioning for the section.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x303C` | sprmSRncFtn | An Rnc that specifies whether and when footnote numbering is restarted.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ☐ | `0x303E` | sprmSRncEdn | An Rnc value that specifies whether and when endnote numbering is restarted. | 节 SEP §2.6.4 |
+| ✅ | `0x503F` | sprmSNFtn | An unsigned 16-bit integer that specifies an offset to add to footnote numbers in this section.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ✅ | `0x5040` | sprmSNfcFtnRef | A 16-bit MSONFC (as specified in [MS-OSHARED] section 2.2.1.3) that specifies the numbering format used for footnotes.；M3Batch5.SectionModifiersPreviouslyUnasserted | 节 SEP §2.6.4 |
+| ☐ | `0x5041` | sprmSNEdn | An unsigned 16-bit integer that specifies an offset to add to endnote numbers in this section. | 节 SEP §2.6.4 |
+| ☐ | `0x5042` | sprmSNfcEdnRef | A 16-bit MSONFC (as specified in [MS-OSHARED] section 2.2.1.3) that specifies the numbering format used for endnotes. | 节 SEP §2.6.4 |
+| N/A | `0xD243` | sprmSPropRMark | A PropRMarkOperand that specifies whether the section has an associated property revision mark, as well as its author and date/time.；修订元数据留 M4；不影响当前格式值 | 节 SEP §2.6.4 |
+| ✅ | `0x7044` | sprmSPgnStart | An unsigned 32-bit integer that specifies the starting value for page numbers when the section has page number restart enabled (as specified by sprmSFPgnRestart). | 节 SEP §2.6.4 |
 
 ## 统计
 
-| 类别 | 总数 | ✅ | ◐ | ☐ | 覆盖率 |
-|---|---:|---:|---:|---:|---:|
-| CHP 字符（已列） | 50 | 28 | 0 | 22 | 56% |
-| PAP 段落（已列） | 34 | 23 | 2 | 9 | 68% |
-| SEP 节（已列） | 33 | 18 | 2 | 13 | 55% |
-| TAPX 表格（已列） | 31 | 29 | 1 | 1 | 94% |
-| 样式/编号（已列） | 4 | 2 | 0 | 2 | 50% |
-| 未列出、待逐项盘点 | 88 | 0 | 0 | 88 | 0% |
-| **合计（原目标口径）** | **240** | **100** | **5** | **135** | **42%** |
+| 类别 | 总数 | ✅ | ◐ | ☐ | N/A | 覆盖率（✅ / 适用项） |
+|---|---:|---:|---:|---:|---:|---:|
+| 字符 CHP | 84 | 46 | 7 | 19 | 12 | 63.9% |
+| 段落 PAP | 91 | 34 | 0 | 51 | 6 | 40.0% |
+| 表格 TAP | 80 | 38 | 0 | 39 | 3 | 49.4% |
+| 节 SEP | 59 | 33 | 1 | 22 | 3 | 58.9% |
+| **合计** | 314 | 151 | 8 | 131 | 24 | 52.1% |
 
-> 注：240 是原清单宣称的目标，尚未逐项列齐，不能视为已核实的规范总数。每个已列类别的小节数字按实际行数计算；未列出的 88 项不能计为 ✅。
+## 规范外旧账别名（不计入 314）
+
+| 旧账项目 | 核对结果 |
+|---|---|
+| sprmCFLanguage `0x083F` | 当前 §2.6.1 无此 opcode；语言由 `sprmCRgLid0_80/1_80`、`sprmCRgLid0/1`、`sprmCLidBi` 表示，均已覆盖。旧别名 N/A。 |
+| sprmCFObjOffset、sprmCObjOffset | 当前四表无此名称或 opcode；对象位置以 `sprmCPicLocation` 表示，M5 处理对象载荷。旧别名 N/A。 |
+| sprmCCondTable | 当前 §2.6.1 名称为 `sprmCCnf` (`0xCA85`)，条件表格样式尚未实现。旧别名 N/A。 |
+| sprmPWatermark `0x6422` | 当前 §2.6.2 不含该 opcode；水印按图片/页眉载荷处理。旧别名 N/A。 |
+| sprmCRmf `0x4875` | 当前 §2.6.1 不含该 opcode；`0x0875` 是 `sprmCFNoProof`。旧别名 N/A。 |
+| sprmSDopLayoutUnix | 当前 §2.6.4 无此名称；属于文档级兼容设置而非 SEPX sprm。旧别名 N/A。 |
+| sprmSFTextFlow `0x3615` | `0x3615` 是表格 `sprmTFAutofit`；节文字方向为 `sprmSTextFlow` (`0x5033`)，已覆盖。旧别名 N/A。 |
+| sprmCFRMark | 当前名称为 `sprmCFRMarkIns` (`0x0801`)；修订标记及 `sprmCFRMarkDel`、`sprmCPropRMark` 完整语义留 M4。 |

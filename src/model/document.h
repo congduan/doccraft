@@ -13,6 +13,14 @@ struct Run {
   std::string hyperlink;
   bool page_field = false;
   std::string font;
+  std::string font_hansi, font_east_asia, font_cs;
+  std::string lang, lang_east_asia, lang_cs;
+  int font_hint = -1;
+  int underline_color = -1, text_effect = -1;
+  bool no_proof = false, rtl = false, complex_script = false;
+  bool web_hidden = false, spec_vanish = false, snap_to_grid = false;
+  bool no_proof_set = false, rtl_set = false, complex_script_set = false;
+  bool web_hidden_set = false, spec_vanish_set = false, snap_to_grid_set = false;
   int size = 0;
   int size_cs = 0, kern = -1, position = 0;
   bool position_set = false;
@@ -36,6 +44,9 @@ struct Run {
   bool color_rgb = false;
   int symbol_character = -1;
   std::string symbol_font;
+  int object_offset = -1;
+  bool binary_data = false, ole_object = false, embedded_object = false;
+  bool revision_insert = false, revision_delete = false, property_revision = false;
   int style = -1;
 };
 struct TabStop { int position = 0, align = 0, leader = 0; };
@@ -74,6 +85,8 @@ struct Section {
   bool first_page_different = false, odd_even_different = false;
   int columns = 1, column_space = -1;
   bool columns_even = true;
+  bool columns_separator = false, bidi = false, rtl_gutter = false;
+  int vertical_justify = -1;
   int page_start = -1, page_format = -1;
   bool page_restart = false;
   int grid_line_pitch = -1, grid_mode = -1, text_flow = -1;

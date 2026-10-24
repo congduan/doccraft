@@ -1,4 +1,4 @@
-add_library(doccraft_docx STATIC writer.cc)
+add_library(doccraft_docx STATIC writer.cc writer_run.cc)
 target_include_directories(doccraft_docx PUBLIC ${CMAKE_SOURCE_DIR}/src)
 add_library(doccraft_miniz STATIC ${CMAKE_SOURCE_DIR}/third_party/miniz/miniz.c ${CMAKE_SOURCE_DIR}/third_party/miniz/miniz_zip.c ${CMAKE_SOURCE_DIR}/third_party/miniz/miniz_tdef.c ${CMAKE_SOURCE_DIR}/third_party/miniz/miniz_tinfl.c)
 target_include_directories(doccraft_miniz PUBLIC ${CMAKE_SOURCE_DIR}/third_party/miniz)
