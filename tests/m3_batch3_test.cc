@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
@@ -10,6 +11,7 @@
 #include "doc/format.h"
 #include "docx/writer.h"
 #include "miniz.h"
+#include "pugixml.hpp"
 
 namespace {
 void U16(std::vector<uint8_t>& b,size_t p,uint16_t n){b[p]=n&255;b[p+1]=n>>8;}
@@ -377,5 +379,68 @@ TEST(M3Batch3, RealTableFixturesEmitCellProperties) {
   EXPECT_NE(merged.find("<w:textDirection"),std::string::npos);
   EXPECT_NE(merged.find("<w:tblInd w:w=\"-8\""),std::string::npos);
   EXPECT_NE(FixtureXml("table-shading-basic").find("<w:shd"),std::string::npos);
+}
+TEST(M3Batch3, ShadingPatterns14Through25UseSTShdValues) {
+  constexpr const char* expected[]={"horzStripe","vertStripe","reverseDiagStripe",
+      "diagStripe","horzCross","diagCross","thinHorzStripe","thinVertStripe",
+      "thinReverseDiagStripe","thinDiagStripe","thinHorzCross","thinDiagCross"};
+  doccraft::model::Document d;
+  for(int pattern=14;pattern<=25;pattern++) {
+    doccraft::model::Paragraph p;p.shade=0xffffff;p.shade_fore=0;
+    p.shade_pattern=pattern;d.paragraphs.push_back(p);
+  }
+  pugi::xml_document xml;
+  ASSERT_TRUE(xml.load_string(Xml(d).c_str()));
+  auto p=xml.child("w:document").child("w:body").child("w:p");
+  for(int pattern=14;pattern<=25;pattern++,p=p.next_sibling("w:p")) {
+    ASSERT_TRUE(p) << pattern;
+    EXPECT_STREQ(p.child("w:pPr").child("w:shd").attribute("w:val").value(),
+        expected[pattern-14]) << pattern;
+  }
+}
+TEST(M3Batch3, MergeFixtureRetainsRowWidthsAndGridSpans) {
+  auto source=FixtureXml("table-merge-direction");
+  pugi::xml_document xml;
+  ASSERT_TRUE(xml.load_string(source.c_str()));
+  auto table=xml.child("w:document").child("w:body").child("w:tbl");
+  ASSERT_TRUE(table);
+  size_t grid_count=0;
+  for(auto col:table.child("w:tblGrid").children("w:gridCol")) { (void)col;grid_count++; }
+  ASSERT_EQ(grid_count,3u);
+  size_t row_index=0;
+  for(auto row:table.children("w:tr")) {
+    size_t cell_index=0,span_sum=0;
+    for(auto cell:row.children("w:tc")) {
+      auto pr=cell.child("w:tcPr");
+      auto span=pr.child("w:gridSpan");
+      int span_width=span?span.attribute("w:val").as_int():1;
+      ASSERT_GE(span_width,1);
+      span_sum+=static_cast<size_t>(span_width);
+      if(row_index==0 && cell_index==1) {
+        EXPECT_EQ(pr.child("w:tcW").attribute("w:w").as_int(),6648);
+        EXPECT_EQ(span_width,2);
+      }
+      cell_index++;
+    }
+    EXPECT_EQ(span_sum,grid_count) << row_index;
+    row_index++;
+  }
+  EXPECT_EQ(row_index,2u);
+}
+TEST(M3Batch3, ManySectionBreaksWriteWithinOneSecond) {
+  doccraft::model::Document d;
+  constexpr size_t kParagraphs=52000,kSections=8000;
+  d.paragraphs.resize(kParagraphs);
+  for(size_t i=0;i<kSections;i++)
+    d.section_breaks.emplace_back(i*(kParagraphs/kSections),doccraft::model::Section{});
+  auto start=std::chrono::steady_clock::now();
+  auto output=doccraft::docx::Write(d);
+  auto elapsed=std::chrono::steady_clock::now()-start;
+  ASSERT_TRUE(output.has_value());
+#if defined(__SANITIZE_ADDRESS__)
+  EXPECT_LT(elapsed,std::chrono::seconds(5));
+#else
+  EXPECT_LT(elapsed,std::chrono::seconds(1));
+#endif
 }
 }

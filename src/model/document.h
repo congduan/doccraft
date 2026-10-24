@@ -101,6 +101,7 @@ struct CellProperties {
 };
 struct RowProperties {
   std::vector<CellProperties> cells;
+  std::vector<int> columns;
   bool cant_split = false, header = false;
   int height = 0;
 };

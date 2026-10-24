@@ -200,7 +200,7 @@ bool ApplyTable(model::Table& table,model::RowProperties& row,uint16_t op,Bytes 
     if((v.size()-start)%20)return false;
     for(size_t i=0;i<count && start+20<=v.size();i++,start+=20) {
       auto& c=cells[i];uint16_t flags=U16(v,start);
-      c.width=U16(v,start+2)?U16(v,start+2):-1;
+      c.width=U16(v,start+2)?U16(v,start+2):table.columns[i];
       c.width_type=(flags>>9)&7;
       unsigned horizontal=flags&3;
       c.horizontal_merge=horizontal>=2?2:horizontal;
@@ -785,6 +785,7 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
         }) && valid;
         if(!valid)return std::unexpected(Error{"invalid TAPX operand " + std::to_string(invalid_op)});
         if(properties.cells.empty())properties.cells.resize(row.size());
+        properties.columns=current_table.columns;
         current_table.row_properties.push_back(std::move(properties));
         current_table.rows.push_back(std::move(row));row.clear();para={};
       } else {

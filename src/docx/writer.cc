@@ -1,4 +1,5 @@
 #include "docx/writer.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <map>
@@ -48,7 +49,7 @@ void BorderPr(pugi::xml_node parent,const char* name,const model::Border& b) {
 }
 void ShadePr(pugi::xml_node parent,int back,int fore,int pattern) {
   if(back<0 && fore<0)return;
-  static constexpr const char* patterns[]={"clear","solid","pct5","pct10","pct20","pct25","pct30","pct40","pct50","pct60","pct70","pct75","pct80","pct90","lightHorizontal","lightVertical","lightDown","lightUp","lightGrid","lightTrellis","horzStripe","vertStripe","reverseDiagStripe","diagStripe","horzCross","diagCross"};
+  static constexpr const char* patterns[]={"clear","solid","pct5","pct10","pct20","pct25","pct30","pct40","pct50","pct60","pct70","pct75","pct80","pct90","horzStripe","vertStripe","reverseDiagStripe","diagStripe","horzCross","diagCross","thinHorzStripe","thinVertStripe","thinReverseDiagStripe","thinDiagStripe","thinHorzCross","thinDiagCross"};
   auto shd=parent.append_child("w:shd");
   Attr(shd,"w:val",pattern>=0 && size_t(pattern)<std::size(patterns)?patterns[pattern]:"clear");
   Attr(shd,"w:fill",Color(back));Attr(shd,"w:color",Color(fore));
@@ -309,11 +310,21 @@ std::expected<std::vector<uint8_t>,Error> Write(const model::Document& document)
           Attr(h,"w:hRule",rp->height<0?"exact":"atLeast");
         }
       }
+      size_t grid_index=0;
       for(size_t j=0;j<row.size();j++) {
         auto tc=tr.append_child("w:tc");auto tcp=tc.append_child("w:tcPr");
         const model::CellProperties* cp=rp && j<rp->cells.size()?&rp->cells[j]:nullptr;
-        int cell_width=cp && cp->width>=0?cp->width:j<t.columns.size()?t.columns[j]:-1;
+        int cell_width=cp && cp->width>=0?cp->width:rp && j<rp->columns.size()?rp->columns[j]:j<t.columns.size()?t.columns[j]:-1;
         if(cell_width>=0) {auto cw=tcp.append_child("w:tcW");IntAttr(cw,"w:w",cell_width);Attr(cw,"w:type",cp && cp->width_type==2?"pct":"dxa");}
+        size_t span=1;
+        if(rp && j<rp->columns.size() && grid_index<t.columns.size()) {
+          int width=t.columns[grid_index];
+          while(width<rp->columns[j] && grid_index+span<t.columns.size())
+            width+=t.columns[grid_index+span++];
+          if(width!=rp->columns[j])span=1;
+        }
+        if(span>1)Value(tcp,"w:gridSpan",static_cast<int>(span));
+        grid_index+=span;
         if(cp) {
           bool any_border=false;for(const auto& b:cp->borders)any_border|=b.set;
           if(any_border) {
@@ -349,8 +360,9 @@ std::expected<std::vector<uint8_t>,Error> Write(const model::Document& document)
     }
   };
   auto break_for=[&](size_t index)->const model::Section* {
-    for(const auto& [at,section]:document.section_breaks)if(at==index)return &section;
-    return nullptr;
+    auto it=std::lower_bound(document.section_breaks.begin(),document.section_breaks.end(),index,
+        [](const auto& entry,size_t value){return entry.first<value;});
+    return it!=document.section_breaks.end() && it->first==index?&it->second:nullptr;
   };
   if(document.blocks.empty())for(size_t i=0;i<document.paragraphs.size();i++)
     paragraph(body,document.paragraphs[i],break_for(i));
