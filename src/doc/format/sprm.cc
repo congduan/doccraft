@@ -95,6 +95,8 @@ bool ApplyTable(model::Table& table,model::RowProperties& row,uint16_t op,Bytes 
   }
   if(op==0x3403 || op==0x3466) {row.cant_split=v[0]!=0;return true;}
   if(op==0x3404) {row.header=v[0]!=0;return true;}
+  if(op==0x3619) {table.keep_next=v[0]!=0;return true;}
+  if(op==0x3465) {table.no_overlap=v[0]!=0;return true;}
   if(op==0x9407) {row.height=S16(v,0);return true;}
   if(op==0xF614) {
     if(v.size()!=3 || (v[0]!=0 && v[0]!=2 && v[0]!=3))return false;
@@ -105,7 +107,7 @@ bool ApplyTable(model::Table& table,model::RowProperties& row,uint16_t op,Bytes 
     if(v.size()!=3 || v[0]!=3)return false;
     table.indent=U16(v,1);return true;
   }
-  if(op==0x548A) {
+  if(op==0x5400 || op==0x548A) {
     if(U16(v,0)>2)return false;
     table.align=U16(v,0);return true;
   }
@@ -251,6 +253,7 @@ void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& 
     case 0x0835:flag(r.bold,r.bold_set);break; case 0x0836:flag(r.italic,r.italic_set);break;
     case 0x0837:flag(r.strike,r.strike_set);break; case 0x2A53:flag(r.double_strike,r.double_strike_set);break;
     case 0x083C:flag(r.hidden,r.hidden_set);break;
+    case 0x0802:flag(r.field_hidden,r.field_hidden_set);break;
     case 0x0811:flag(r.web_hidden,r.web_hidden_set);break;
     case 0x0818:flag(r.spec_vanish,r.spec_vanish_set);break;
     case 0x085A:flag(r.rtl,r.rtl_set);break;
@@ -280,6 +283,8 @@ void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& 
     case 0x8840:r.spacing=S16(v,0);r.spacing_set=true;break;
     case 0x4852:r.scale=U16(v,0);r.scale_set=true;break;
     case 0x2A42:r.color=v[0];r.color_rgb=false;break;
+    case 0x4A60:r.color_cs=U16(v,0);break;
+    case 0x4866: {unsigned sh=U16(v,0);r.shade_fore=sh&31;r.shade=(sh>>5)&31;r.shade_pattern=(sh>>10)&63;break;}
     case 0x6870:r.color=U32(v,0);r.color_rgb=true;break;
     case 0x2A0C:r.highlight=v[0];break;
     case 0xCA71:ReadShade(r.shade,r.shade_fore,r.shade_pattern,v);break;
@@ -329,6 +334,22 @@ void ApplyPara(model::Paragraph& p,uint16_t op,Bytes v) {
   if(op==0xC64D) {ReadShade(p.shade,p.shade_fore,p.shade_pattern,v);return;}
   switch(op) {
     case 0x4600:p.style=U16(v,0);break;
+    case 0x240C:p.no_line_number=v[0]!=0;p.no_line_number_set=true;break;
+    case 0x242A:p.suppress_hyphenation=v[0]!=0;p.suppress_hyphenation_set=true;break;
+    case 0x2431:p.widow_control=v[0]!=0;p.widow_control_set=true;break;
+    case 0x2433:p.kinsoku=v[0]!=0;p.kinsoku_set=true;break;
+    case 0x2435:p.overflow_punct=v[0]!=0;p.overflow_punct_set=true;break;
+    case 0x2436:p.top_line_punct=v[0]!=0;p.top_line_punct_set=true;break;
+    case 0x2437:p.auto_space_de=v[0]!=0;p.auto_space_de_set=true;break;
+    case 0x2438:p.auto_space_dn=v[0]!=0;p.auto_space_dn_set=true;break;
+    case 0x2434:p.word_wrap=v[0]!=0;p.word_wrap_set=true;break;
+    case 0x2441:p.bidi=v[0]!=0;p.bidi_set=true;break;
+    case 0x2447:p.snap_to_grid=v[0]!=0;p.snap_to_grid_set=true;break;
+    case 0x2448:p.adjust_right=v[0]!=0;p.adjust_right_set=true;break;
+    case 0x245B:p.before_auto=v[0]!=0;p.before_auto_set=true;break;
+    case 0x245C:p.after_auto=v[0]!=0;p.after_auto_set=true;break;
+    case 0x246D:p.contextual_spacing=v[0]!=0;p.contextual_spacing_set=true;break;
+    case 0x2470:p.mirror_indents=v[0]!=0;p.mirror_indents_set=true;break;
     case 0x2403:case 0x2461:p.align=v[0];break;
     case 0x840F:case 0x845E:p.left=S16(v,0);p.left_set=true;break;
     case 0x840E:case 0x845D:p.right=S16(v,0);p.right_set=true;break;
@@ -348,7 +369,15 @@ void ApplyPara(model::Paragraph& p,uint16_t op,Bytes v) {
   }
 }
 bool ApplySection(model::Section& s,uint16_t op,Bytes v) {
+  if(op>=0x702B && op<=0x702E)return ReadBorder(s.page_borders[op-0x702B],v,true);
+  if(op>=0xD234 && op<=0xD237)return ReadBorder(s.page_borders[op-0xD234],v,false);
   switch(op) {
+    case 0x3000:s.chapter_separator=v[0];break;
+    case 0x3001:s.chapter_heading=v[0];break;
+    case 0x7030:s.grid_char_space=static_cast<int>(U32(v,0));break;
+    case 0x303E:s.endnote_restart=v[0];break;
+    case 0x5041:s.endnote_start=U16(v,0);break;
+    case 0x5042:s.endnote_format=U16(v,0);break;
     case 0x3009:s.break_type=v[0];s.break_specified=true;break;
     case 0x301D:s.orientation=v[0];break;
     case 0x300A:s.first_page_different=v[0]!=0;break;

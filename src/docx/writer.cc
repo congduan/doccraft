@@ -81,10 +81,12 @@ void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=fal
     if(p.first_set && p.first<0)IntAttr(ind,"w:hanging",-p.first);
     else if(p.first_set)IntAttr(ind,"w:firstLine",p.first);
   }
-  if(p.before>=0 || p.after>=0 || p.line) {
+  if(p.before>=0 || p.after>=0 || p.line || p.before_auto_set || p.after_auto_set) {
     auto sp=n.append_child("w:spacing");
     if(p.before>=0)IntAttr(sp,"w:before",p.before);
     if(p.after>=0)IntAttr(sp,"w:after",p.after);
+    if(p.before_auto_set)Attr(sp,"w:beforeAutospacing",p.before_auto?"1":"0");
+    if(p.after_auto_set)Attr(sp,"w:afterAutospacing",p.after_auto?"1":"0");
     if(p.line) {
       if(p.line_auto) {IntAttr(sp,"w:line",p.line);Attr(sp,"w:lineRule","auto");}
       else if(p.line<0) {IntAttr(sp,"w:line",-p.line);Attr(sp,"w:lineRule","exact");}
@@ -94,6 +96,20 @@ void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=fal
   SpecBool(n,"w:keepNext",p.keep_next,p.keep_next_set);
   SpecBool(n,"w:keepLines",p.keep_lines,p.keep_lines_set);
   SpecBool(n,"w:pageBreakBefore",p.page_break_before,p.page_break_before_set);
+  SpecBool(n,"w:widowControl",p.widow_control,p.widow_control_set);
+  SpecBool(n,"w:bidi",p.bidi,p.bidi_set);
+  SpecBool(n,"w:suppressAutoHyphens",p.suppress_hyphenation,p.suppress_hyphenation_set);
+  SpecBool(n,"w:contextualSpacing",p.contextual_spacing,p.contextual_spacing_set);
+  SpecBool(n,"w:mirrorIndents",p.mirror_indents,p.mirror_indents_set);
+  SpecBool(n,"w:snapToGrid",p.snap_to_grid,p.snap_to_grid_set);
+  SpecBool(n,"w:adjustRightInd",p.adjust_right,p.adjust_right_set);
+  SpecBool(n,"w:suppressLineNumbers",p.no_line_number,p.no_line_number_set);
+  SpecBool(n,"w:wordWrap",p.word_wrap,p.word_wrap_set);
+  SpecBool(n,"w:kinsoku",p.kinsoku,p.kinsoku_set);
+  SpecBool(n,"w:overflowPunct",p.overflow_punct,p.overflow_punct_set);
+  SpecBool(n,"w:topLinePunct",p.top_line_punct,p.top_line_punct_set);
+  SpecBool(n,"w:autoSpaceDE",p.auto_space_de,p.auto_space_de_set);
+  SpecBool(n,"w:autoSpaceDN",p.auto_space_dn,p.auto_space_dn_set);
   if(p.outline>=0 && p.outline<=9)Value(n,"w:outlineLvl",p.outline);
   if(!p.tabs.empty()) {
     auto tabs=n.append_child("w:tabs");
@@ -163,11 +179,32 @@ void SectionPr(pugi::xml_node sec,const model::Section& section) {
       const char* formats[]={"decimal","upperRoman","lowerRoman","upperLetter","lowerLetter"};
       Attr(pages,"w:fmt",section.page_format<5?formats[section.page_format]:"decimal");
     }
+    if(section.chapter_heading>=0)IntAttr(pages,"w:chapStyle",section.chapter_heading);
+    if(section.chapter_separator>=0) {
+      const char* separators[]={"hyphen","period","colon","emDash","enDash"};
+      Attr(pages,"w:chapSep",section.chapter_separator<5?separators[section.chapter_separator]:"hyphen");
+    }
+  }
+  if(section.chapter_heading>=0 || section.chapter_separator>=0) {
+    auto pages=sec.child("w:pgNumType");
+    if(!pages)pages=sec.append_child("w:pgNumType");
+    if(section.chapter_heading>=0 && !pages.attribute("w:chapStyle"))IntAttr(pages,"w:chapStyle",section.chapter_heading);
+    if(section.chapter_separator>=0 && !pages.attribute("w:chapSep")) {
+      const char* separators[]={"hyphen","period","colon","emDash","enDash"};
+      Attr(pages,"w:chapSep",section.chapter_separator<5?separators[section.chapter_separator]:"hyphen");
+    }
   }
   if(section.grid_mode>0 || section.grid_line_pitch>0) {
     auto grid=sec.append_child("w:docGrid");
     if(section.grid_mode>0)Attr(grid,"w:type",section.grid_mode==2?"lines":section.grid_mode==3?"snapToChars":"linesAndChars");
     if(section.grid_line_pitch>0)IntAttr(grid,"w:linePitch",section.grid_line_pitch);
+    if(section.grid_char_space>=0)IntAttr(grid,"w:charSpace",section.grid_char_space);
+  }
+  bool has_page_border=false;for(const auto& b:section.page_borders)has_page_border|=b.set;
+  if(has_page_border) {
+    auto borders=sec.append_child("w:pgBorders");
+    const char* sides[]={"w:top","w:left","w:bottom","w:right"};
+    for(size_t i=0;i<4;i++)BorderPr(borders,sides[i],section.page_borders[i]);
   }
   if(section.text_flow>=0) {
     const char* directions[]={"lrTb","tbRl","btLr","tbRl","lrTb","tbRl"};
@@ -192,6 +229,18 @@ void SectionPr(pugi::xml_node sec,const model::Section& section) {
     if(section.footnote_format>=0) {
       const char* format[]={"decimal","upperRoman","lowerRoman","upperLetter","lowerLetter"};
       Attr(note.append_child("w:numFmt"),"w:val",section.footnote_format<5?format[section.footnote_format]:"decimal");
+    }
+  }
+  if(section.endnote_restart>=0 || section.endnote_start>=0 || section.endnote_format>=0) {
+    auto note=sec.append_child("w:endnotePr");
+    if(section.endnote_restart>=0) {
+      const char* restart[]={"continuous","eachSect","eachPage"};
+      Attr(note.append_child("w:numRestart"),"w:val",section.endnote_restart<3?restart[section.endnote_restart]:"continuous");
+    }
+    if(section.endnote_start>0)Value(note,"w:numStart",section.endnote_start);
+    if(section.endnote_format>=0) {
+      const char* format[]={"decimal","upperRoman","lowerRoman","upperLetter","lowerLetter"};
+      Attr(note.append_child("w:numFmt"),"w:val",section.endnote_format<5?format[section.endnote_format]:"decimal");
     }
   }
 }
@@ -248,6 +297,7 @@ std::expected<std::vector<uint8_t>,Error> Write(const model::Document& document)
       Attr(pr.append_child("w:jc"),"w:val",t.align<3?aligns[t.align]:"left");
     }
     if(t.bidi)One(pr,"w:bidiVisual");
+    if(t.no_overlap)Attr(pr.append_child("w:tblOverlap"),"w:val","never");
     ShadePr(pr,t.shade,t.shade_fore,t.shade_pattern);
     bool any_table_border=false;for(const auto& b:t.borders)any_table_border|=b.set;
     if(any_table_border) {

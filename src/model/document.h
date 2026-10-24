@@ -19,6 +19,8 @@ struct Run {
   int underline_color = -1, text_effect = -1;
   bool no_proof = false, rtl = false, complex_script = false;
   bool web_hidden = false, spec_vanish = false, snap_to_grid = false;
+  bool field_hidden = false, field_hidden_set = false;
+  int color_cs = -1;
   bool no_proof_set = false, rtl_set = false, complex_script_set = false;
   bool web_hidden_set = false, spec_vanish_set = false, snap_to_grid_set = false;
   int size = 0;
@@ -57,6 +59,21 @@ struct Paragraph {
   bool left_set = false, right_set = false, first_set = false;
   int before = -1, after = -1, line = 0;
   bool line_auto = false;
+  bool widow_control = true, widow_control_set = false;
+  bool bidi = false, bidi_set = false;
+  bool suppress_hyphenation = false, suppress_hyphenation_set = false;
+  bool before_auto = false, after_auto = false, contextual_spacing = false;
+  bool before_auto_set = false, after_auto_set = false, contextual_spacing_set = false;
+  bool mirror_indents = false, mirror_indents_set = false;
+  bool snap_to_grid = false, snap_to_grid_set = false;
+  bool adjust_right = false, adjust_right_set = false;
+  bool no_line_number = false, no_line_number_set = false;
+  bool word_wrap = false, word_wrap_set = false;
+  bool kinsoku = false, kinsoku_set = false;
+  bool overflow_punct = false, overflow_punct_set = false;
+  bool top_line_punct = false, top_line_punct_set = false;
+  bool auto_space_de = false, auto_space_de_set = false;
+  bool auto_space_dn = false, auto_space_dn_set = false;
   bool keep_next = false, keep_lines = false, page_break_before = false;
   bool keep_next_set = false, keep_lines_set = false, page_break_before_set = false;
   int outline = -1, list_id = -1, list_level = 0;
@@ -92,6 +109,9 @@ struct Section {
   int grid_line_pitch = -1, grid_mode = -1, text_flow = -1;
   int line_count_by = 0, line_restart = 0, line_start = 0, line_distance = -1;
   int footnote_position = -1, footnote_restart = -1, footnote_start = -1, footnote_format = -1;
+  int endnote_restart = -1, endnote_start = -1, endnote_format = -1;
+  int chapter_separator = -1, chapter_heading = -1, grid_char_space = -1;
+  std::array<Border,4> page_borders;
   std::array<std::vector<Paragraph>,6> headers;
 };
 struct ListLevel {
@@ -127,7 +147,7 @@ struct Table {
   bool auto_fit = false;
   int indent = -1, align = -1;
   int cell_spacing = -1, left_origin = -1, gap_half = 0;
-  bool bidi = false;
+  bool bidi = false, keep_next = false, no_overlap = false;
   int shade = -1, shade_fore = -1, shade_pattern = 0;
 };
 struct Block {
