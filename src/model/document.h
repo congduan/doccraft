@@ -1,10 +1,13 @@
 #ifndef DOCCRAFT_MODEL_DOCUMENT_H_
 #define DOCCRAFT_MODEL_DOCUMENT_H_
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 namespace doccraft::model {
+struct Border { bool set = false; int type = 0, width = 0, space = 0, color = -1; bool shadow = false, frame = false; };
 struct Run {
   std::string text;
   std::string hyperlink;
@@ -15,16 +18,21 @@ struct Run {
   bool hidden = false;
   bool bold_set = false, italic_set = false, strike_set = false;
   bool double_strike_set = false, hidden_set = false;
+  bool shadow = false, emboss = false, imprint = false, outline = false;
+  bool small_caps = false, caps = false;
+  bool shadow_set = false, emboss_set = false, imprint_set = false;
+  bool outline_set = false, small_caps_set = false, caps_set = false;
   int underline = 0, super_sub = 0, spacing = 0, scale = 0;
   bool underline_set = false, super_sub_set = false, spacing_set = false;
   bool scale_set = false;
   int color = -1, highlight = -1;
   int shade = -1;
+  int shade_fore = -1, shade_pattern = 0;
+  Border border;
   bool color_rgb = false;
   int style = -1;
 };
 struct TabStop { int position = 0, align = 0, leader = 0; };
-struct Border { bool set = false; int type = 0, width = 0, space = 0, color = -1; };
 struct Paragraph {
   std::vector<Run> runs;
   int style = -1;
@@ -37,7 +45,9 @@ struct Paragraph {
   int outline = -1, list_id = -1, list_level = 0;
   std::vector<TabStop> tabs;
   std::array<Border,4> borders;
+  std::array<Border,3> extra_borders;
   int shade = -1;
+  int shade_fore = -1, shade_pattern = 0;
 };
 struct Style {
   std::string name;
@@ -55,6 +65,8 @@ struct Section {
   bool break_specified = false;
   int header_distance = -1, footer_distance = -1;
   bool first_page_different = false, odd_even_different = false;
+  int line_count_by = 0, line_restart = 0, line_start = 0, line_distance = -1;
+  int footnote_position = -1, footnote_restart = -1, footnote_start = -1, footnote_format = -1;
   std::array<std::vector<Paragraph>,6> headers;
 };
 struct ListLevel {
@@ -78,6 +90,7 @@ struct Document {
   std::vector<Paragraph> paragraphs;
   std::vector<Style> styles;
   Section section;
+  std::vector<std::pair<size_t,Section>> section_breaks;
   std::vector<std::string> fonts;
   std::vector<List> lists;
   std::vector<int> list_overrides;

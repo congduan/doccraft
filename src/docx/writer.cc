@@ -26,6 +26,33 @@ std::string Color(int rgb) {
   char out[7];std::snprintf(out,sizeof(out),"%02X%02X%02X",rgb&255,(rgb>>8)&255,(rgb>>16)&255);
   return out;
 }
+const char* BorderType(int type) {
+  switch(type) {
+    case 0:return "nil";case 1:return "single";case 2:return "thick";
+    case 3:return "double";case 5:return "hairline";case 6:return "dotted";
+    case 7:return "dashed";case 8:return "dotDash";case 9:return "dotDotDash";
+    case 10:return "triple";case 20:return "wave";case 21:return "doubleWave";
+    case 22:return "dashSmallGap";case 24:return "threeDEmboss";case 25:return "threeDEngrave";
+    default:return "single";
+  }
+}
+void BorderPr(pugi::xml_node parent,const char* name,const model::Border& b) {
+  if(!b.set)return;
+  auto side=parent.append_child(name);Attr(side,"w:val",BorderType(b.type));
+  if(b.type) {
+    IntAttr(side,"w:sz",b.width<2?2:b.width);
+    Attr(side,"w:color",Color(b.color));IntAttr(side,"w:space",b.space);
+    if(b.shadow)Attr(side,"w:shadow","1");
+    if(b.frame)Attr(side,"w:frame","1");
+  }
+}
+void ShadePr(pugi::xml_node parent,int back,int fore,int pattern) {
+  if(back<0 && fore<0)return;
+  static constexpr const char* patterns[]={"clear","solid","pct5","pct10","pct20","pct25","pct30","pct40","pct50","pct60","pct70","pct75","pct80","pct90","lightHorizontal","lightVertical","lightDown","lightUp","lightGrid","lightTrellis","horzStripe","vertStripe","reverseDiagStripe","diagStripe","horzCross","diagCross"};
+  auto shd=parent.append_child("w:shd");
+  Attr(shd,"w:val",pattern>=0 && size_t(pattern)<std::size(patterns)?patterns[pattern]:"clear");
+  Attr(shd,"w:fill",Color(back));Attr(shd,"w:color",Color(fore));
+}
 void RunPr(pugi::xml_node parent,const model::Run& r) {
   pugi::xml_node n=parent.append_child("w:rPr");
   if(r.style>=0)Attr(n.append_child("w:rStyle"),"w:val",Id(r.style));
@@ -35,9 +62,22 @@ void RunPr(pugi::xml_node parent,const model::Run& r) {
   SpecBool(n,"w:strike",r.strike,r.strike_set);
   SpecBool(n,"w:dstrike",r.double_strike,r.double_strike_set);
   SpecBool(n,"w:vanish",r.hidden,r.hidden_set);
+  SpecBool(n,"w:shadow",r.shadow,r.shadow_set);SpecBool(n,"w:emboss",r.emboss,r.emboss_set);
+  SpecBool(n,"w:imprint",r.imprint,r.imprint_set);SpecBool(n,"w:outline",r.outline,r.outline_set);
+  SpecBool(n,"w:smallCaps",r.small_caps,r.small_caps_set);SpecBool(n,"w:caps",r.caps,r.caps_set);
   if(r.underline_set) {
-    const char* kinds[]={"none","single","words","double","dotted","hidden","thick","dash","dotDash","dotDotDash","wave"};
-    auto u=n.append_child("w:u");Attr(u,"w:val",r.underline<11?kinds[r.underline]:"single");
+    const char* kind="single";
+    switch(r.underline) {
+      case 0:kind="none";break;case 1:kind="single";break;case 2:kind="words";break;
+      case 3:kind="double";break;case 4:kind="dotted";break;case 6:kind="thick";break;
+      case 7:kind="dash";break;case 9:kind="dotDash";break;case 10:kind="dotDotDash";break;
+      case 11:kind="wave";break;case 0x14:kind="dottedHeavy";break;
+      case 0x17:kind="dashedHeavy";break;case 0x19:kind="dotDashHeavy";break;
+      case 0x1A:kind="dotDotDashHeavy";break;case 0x1B:kind="wavyHeavy";break;
+      case 0x27:kind="dashLong";break;case 0x2B:kind="wavyDouble";break;
+      case 0x37:kind="dashLongHeavy";break;
+    }
+    auto u=n.append_child("w:u");Attr(u,"w:val",kind);
   }
   if(r.super_sub_set)Attr(n.append_child("w:vertAlign"),"w:val",r.super_sub==1?"superscript":r.super_sub==2?"subscript":"baseline");
   if(r.spacing_set)IntAttr(n.append_child("w:spacing"),"w:val",r.spacing);
@@ -50,9 +90,8 @@ void RunPr(pugi::xml_node parent,const model::Run& r) {
     constexpr const char* colors[]={"none","black","blue","cyan","green","magenta","red","yellow","white","darkBlue","darkCyan","darkGreen","darkMagenta","darkRed","darkYellow","darkGray"};
     Attr(n.append_child("w:highlight"),"w:val",r.highlight<16?colors[r.highlight]:"none");
   }
-  if(r.shade>=0) {
-    auto shd=n.append_child("w:shd");Attr(shd,"w:fill",Color(r.shade));Attr(shd,"w:val","clear");
-  }
+  ShadePr(n,r.shade,r.shade_fore,r.shade_pattern);
+  BorderPr(n,"w:bdr",r.border);
 }
 void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=false) {
   auto n=parent.append_child("w:pPr");
@@ -94,17 +133,15 @@ void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=fal
     }
   }
   bool has_border=false;for(const auto& b:p.borders)has_border|=b.set;
+  for(const auto& b:p.extra_borders)has_border|=b.set;
   if(has_border) {
     auto bd=n.append_child("w:pBdr");
     const char* sides[]={"w:top","w:left","w:bottom","w:right"};
-    for(size_t i=0;i<4;i++)if(p.borders[i].set) {
-      const auto& b=p.borders[i];auto side=bd.append_child(sides[i]);
-      const char* types[]={"nil","single","thick","double","dotted","dashed","dotDash","dotDotDash"};
-      Attr(side,"w:val",b.type<8?types[b.type]:"single");
-      if(b.type) {IntAttr(side,"w:sz",b.width<2?2:b.width);Attr(side,"w:color",Color(b.color));IntAttr(side,"w:space",b.space);}
-    }
+    for(size_t i=0;i<4;i++)BorderPr(bd,sides[i],p.borders[i]);
+    BorderPr(bd,"w:between",p.extra_borders[0]);
+    BorderPr(bd,"w:bar",p.extra_borders[1]);
   }
-  if(p.shade>=0 && (static_cast<uint32_t>(p.shade)>>24)!=0xff)Attr(n.append_child("w:shd"),"w:fill",Color(p.shade));
+  ShadePr(n,p.shade,p.shade_fore,p.shade_pattern);
   if(p.list_id>0) {auto num=n.append_child("w:numPr");Value(num,"w:ilvl",p.list_level);Value(num,"w:numId",p.list_id);}
 }
 void Text(pugi::xml_node run,std::string_view text) {
@@ -119,6 +156,41 @@ void Text(pugi::xml_node run,std::string_view text) {
   }
   flush();
 }
+void SectionPr(pugi::xml_node sec,const model::Section& section) {
+  if(section.break_specified) {
+    const char* types[]={"continuous","nextColumn","nextPage","evenPage","oddPage"};
+    Attr(sec.append_child("w:type"),"w:val",section.break_type<5?types[section.break_type]:"nextPage");
+  }
+  auto size=sec.append_child("w:pgSz");IntAttr(size,"w:w",section.width);IntAttr(size,"w:h",section.height);
+  if(section.orientation || section.width>section.height)Attr(size,"w:orient","landscape");
+  auto mar=sec.append_child("w:pgMar");
+  IntAttr(mar,"w:left",section.left);IntAttr(mar,"w:right",section.right);
+  IntAttr(mar,"w:top",section.top);IntAttr(mar,"w:bottom",section.bottom);
+  if(section.gutter)IntAttr(mar,"w:gutter",section.gutter);
+  if(section.header_distance>=0)IntAttr(mar,"w:header",section.header_distance);
+  if(section.footer_distance>=0)IntAttr(mar,"w:footer",section.footer_distance);
+  if(section.line_count_by>0) {
+    auto line=sec.append_child("w:lnNumType");
+    IntAttr(line,"w:countBy",section.line_count_by);
+    if(section.line_start)IntAttr(line,"w:start",section.line_start+1);
+    if(section.line_distance>=0)IntAttr(line,"w:distance",section.line_distance);
+    const char* restart[]={"newPage","newSection","continuous"};
+    Attr(line,"w:restart",section.line_restart<3?restart[section.line_restart]:"newPage");
+  }
+  if(section.footnote_position>=0 || section.footnote_restart>=0 || section.footnote_start>=0 || section.footnote_format>=0) {
+    auto note=sec.append_child("w:footnotePr");
+    if(section.footnote_position>=0)Attr(note.append_child("w:pos"),"w:val",section.footnote_position==2?"beneathText":"pageBottom");
+    if(section.footnote_restart>=0) {
+      const char* restart[]={"continuous","eachSect","eachPage"};
+      Attr(note.append_child("w:numRestart"),"w:val",section.footnote_restart<3?restart[section.footnote_restart]:"continuous");
+    }
+    if(section.footnote_start>0)Value(note,"w:numStart",section.footnote_start);
+    if(section.footnote_format>=0) {
+      const char* format[]={"decimal","upperRoman","lowerRoman","upperLetter","lowerLetter"};
+      Attr(note.append_child("w:numFmt"),"w:val",section.footnote_format<5?format[section.footnote_format]:"decimal");
+    }
+  }
+}
 std::string Save(const pugi::xml_document& d) {std::ostringstream out;d.save(out,"",pugi::format_raw,pugi::encoding_utf8);return out.str();}
 }
 uint32_t Crc32(std::string_view bytes) {return mz_crc32(0,reinterpret_cast<const unsigned char*>(bytes.data()),bytes.size());}
@@ -128,8 +200,9 @@ std::expected<std::vector<uint8_t>,Error> Write(const model::Document& document)
   Attr(root,"xmlns:r","http://schemas.openxmlformats.org/officeDocument/2006/relationships");
   auto body=root.append_child("w:body");
   std::map<std::string,int> hyperlinks;
-  auto paragraph=[&](pugi::xml_node parent,const model::Paragraph& p) {
+  auto paragraph=[&](pugi::xml_node parent,const model::Paragraph& p,const model::Section* break_section=nullptr) {
     auto pn=parent.append_child("w:p");ParaPr(pn,p);
+    if(break_section)SectionPr(pn.child("w:pPr").append_child("w:sectPr"),*break_section);
     for(const auto& r:p.runs) {
       pugi::xml_node owner=pn;
       if(!r.hyperlink.empty()) {
@@ -161,25 +234,18 @@ std::expected<std::vector<uint8_t>,Error> Write(const model::Document& document)
       }
     }
   };
-  if(document.blocks.empty())for(const auto& p:document.paragraphs)paragraph(body,p);
+  auto break_for=[&](size_t index)->const model::Section* {
+    for(const auto& [at,section]:document.section_breaks)if(at==index)return &section;
+    return nullptr;
+  };
+  if(document.blocks.empty())for(size_t i=0;i<document.paragraphs.size();i++)
+    paragraph(body,document.paragraphs[i],break_for(i));
   else for(const auto& b:document.blocks) {
     if(b.table && b.index<document.tables.size())table(document.tables[b.index]);
-    else if(!b.table && b.index<document.paragraphs.size())paragraph(body,document.paragraphs[b.index]);
+    else if(!b.table && b.index<document.paragraphs.size())paragraph(body,document.paragraphs[b.index],break_for(b.index));
   }
   auto sec=body.append_child("w:sectPr");
-  if(document.section.break_specified) {
-    const char* types[]={"continuous","nextColumn","nextPage","evenPage","oddPage"};
-    Attr(sec.append_child("w:type"),"w:val",document.section.break_type<5?types[document.section.break_type]:"nextPage");
-  }
-  auto size=sec.append_child("w:pgSz");IntAttr(size,"w:w",document.section.width);IntAttr(size,"w:h",document.section.height);
-  if(document.section.orientation || document.section.width>document.section.height)
-    Attr(size,"w:orient","landscape");
-  auto mar=sec.append_child("w:pgMar");
-  IntAttr(mar,"w:left",document.section.left);IntAttr(mar,"w:right",document.section.right);
-  IntAttr(mar,"w:top",document.section.top);IntAttr(mar,"w:bottom",document.section.bottom);
-  if(document.section.gutter)IntAttr(mar,"w:gutter",document.section.gutter);
-  if(document.section.header_distance>=0)IntAttr(mar,"w:header",document.section.header_distance);
-  if(document.section.footer_distance>=0)IntAttr(mar,"w:footer",document.section.footer_distance);
+  SectionPr(sec,document.section);
   std::vector<std::pair<std::string,std::string>> header_parts;
   for(size_t i=0;i<6;i++)if(!document.section.headers[i].empty()) {
     bool is_header=i==0 || i==1 || i==4;

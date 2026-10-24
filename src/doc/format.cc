@@ -146,12 +146,32 @@ template<class F> void WalkParagraph(Bytes b,Bytes data,F fn,int depth=0) {
   });
 }
 bool Toggle(bool old,uint8_t v) { return v==0x80?old:v==0x81?!old:v!=0; }
+bool ReadBorder(model::Border& b,Bytes v,bool old) {
+  size_t start=old?0:1;
+  if(v.size()!=(old?4u:9u) || (!old && v[0]!=8))return false;
+  b.set=true;b.color=old?-1:static_cast<int>(U32(v,start));
+  b.width=v[start+(old?0:4)];b.type=v[start+(old?1:5)];
+  uint8_t flags=v[start+(old?3:6)];b.space=flags&31;
+  b.shadow=(flags&32)!=0;b.frame=(flags&64)!=0;
+  return true;
+}
+bool ReadShade(int& back,int& fore,int& pattern,Bytes v) {
+  if(v.size()!=11 || v[0]!=10)return false;
+  fore=static_cast<int>(U32(v,1));back=static_cast<int>(U32(v,5));pattern=U16(v,9);
+  return true;
+}
 void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& fonts) {
   auto flag=[&](bool& x,bool& set){ x=Toggle(x,v[0]);set=true; };
   switch(op) {
     case 0x0835:flag(r.bold,r.bold_set);break; case 0x0836:flag(r.italic,r.italic_set);break;
     case 0x0837:flag(r.strike,r.strike_set);break; case 0x2A53:flag(r.double_strike,r.double_strike_set);break;
     case 0x083C:flag(r.hidden,r.hidden_set);break;
+    case 0x0838:flag(r.outline,r.outline_set);break;
+    case 0x0839:flag(r.shadow,r.shadow_set);break;
+    case 0x083A:flag(r.small_caps,r.small_caps_set);break;
+    case 0x083B:flag(r.caps,r.caps_set);break;
+    case 0x0854:flag(r.imprint,r.imprint_set);break;
+    case 0x0858:flag(r.emboss,r.emboss_set);break;
     case 0x2A3E:r.underline=v[0];r.underline_set=true;break;
     case 0x4A43:r.size=U16(v,0);break;
     case 0x2A48:r.super_sub=v[0];r.super_sub_set=true;break;
@@ -160,7 +180,9 @@ void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& 
     case 0x2A42:r.color=v[0];r.color_rgb=false;break;
     case 0x6870:r.color=U32(v,0);r.color_rgb=true;break;
     case 0x2A0C:r.highlight=v[0];break;
-    case 0xCA71:if(v.size()>=11 && v[0]==10)r.shade=U32(v,5);break;
+    case 0xCA71:ReadShade(r.shade,r.shade_fore,r.shade_pattern,v);break;
+    case 0x6865:ReadBorder(r.border,v,true);break;
+    case 0xCA72:ReadBorder(r.border,v,false);break;
     case 0x4A30:r.style=U16(v,0);break;
     case 0x4A4F: {
       unsigned n=U16(v,0);if(n<fonts.size()) r.font=fonts[n];break;
@@ -182,14 +204,15 @@ void ApplyPara(model::Paragraph& p,uint16_t op,Bytes v) {
     }
     return;
   }
-  if(op>=0xC64E && op<=0xC651 && v.size()>=9 && v[0]==8) {
-    auto& b=p.borders[op-0xC64E];b.set=true;b.color=U32(v,1);
-    b.width=v[5];b.type=v[6];b.space=v[7]&31;return;
+  if(op>=0xC64E && op<=0xC653) {
+    size_t i=op-0xC64E;
+    ReadBorder(i<4?p.borders[i]:p.extra_borders[i-4],v,false);return;
   }
-  if(op>=0x6424 && op<=0x6427 && v.size()==4) {
-    auto& b=p.borders[op-0x6424];b.set=true;b.width=v[0];b.type=v[1];b.color=-1;b.space=v[3]&31;return;
+  if((op>=0x6424 && op<=0x6428) || op==0x6629) {
+    size_t i=op==0x6629?5:op-0x6424;
+    ReadBorder(i<4?p.borders[i]:p.extra_borders[i-4],v,true);return;
   }
-  if(op==0xC64D && v.size()>=11 && v[0]==10) {p.shade=U32(v,5);return;}
+  if(op==0xC64D) {ReadShade(p.shade,p.shade_fore,p.shade_pattern,v);return;}
   switch(op) {
     case 0x4600:p.style=U16(v,0);break;
     case 0x2403:case 0x2461:p.align=v[0];break;
@@ -213,6 +236,14 @@ void ApplySection(model::Section& s,uint16_t op,Bytes v) {
     case 0x3009:s.break_type=v[0];s.break_specified=true;break;
     case 0x301D:s.orientation=v[0];break;
     case 0x300A:s.first_page_different=v[0]!=0;break;
+    case 0x3013:s.line_restart=v[0];break;
+    case 0x5015:s.line_count_by=U16(v,0);break;
+    case 0x9016:s.line_distance=U16(v,0);break;
+    case 0x501B:s.line_start=U16(v,0);break;
+    case 0x303B:s.footnote_position=v[0];break;
+    case 0x303C:s.footnote_restart=v[0];break;
+    case 0x503F:s.footnote_start=U16(v,0);break;
+    case 0x5040:s.footnote_format=U16(v,0);break;
     case 0xB017:s.header_distance=U16(v,0);break;
     case 0xB018:s.footer_distance=U16(v,0);break;
     case 0xB01F:s.width=U16(v,0);break;case 0xB020:s.height=U16(v,0);break;
@@ -273,6 +304,12 @@ std::vector<model::Style> ReadStyles(Bytes table,Fib::Range r,const std::vector<
     if(src.strike_set){dst.strike=src.strike;dst.strike_set=true;}
     if(src.double_strike_set){dst.double_strike=src.double_strike;dst.double_strike_set=true;}
     if(src.hidden_set){dst.hidden=src.hidden;dst.hidden_set=true;}
+    if(src.shadow_set){dst.shadow=src.shadow;dst.shadow_set=true;}
+    if(src.emboss_set){dst.emboss=src.emboss;dst.emboss_set=true;}
+    if(src.imprint_set){dst.imprint=src.imprint;dst.imprint_set=true;}
+    if(src.outline_set){dst.outline=src.outline;dst.outline_set=true;}
+    if(src.small_caps_set){dst.small_caps=src.small_caps;dst.small_caps_set=true;}
+    if(src.caps_set){dst.caps=src.caps;dst.caps_set=true;}
     if(src.underline_set){dst.underline=src.underline;dst.underline_set=true;}
     if(src.super_sub_set){dst.super_sub=src.super_sub;dst.super_sub_set=true;}
     if(src.spacing_set){dst.spacing=src.spacing;dst.spacing_set=true;}
@@ -280,6 +317,9 @@ std::vector<model::Style> ReadStyles(Bytes table,Fib::Range r,const std::vector<
     if(src.color>=0){dst.color=src.color;dst.color_rgb=src.color_rgb;}
     if(src.highlight>=0)dst.highlight=src.highlight;
     if(src.shade>=0)dst.shade=src.shade;
+    if(src.shade_fore>=0)dst.shade_fore=src.shade_fore;
+    if(src.shade>=0 || src.shade_fore>=0)dst.shade_pattern=src.shade_pattern;
+    if(src.border.set)dst.border=src.border;
   };
   auto overlay_para=[](model::Paragraph& dst,const model::Paragraph& src) {
     if(src.align>=0)dst.align=src.align;
@@ -296,7 +336,10 @@ std::vector<model::Style> ReadStyles(Bytes table,Fib::Range r,const std::vector<
     if(src.list_id>=0){dst.list_id=src.list_id;dst.list_level=src.list_level;}
     if(!src.tabs.empty())dst.tabs=src.tabs;
     for(size_t k=0;k<4;k++)if(src.borders[k].set)dst.borders[k]=src.borders[k];
+    for(size_t k=0;k<3;k++)if(src.extra_borders[k].set)dst.extra_borders[k]=src.extra_borders[k];
     if(src.shade>=0)dst.shade=src.shade;
+    if(src.shade_fore>=0)dst.shade_fore=src.shade_fore;
+    if(src.shade>=0 || src.shade_fore>=0)dst.shade_pattern=src.shade_pattern;
   };
   std::vector<uint8_t> state(out.size());
   std::function<void(size_t)> resolve=[&](size_t i) {
@@ -381,8 +424,11 @@ model::Run InheritedRun(const model::Document& doc,int style) {
     value.font.clear();value.size=0;value.underline_set=false;
     value.super_sub_set=false;value.spacing_set=false;value.scale_set=false;
     value.color=-1;value.highlight=-1;value.shade=-1;
+    value.shade_fore=-1;value.border={};
     value.bold_set=value.italic_set=value.strike_set=false;
     value.double_strike_set=value.hidden_set=false;
+    value.shadow_set=value.emboss_set=value.imprint_set=false;
+    value.outline_set=value.small_caps_set=value.caps_set=false;
     return value;
   }
   return {};
@@ -436,13 +482,29 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
   auto papx=ReadFkps(word,table,fib.papx_bte,true);if(!papx)return std::unexpected(papx.error());
   model::Document doc;doc.fonts=ReadFonts(table,fib.fonts);doc.styles=ReadStyles(table,fib.stsh,doc.fonts);
   ReadLists(doc,table,fib);
-  if(fib.sed.size && Valid(table,fib.sed) && fib.sed.size>=16) {
+  std::vector<std::pair<uint32_t,model::Section>> sections;
+  if(fib.sed.size) {
+    if(!Valid(table,fib.sed) || fib.sed.size<20 || (fib.sed.size-4)%16)
+      return std::unexpected(Error{"invalid SED PLC"});
     Bytes b=table.subspan(fib.sed.offset,fib.sed.size);size_t n=(b.size()-4)/16;
-    if(n) {size_t pos=4*(n+1);if(pos+6<=b.size()) {uint32_t fc=U32(b,pos+2);
-      if(fc<word.size() && word.size()-fc>=2) {size_t len=U16(word,fc);
-        if(len<=word.size()-fc-2) Walk(word.subspan(fc+2,len),[&](uint16_t op,Bytes v){ApplySection(doc.section,op,v);});
+    uint32_t previous=0;
+    for(size_t i=0;i<n;i++) {
+      uint32_t end=U32(b,4*(i+1));
+      if(end<=previous)return std::unexpected(Error{"invalid section CP order"});
+      previous=end;
+      size_t pos=4*(n+1)+12*i;
+      uint32_t fc=U32(b,pos+2);
+      model::Section section;
+      if(fc!=0xffffffffu) {
+        if(fc>word.size() || word.size()-fc<2)return std::unexpected(Error{"SEPX outside WordDocument"});
+        size_t len=U16(word,fc);
+        if(len>word.size()-fc-2)return std::unexpected(Error{"truncated SEPX"});
+        if(!Walk(word.subspan(fc+2,len),[&](uint16_t op,Bytes v){ApplySection(section,op,v);}))
+          return std::unexpected(Error{"invalid SEPX sprm"});
       }
-    }}
+      sections.emplace_back(end,std::move(section));
+    }
+    doc.section=sections.back().second;
   }
   model::Paragraph para;
   model::Table current_table;
@@ -451,6 +513,7 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
   int field_depth=0;
   bool field_instruction=false, page_field=false;
   std::string instruction, hyperlink;
+  size_t next_section=0;
   auto add_paragraph=[&](model::Paragraph value) {
     doc.blocks.push_back({false,doc.paragraphs.size()});
     doc.paragraphs.push_back(std::move(value));
@@ -515,7 +578,15 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
       para={};
       continue;
     }
-    if(ch.text.size()==1 && ch.text[0]=='\x0c') continue;
+    if(ch.text.size()==1 && ch.text[0]=='\x0c') {
+      if(next_section+1<sections.size() && ch.cp+1==sections[next_section].first) {
+        if(pap) {para.style=pap->style;WalkParagraph(pap->sprms,data,[&](uint16_t op,Bytes v){ApplyPara(para,op,v);});}
+        add_paragraph(std::move(para));para={};
+        doc.section_breaks.emplace_back(doc.paragraphs.size()-1,sections[next_section].second);
+        next_section++;
+      }
+      continue;
+    }
     model::Run r;
     r.hyperlink=hyperlink;r.page_field=page_field;
     if(pap)r=InheritedRun(doc,pap->style);
@@ -523,7 +594,7 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
     if(!para.runs.empty()) {
       auto& back=para.runs.back();
       model::Run prior=back;prior.text.clear();
-      if(prior.hyperlink==r.hyperlink && prior.page_field==r.page_field && prior.font==r.font && prior.size==r.size && prior.bold==r.bold && prior.italic==r.italic && prior.strike==r.strike && prior.double_strike==r.double_strike && prior.hidden==r.hidden && prior.bold_set==r.bold_set && prior.italic_set==r.italic_set && prior.strike_set==r.strike_set && prior.double_strike_set==r.double_strike_set && prior.hidden_set==r.hidden_set && prior.underline==r.underline && prior.underline_set==r.underline_set && prior.super_sub==r.super_sub && prior.super_sub_set==r.super_sub_set && prior.spacing==r.spacing && prior.spacing_set==r.spacing_set && prior.scale==r.scale && prior.scale_set==r.scale_set && prior.color==r.color && prior.color_rgb==r.color_rgb && prior.highlight==r.highlight && prior.shade==r.shade && prior.style==r.style) {back.text+=ch.text;continue;}
+      if(prior.hyperlink==r.hyperlink && prior.page_field==r.page_field && prior.font==r.font && prior.size==r.size && prior.bold==r.bold && prior.italic==r.italic && prior.strike==r.strike && prior.double_strike==r.double_strike && prior.hidden==r.hidden && prior.bold_set==r.bold_set && prior.italic_set==r.italic_set && prior.strike_set==r.strike_set && prior.double_strike_set==r.double_strike_set && prior.hidden_set==r.hidden_set && prior.shadow==r.shadow && prior.shadow_set==r.shadow_set && prior.emboss==r.emboss && prior.emboss_set==r.emboss_set && prior.imprint==r.imprint && prior.imprint_set==r.imprint_set && prior.outline==r.outline && prior.outline_set==r.outline_set && prior.small_caps==r.small_caps && prior.small_caps_set==r.small_caps_set && prior.caps==r.caps && prior.caps_set==r.caps_set && prior.underline==r.underline && prior.underline_set==r.underline_set && prior.super_sub==r.super_sub && prior.super_sub_set==r.super_sub_set && prior.spacing==r.spacing && prior.spacing_set==r.spacing_set && prior.scale==r.scale && prior.scale_set==r.scale_set && prior.color==r.color && prior.color_rgb==r.color_rgb && prior.highlight==r.highlight && prior.shade==r.shade && prior.shade_fore==r.shade_fore && prior.shade_pattern==r.shade_pattern && prior.border.set==r.border.set && prior.border.type==r.border.type && prior.border.width==r.border.width && prior.border.space==r.border.space && prior.border.color==r.border.color && prior.border.shadow==r.border.shadow && prior.border.frame==r.border.frame && prior.style==r.style) {back.text+=ch.text;continue;}
     }
     r.text=ch.text;para.runs.push_back(std::move(r));
   }
