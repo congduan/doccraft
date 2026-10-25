@@ -1,0 +1,52 @@
+---
+# Google C++ Style Guide (https://google.github.io/styleguide/cppguide.html)
+# Enforced by `scripts/lint.sh` and the `format` / `format-check` CMake targets.
+Language: Cpp
+BasedOnStyle: Google
+Standard: c++20
+
+# Hard 80-column limit -- the rule most frequently broken in this repo.
+ColumnLimit: 80
+IndentWidth: 2
+TabWidth: 8
+UseTab: Never
+
+# Google keeps the `&`/`*` with the type (`int* p`), never with the variable.
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# Google: a short function body may stay on one line only when it is empty;
+# `if`/`for`/`while` bodies always get their own line.
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Empty
+
+# Prefer one statement per line, but keep short case labels/accessors compact.
+AllowShortCaseLabelsOnASingleLine: false
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+
+# Include order: related header, C system, C++ standard, third-party, project.
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<.*\.h>'
+    Priority: 1
+  - Regex: '^<.*'
+    Priority: 2
+  - Regex: '^"(miniz|pugixml)'
+    Priority: 3
+  - Regex: '.*'
+    Priority: 4
+IncludeIsMainRegex: '(_test)?$'
+
+# Namespaces: no indentation, closing brace always commented.
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+# Comments
+ReflowComments: true
+SpacesBeforeTrailingComments: 2
+...

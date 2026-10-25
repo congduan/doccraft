@@ -32,6 +32,19 @@ ctest --test-dir build
 
 Requirements: C++20 compiler (GCC 12+/Clang 15+), CMake 3.20+.
 
+## Code style
+
+The tree follows the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html),
+enforced by `.clang-format`, `.clang-tidy` and `CPPLINT.cfg`. `third_party/`
+is vendored upstream code and excluded from all checks.
+
+```bash
+cmake --build build --target format-check   # verify formatting (CI gate)
+cmake --build build --target format         # rewrite sources in place
+scripts/lint.sh --cpplint                   # optional cpplint pass
+scripts/lint.sh --tidy                      # optional clang-tidy pass
+```
+
 ## License
 
 Apache-2.0

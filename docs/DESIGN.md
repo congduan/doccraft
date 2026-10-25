@@ -86,9 +86,14 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ## 2. 代码风格与工程规范
 
-- **Google C++ Style Guide**：2 空格缩进、`kConstantName`、`.h/.cc` 后缀、
-  header guard `DOCCRAFT_PATH_FILE_H_`、include 分组
-- C++23，`-Wall -Wextra -Wpedantic -Werror`；clang-format/.clang-tidy 强制
+- **Google C++ Style Guide**，由 `.clang-format` / `.clang-tidy` / `CPPLINT.cfg`
+  强制：2 空格缩进、80 列上限、`kConstantName`、`.h/.cc` 后缀、include 分组
+  （本文件 → C 系统 → C++ 标准库 → third_party → 项目头）
+- header guard 为仓库根相对路径（`SRC_DOCX_WRITER_H_`、`TESTS_CFB_TEST_UTIL_H_`），
+  `#endif` 必须带保护宏注释；源文件首行为 Apache-2.0 版权头
+- include 一律相对仓库根书写（`"docx/writer.h"`、`"third_party/miniz/miniz.h"`）
+- C++23，`-Wall -Wextra -Wpedantic -Werror`；CI 用 `format-check` 目标把关，
+  本地 `scripts/lint.sh [--fix|--cpplint|--tidy]`
 - 测试用 googletest（FetchContent）
 - 命名：`doccraft::cfb`、`doccraft::doc`、`doccraft::model`、`doccraft::docx`
 

@@ -1,0 +1,51 @@
+---
+# Google C++ Style Guide checks for clang-tidy.
+# Advisory by default (see scripts/lint.sh --tidy); run on changed files only.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  google-*,
+  -google-readability-todo,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-emplace,
+  performance-*,
+  -performance-inefficient-string-concatenation,
+  readability-braces-around-statements,
+  readability-const-return-type,
+  readability-container-size-empty,
+  readability-identifier-naming,
+  readability-qualified-auto,
+  readability-redundant-smartptr-get,
+  readability-static-accessed-through-instance
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(src|tests)/.*'
+FormatStyle: file
+
+CheckOptions:
+  # Google naming: types CamelCase, functions CamelCase, variables lower_case,
+  # constants/enumerators kCamelCase, class data members trailing underscore.
+  - { key: readability-identifier-naming.NamespaceCase, value: lower_case }
+  - { key: readability-identifier-naming.ClassCase, value: CamelCase }
+  - { key: readability-identifier-naming.StructCase, value: CamelCase }
+  - { key: readability-identifier-naming.EnumCase, value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantPrefix, value: k }
+  - { key: readability-identifier-naming.UnionCase, value: CamelCase }
+  - { key: readability-identifier-naming.TypedefCase, value: CamelCase }
+  - { key: readability-identifier-naming.TypeAliasCase, value: CamelCase }
+  - { key: readability-identifier-naming.FunctionCase, value: CamelCase }
+  - { key: readability-identifier-naming.ConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.ConstantPrefix, value: k }
+  - { key: readability-identifier-naming.GlobalConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.GlobalConstantPrefix, value: k }
+  - { key: readability-identifier-naming.GlobalVariableCase, value: lower_case }
+  - { key: readability-identifier-naming.LocalVariableCase, value: lower_case }
+  - { key: readability-identifier-naming.ParameterCase, value: lower_case }
+  - { key: readability-identifier-naming.VariableCase, value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberSuffix, value: '_' }
+  - { key: readability-identifier-naming.PublicMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.IgnoreMainLikeFunctions, value: 1 }
+...
