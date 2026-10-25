@@ -7,7 +7,6 @@
 
 namespace doccraft::docx {
 namespace {
-constexpr const char* kW="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 std::string Id(int i) { if(i==0)return "Normal";if(i>0&&i<=9)return "Heading"+std::to_string(i);return "Style"+std::to_string(i); }
 void Attr(pugi::xml_node n,const char* name,const std::string& value) { n.append_attribute(name).set_value(value.c_str()); }
 void IntAttr(pugi::xml_node n,const char* name,int value) { n.append_attribute(name).set_value(value); }
@@ -74,7 +73,8 @@ void RunPr(pugi::xml_node parent,const model::Run& r) {
   if(r.position_set)Value(n,"w:position",r.position);
   SpecBool(n,"w:strike",r.strike,r.strike_set);
   SpecBool(n,"w:dstrike",r.double_strike,r.double_strike_set);
-  SpecBool(n,"w:vanish",r.hidden,r.hidden_set);
+  bool vanish=r.hidden || r.field_hidden;
+  SpecBool(n,"w:vanish",vanish,r.hidden_set || r.field_hidden_set);
   SpecBool(n,"w:webHidden",r.web_hidden,r.web_hidden_set);
   SpecBool(n,"w:specVanish",r.spec_vanish,r.spec_vanish_set);
   SpecBool(n,"w:rtl",r.rtl,r.rtl_set);
@@ -100,6 +100,10 @@ void RunPr(pugi::xml_node parent,const model::Run& r) {
     if(r.underline_color>=0)Attr(u,"w:color",Color(r.underline_color));
   }
   if(r.super_sub_set)Attr(n.append_child("w:vertAlign"),"w:val",r.super_sub==1?"superscript":r.super_sub==2?"subscript":"baseline");
+  if(r.emphasis>=0) {
+    const char* marks[]={"none","dot","comma","circle","underDot"};
+    Attr(n.append_child("w:em"),"w:val",marks[r.emphasis<5?r.emphasis:0]);
+  }
   if(r.spacing_set)IntAttr(n.append_child("w:spacing"),"w:val",r.spacing);
   if(r.scale_set)IntAttr(n.append_child("w:w"),"w:val",r.scale);
   if(r.text_effect>=0) {

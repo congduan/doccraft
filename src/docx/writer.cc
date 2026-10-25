@@ -58,7 +58,9 @@ void ShadePr(pugi::xml_node parent,int back,int fore,int pattern) {
 void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=false) {
   auto n=parent.append_child("w:pPr");
   if(!style_props && p.style>=0)Attr(n.append_child("w:pStyle"),"w:val",Id(p.style));
-  if(p.frame_wrap>=0 || p.frame_anchor>=0) {
+  if(p.frame_wrap>=0 || p.frame_anchor>=0 || p.frame_x>=0 || p.frame_y>=0 ||
+     p.frame_width>=0 || p.frame_height>=0 || p.frame_h_space>=0 ||
+     p.frame_v_space>=0 || p.frame_lock_set) {
     auto frame=n.append_child("w:framePr");
     if(p.frame_wrap>=0) {
       const char* wraps[]={"auto","notBeside","around","none","tight","through"};
@@ -69,14 +71,24 @@ void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=fal
       if(horizontal<3)Attr(frame,"w:hAnchor",horizontal==0?"text":horizontal==1?"margin":"page");
       if(vertical<3)Attr(frame,"w:vAnchor",vertical==0?"margin":vertical==1?"page":"text");
     }
+    if(p.frame_x!=-1)IntAttr(frame,"w:x",p.frame_x);
+    if(p.frame_y!=-1)IntAttr(frame,"w:y",p.frame_y);
+    if(p.frame_width>0)IntAttr(frame,"w:w",p.frame_width);
+    if(p.frame_height>0) {
+      IntAttr(frame,"w:h",p.frame_height);
+      Attr(frame,"w:hRule",p.frame_height_exact?"exact":"atLeast");
+    }
+    if(p.frame_h_space>=0)IntAttr(frame,"w:hSpace",p.frame_h_space);
+    if(p.frame_v_space>=0)IntAttr(frame,"w:vSpace",p.frame_v_space);
+    if(p.frame_lock_set)Attr(frame,"w:lock",p.frame_lock?"1":"0");
   }
   if(p.align>=0) {
     const char* align[]={"left","center","right","both","distribute"};
     Attr(n.append_child("w:jc"),"w:val",p.align<5?align[p.align]:"left");
   }
-  if(p.left_set || p.right_set || p.first_set) {
+  if(p.left_set || p.right_set || p.first_set || p.nest_set) {
     auto ind=n.append_child("w:ind");
-    if(p.left_set)IntAttr(ind,"w:left",p.left);
+    if(p.left_set || p.nest_set)IntAttr(ind,"w:left",(p.left_set?p.left:0)+p.nest);
     if(p.right_set)IntAttr(ind,"w:right",p.right);
     if(p.first_set && p.first<0)IntAttr(ind,"w:hanging",-p.first);
     else if(p.first_set)IntAttr(ind,"w:firstLine",p.first);
@@ -132,7 +144,11 @@ void ParaPr(pugi::xml_node parent,const model::Paragraph& p,bool style_props=fal
     BorderPr(bd,"w:bar",p.extra_borders[1]);
   }
   ShadePr(n,p.shade,p.shade_fore,p.shade_pattern);
-  if(p.list_id>0) {auto num=n.append_child("w:numPr");Value(num,"w:ilvl",p.list_level);Value(num,"w:numId",p.list_id);}
+  if(p.list_id>0) {
+    auto num=n.append_child("w:numPr");
+    Value(num,"w:ilvl",std::clamp(p.list_level+p.list_level_inc,0,8));
+    Value(num,"w:numId",p.list_id);
+  }
 }
 void Text(pugi::xml_node run,std::string_view text) {
   std::string chunk;
@@ -159,12 +175,26 @@ void SectionPr(pugi::xml_node sec,const model::Section& section) {
   if(section.gutter)IntAttr(mar,"w:gutter",section.gutter);
   if(section.header_distance>=0)IntAttr(mar,"w:header",section.header_distance);
   if(section.footer_distance>=0)IntAttr(mar,"w:footer",section.footer_distance);
-  if(section.columns>1 || section.column_space>=0) {
+  if(section.paper_first>=0 || section.paper_other>=0) {
+    auto src=sec.append_child("w:paperSrc");
+    if(section.paper_first>=0)IntAttr(src,"w:first",section.paper_first);
+    if(section.paper_other>=0)IntAttr(src,"w:other",section.paper_other);
+  }
+  bool custom_columns=false;
+  for(const auto& spec:section.column_specs)custom_columns|=spec.width>=0;
+  if(section.columns>1 || section.column_space>=0 || !section.column_specs.empty()) {
     auto cols=sec.append_child("w:cols");
     IntAttr(cols,"w:num",section.columns);
     if(section.column_space>=0)IntAttr(cols,"w:space",section.column_space);
-    if(!section.columns_even)Attr(cols,"w:equalWidth","0");
+    if(!section.columns_even || custom_columns)Attr(cols,"w:equalWidth","0");
     if(section.columns_separator)Attr(cols,"w:sep","1");
+    for(int index=0;index<section.columns;index++) {
+      const model::ColumnSpec* spec=nullptr;
+      for(const auto& entry:section.column_specs)if(entry.index==index)spec=&entry;
+      if(!spec || spec->width<0)continue;
+      auto col=cols.append_child("w:col");IntAttr(col,"w:w",spec->width);
+      if(spec->space>=0)IntAttr(col,"w:space",spec->space);
+    }
   }
   if(section.vertical_justify>=0) {
     const char* align[]={"top","center","both","bottom"};
@@ -231,8 +261,10 @@ void SectionPr(pugi::xml_node sec,const model::Section& section) {
       Attr(note.append_child("w:numFmt"),"w:val",section.footnote_format<5?format[section.footnote_format]:"decimal");
     }
   }
-  if(section.endnote_restart>=0 || section.endnote_start>=0 || section.endnote_format>=0) {
+  if(section.endnote_restart>=0 || section.endnote_start>=0 || section.endnote_format>=0 ||
+     section.endnote_at_section_end) {
     auto note=sec.append_child("w:endnotePr");
+    if(section.endnote_at_section_end)Attr(note.append_child("w:pos"),"w:val","sectEnd");
     if(section.endnote_restart>=0) {
       const char* restart[]={"continuous","eachSect","eachPage"};
       Attr(note.append_child("w:numRestart"),"w:val",section.endnote_restart<3?restart[section.endnote_restart]:"continuous");
@@ -275,6 +307,19 @@ std::expected<std::vector<uint8_t>,Error> Write(const model::Document& document)
   };
   auto table=[&](const model::Table& t) {
     auto tn=body.append_child("w:tbl");auto pr=tn.append_child("w:tblPr");
+    if(t.style>=0)Attr(pr.append_child("w:tblStyle"),"w:val",Id(t.style));
+    bool positioned=t.tblp_x>=0 || t.tblp_y>=0;
+    for(int space:t.from_text)positioned|=space>=0;
+    if(positioned) {
+      auto pos=pr.append_child("w:tblpPr");
+      if(t.from_text[0]>=0)IntAttr(pos,"w:leftFromText",t.from_text[0]);
+      if(t.from_text[1]>=0)IntAttr(pos,"w:topFromText",t.from_text[1]);
+      if(t.from_text[2]>=0)IntAttr(pos,"w:rightFromText",t.from_text[2]);
+      if(t.from_text[3]>=0)IntAttr(pos,"w:bottomFromText",t.from_text[3]);
+      if(t.tblp_x!=-1)IntAttr(pos,"w:tblpX",t.tblp_x);
+      if(t.tblp_y!=-1)IntAttr(pos,"w:tblpY",t.tblp_y);
+      Attr(pos,"w:horzAnchor","margin");Attr(pos,"w:vertAnchor","margin");
+    }
     auto width=pr.append_child("w:tblW");IntAttr(width,"w:w",t.width);
     Attr(width,"w:type",t.width_type==3?"dxa":t.width_type==2?"pct":"auto");
     Attr(pr.append_child("w:tblLayout"),"w:type",t.auto_fit?"autofit":"fixed");

@@ -26,6 +26,12 @@ std::string LanguageTag(uint16_t lid) {
   char tag[16];std::snprintf(tag,sizeof(tag),"x-lcid-%04x",lid);
   return tag;
 }
+int Ico(unsigned index) {
+  // Ico is a 4-bit index into Word's fixed palette; 0 means "auto".
+  static constexpr int palette[16]={-1,0x000000,0xff0000,0xffff00,0x008000,0xff00ff,
+    0x0000ff,0x00ffff,0xffffff,0x800000,0x808000,0x008000,0x800080,0x000080,0x008080,0x808080};
+  return index<16?palette[index]:-1;
+}
 bool Toggle(bool old,uint8_t v) { return v==0x80?old:v==0x81?!old:v!=0; }
 bool ReadBorder(model::Border& b,Bytes v,bool old) {
   size_t start=old?0:1;
@@ -106,6 +112,20 @@ bool ApplyTable(model::Table& table,model::RowProperties& row,uint16_t op,Bytes 
   if(op==0xF661) {
     if(v.size()!=3 || v[0]!=3)return false;
     table.indent=U16(v,1);return true;
+  }
+  if(op==0x563A) {table.style=U16(v,0);return true;}
+  if(op==0x940E) {
+    if(S16(v,0)<-31680)return false;
+    table.tblp_x=S16(v,0);return true;
+  }
+  if(op==0x940F) {
+    if(S16(v,0)<-31680)return false;
+    table.tblp_y=S16(v,0);return true;
+  }
+  if(op==0x9410 || op==0x9411 || op==0x941E || op==0x941F) {
+    if(U16(v,0)>31680)return false;
+    size_t slot=op==0x9410?0:op==0x9411?1:op==0x941E?2:3;
+    table.from_text[slot]=U16(v,0);return true;
   }
   if(op==0x5400 || op==0x548A) {
     if(U16(v,0)>2)return false;
@@ -219,7 +239,12 @@ bool ApplyTable(model::Table& table,model::RowProperties& row,uint16_t op,Bytes 
   }
   if(op==0xD609) {
     if(v.empty() || size_t(v[0])+1!=v.size() || v[0]%2)return false;
-    // SHD80 has palette colors; modern SHD values later in the grpprl override it.
+    // SHD80 carries palette indices; a later modern SHD operand overrides it.
+    for(size_t i=0;i<v[0]/2 && i<cells.size();i++) {
+      unsigned sh=U16(v,1+2*i);
+      cells[i].shade_fore=Ico(sh&31);cells[i].shade=Ico((sh>>5)&31);
+      cells[i].shade_pattern=(sh>>10)&63;
+    }
     return true;
   }
   if(op==0xD612 || op==0xD616 || op==0xD60C || op==0xD670 || op==0xD671 || op==0xD672) {
@@ -273,6 +298,8 @@ void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& 
     case 0x0854:flag(r.imprint,r.imprint_set);break;
     case 0x0858:flag(r.emboss,r.emboss_set);break;
     case 0x2A3E:r.underline=v[0];r.underline_set=true;break;
+    case 0x2A34:if(v[0]<5)r.emphasis=v[0];break;
+    case 0x2A90:flag(r.hidden,r.hidden_set);break;  // hidden with XML delimiters
     case 0x4A43:r.size=U16(v,0);break;
     case 0x4A61:r.size_cs=U16(v,0);break;
     case 0x085C:flag(r.bold_cs,r.bold_cs_set);break;
@@ -284,7 +311,7 @@ void ApplyRun(model::Run& r,uint16_t op,Bytes v,const std::vector<std::string>& 
     case 0x4852:r.scale=U16(v,0);r.scale_set=true;break;
     case 0x2A42:r.color=v[0];r.color_rgb=false;break;
     case 0x4A60:r.color_cs=U16(v,0);break;
-    case 0x4866: {unsigned sh=U16(v,0);r.shade_fore=sh&31;r.shade=(sh>>5)&31;r.shade_pattern=(sh>>10)&63;break;}
+    case 0x4866: {unsigned sh=U16(v,0);r.shade_fore=Ico(sh&31);r.shade=Ico((sh>>5)&31);r.shade_pattern=(sh>>10)&63;break;}
     case 0x6870:r.color=U32(v,0);r.color_rgb=true;break;
     case 0x2A0C:r.highlight=v[0];break;
     case 0xCA71:ReadShade(r.shade,r.shade_fore,r.shade_pattern,v);break;
@@ -365,13 +392,41 @@ void ApplyPara(model::Paragraph& p,uint16_t op,Bytes v) {
     case 0x260A:p.list_level=v[0];break;
     case 0x2423:if(v[0]<=5)p.frame_wrap=v[0];break;
     case 0x261B:p.frame_anchor=v[0];break;
+    case 0x2430:p.frame_lock=v[0]!=0;p.frame_lock_set=true;break;
+    case 0x8418:if(S16(v,0)>=-31680)p.frame_x=S16(v,0);break;
+    case 0x8419:if(S16(v,0)>=-31680)p.frame_y=S16(v,0);break;
+    case 0x841A:if(U16(v,0)<=31680)p.frame_width=U16(v,0);break;
+    case 0x442B: {
+      unsigned h=U16(v,0)&0x7fff;
+      if(h<=31680) {p.frame_height=h;p.frame_height_exact=(U16(v,0)&0x8000)!=0;}
+      break;
+    }
+    case 0x842E:if(U16(v,0)<=31680)p.frame_v_space=U16(v,0);break;
+    case 0x842F:if(U16(v,0)<=31680)p.frame_h_space=U16(v,0);break;
+    case 0x442D: {
+      unsigned sh=U16(v,0);
+      p.shade_fore=Ico(sh&31);p.shade=Ico((sh>>5)&31);p.shade_pattern=(sh>>10)&63;break;
+    }
+    case 0x2602:p.list_level_inc=static_cast<int8_t>(v[0]);break;
+    case 0x4610:case 0x465F:p.nest=S16(v,0);p.nest_set=true;break;
     default:break;
   }
 }
 bool ApplySection(model::Section& s,uint16_t op,Bytes v) {
   if(op>=0x702B && op<=0x702E)return ReadBorder(s.page_borders[op-0x702B],v,true);
   if(op>=0xD234 && op<=0xD237)return ReadBorder(s.page_borders[op-0xD234],v,false);
+  if(op==0xF203 || op==0xF204) {
+    if(v[0]>43)return false;
+    model::ColumnSpec* spec=nullptr;
+    for(auto& c:s.column_specs)if(c.index==v[0])spec=&c;
+    if(!spec) {s.column_specs.push_back({int(v[0]),-1,-1});spec=&s.column_specs.back();}
+    if(op==0xF204) {spec->space=U16(v,1);return true;}
+    spec->width=U16(v,1);return true;
+  }
   switch(op) {
+    case 0x5007:if(U16(v,0)!=0xffff)s.paper_first=U16(v,0);break;
+    case 0x5008:if(U16(v,0)!=0xffff)s.paper_other=U16(v,0);break;
+    case 0x3012:s.endnote_at_section_end=v[0]!=0;break;
     case 0x3000:s.chapter_separator=v[0];break;
     case 0x3001:s.chapter_heading=v[0];break;
     case 0x7030:s.grid_char_space=static_cast<int>(U32(v,0));break;

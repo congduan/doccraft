@@ -123,14 +123,20 @@ std::expected<model::Document,Error> ParseFormatted(Bytes word,Bytes table,const
       }
       continue;
     }
-    model::Run r;
-    r.hyperlink=hyperlink;r.page_field=page_field;
-    if(pap)r=InheritedRun(doc,pap->style);
-    if(const auto* x=Find(*chpx,ch.fc)) Walk(x->sprms,[&](uint16_t op,Bytes v){ApplyRun(r,op,v,doc.fonts);});
+    auto baseline=[&]() {
+      model::Run value=pap?InheritedRun(doc,pap->style):model::Run{};
+      value.hyperlink=hyperlink;value.page_field=page_field;return value;
+    };
+    model::Run r=baseline();
+    if(const auto* x=Find(*chpx,ch.fc)) Walk(x->sprms,[&](uint16_t op,Bytes v){
+      // sprmCPlain discards direct character formatting accumulated so far.
+      if(op==0x2A33) r=baseline();
+      else ApplyRun(r,op,v,doc.fonts);
+    });
     if(!para.runs.empty()) {
       auto& back=para.runs.back();
       model::Run prior=back;prior.text.clear();
-      if(r.symbol_character<0 && prior.hyperlink==r.hyperlink && prior.page_field==r.page_field && prior.font==r.font && prior.size==r.size && prior.bold==r.bold && prior.italic==r.italic && prior.strike==r.strike && prior.double_strike==r.double_strike && prior.hidden==r.hidden && prior.bold_set==r.bold_set && prior.italic_set==r.italic_set && prior.strike_set==r.strike_set && prior.double_strike_set==r.double_strike_set && prior.hidden_set==r.hidden_set && prior.shadow==r.shadow && prior.shadow_set==r.shadow_set && prior.emboss==r.emboss && prior.emboss_set==r.emboss_set && prior.imprint==r.imprint && prior.imprint_set==r.imprint_set && prior.outline==r.outline && prior.outline_set==r.outline_set && prior.small_caps==r.small_caps && prior.small_caps_set==r.small_caps_set && prior.caps==r.caps && prior.caps_set==r.caps_set && prior.underline==r.underline && prior.underline_set==r.underline_set && prior.super_sub==r.super_sub && prior.super_sub_set==r.super_sub_set && prior.spacing==r.spacing && prior.spacing_set==r.spacing_set && prior.scale==r.scale && prior.scale_set==r.scale_set && prior.color==r.color && prior.color_rgb==r.color_rgb && prior.highlight==r.highlight && prior.shade==r.shade && prior.shade_fore==r.shade_fore && prior.shade_pattern==r.shade_pattern && prior.border.set==r.border.set && prior.border.type==r.border.type && prior.border.width==r.border.width && prior.border.space==r.border.space && prior.border.color==r.border.color && prior.border.shadow==r.border.shadow && prior.border.frame==r.border.frame && prior.symbol_character==r.symbol_character && prior.symbol_font==r.symbol_font && prior.style==r.style) {back.text+=ch.text;continue;}
+      if(r.symbol_character<0 && prior.hyperlink==r.hyperlink && prior.page_field==r.page_field && prior.font==r.font && prior.size==r.size && prior.bold==r.bold && prior.italic==r.italic && prior.strike==r.strike && prior.double_strike==r.double_strike && prior.hidden==r.hidden && prior.bold_set==r.bold_set && prior.italic_set==r.italic_set && prior.strike_set==r.strike_set && prior.double_strike_set==r.double_strike_set && prior.hidden_set==r.hidden_set && prior.shadow==r.shadow && prior.shadow_set==r.shadow_set && prior.emboss==r.emboss && prior.emboss_set==r.emboss_set && prior.imprint==r.imprint && prior.imprint_set==r.imprint_set && prior.outline==r.outline && prior.outline_set==r.outline_set && prior.small_caps==r.small_caps && prior.small_caps_set==r.small_caps_set && prior.caps==r.caps && prior.caps_set==r.caps_set && prior.underline==r.underline && prior.underline_set==r.underline_set && prior.emphasis==r.emphasis && prior.super_sub==r.super_sub && prior.super_sub_set==r.super_sub_set && prior.spacing==r.spacing && prior.spacing_set==r.spacing_set && prior.scale==r.scale && prior.scale_set==r.scale_set && prior.color==r.color && prior.color_rgb==r.color_rgb && prior.highlight==r.highlight && prior.shade==r.shade && prior.shade_fore==r.shade_fore && prior.shade_pattern==r.shade_pattern && prior.border.set==r.border.set && prior.border.type==r.border.type && prior.border.width==r.border.width && prior.border.space==r.border.space && prior.border.color==r.border.color && prior.border.shadow==r.border.shadow && prior.border.frame==r.border.frame && prior.symbol_character==r.symbol_character && prior.symbol_font==r.symbol_font && prior.style==r.style) {back.text+=ch.text;continue;}
     }
     r.text=ch.text;para.runs.push_back(std::move(r));
   }

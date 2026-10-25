@@ -28,3 +28,6 @@ add_test(NAME corpus_text_consistency COMMAND ${Python3_EXECUTABLE}
 add_executable(m3_batch6_test m3_batch6_test.cc)
 target_link_libraries(m3_batch6_test PRIVATE doccraft_doc doccraft_docx gtest_main)
 gtest_discover_tests(m3_batch6_test)
+add_executable(m3_batch7_test m3_batch7_test.cc)
+target_link_libraries(m3_batch7_test PRIVATE doccraft_doc doccraft_docx gtest_main)
+gtest_discover_tests(m3_batch7_test)

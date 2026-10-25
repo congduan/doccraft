@@ -23,4 +23,10 @@
 - 多节文档已写出节间属性切换、行号与脚注位置；页眉页脚仍仅写出首节内容。
 - 样式表保留段落、字符、表格和编号样式的条目及继承链接；表格样式的 TAPX 仅保存原始 sprm，尚未全部映射为 OOXML 的条件格式。
 - `sprmPHugePapx` 和 `sprmPTableProps` 会按 Data 流偏移读取嵌套 PrcData；超出流边界则忽略该引用。其复杂表格语义未全部映射。
+- 浮动段落框只映射 `w:framePr` 的位置/尺寸/间距/锁定；`w:drawing` 级锚点、绕排多边形与 `sprmPDcs` 首字下沉仍缺。
+- 浮动表格用 `w:tblpPr` 表达，但 `sprmTPc` 未实现，`w:horzAnchor`/`w:vertAnchor` 固定为 `margin`；表格文本环绕距离已映射。
+- 非等宽分栏（`sprmSFEvenlySpaced` + `sprmSDxaColWidth`/`sprmSDxaColSpacing`）只输出已有宽度的列；仅指定间距的列被丢弃。
+- SHD80 系列（`sprmCShd80`/`sprmPShd80`/`sprmTDefTableShd80`）走 16 色调色板，索引 0（自动色）不产生 `w:shd`；现代 SHD 操作数仍以 COLORREF 优先。
+- `sprmPIncLvl` 只在 `sprmPIlfo != 0` 时累加 `ilvl`，按规范应增量 `istd` 的段落样式分支未实现。
+- `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。
 - M3 仅保留越界不崩溃底线。针对 sprm 攻击面的专项分析、定向 fuzz 和防御补强移至 M6。

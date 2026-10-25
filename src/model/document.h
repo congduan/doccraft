@@ -8,6 +8,7 @@
 #include <vector>
 namespace doccraft::model {
 struct Border { bool set = false; int type = 0, width = 0, space = 0, color = -1; bool shadow = false, frame = false; };
+struct ColumnSpec { int index = 0, width = -1, space = -1; };
 struct Run {
   std::string text;
   std::string hyperlink;
@@ -37,6 +38,7 @@ struct Run {
   bool shadow_set = false, emboss_set = false, imprint_set = false;
   bool outline_set = false, small_caps_set = false, caps_set = false;
   int underline = 0, super_sub = 0, spacing = 0, scale = 0;
+  int emphasis = -1;
   bool underline_set = false, super_sub_set = false, spacing_set = false;
   bool scale_set = false;
   int color = -1, highlight = -1;
@@ -77,7 +79,14 @@ struct Paragraph {
   bool keep_next = false, keep_lines = false, page_break_before = false;
   bool keep_next_set = false, keep_lines_set = false, page_break_before_set = false;
   int outline = -1, list_id = -1, list_level = 0;
+  int list_level_inc = 0;
+  int nest = 0;
+  bool nest_set = false;
   int frame_wrap = -1, frame_anchor = -1;
+  int frame_x = -1, frame_y = -1, frame_width = -1, frame_height = -1;
+  bool frame_height_exact = false;
+  int frame_h_space = -1, frame_v_space = -1;
+  bool frame_lock = false, frame_lock_set = false;
   std::vector<TabStop> tabs;
   std::array<Border,4> borders;
   std::array<Border,3> extra_borders;
@@ -110,6 +119,9 @@ struct Section {
   int line_count_by = 0, line_restart = 0, line_start = 0, line_distance = -1;
   int footnote_position = -1, footnote_restart = -1, footnote_start = -1, footnote_format = -1;
   int endnote_restart = -1, endnote_start = -1, endnote_format = -1;
+  bool endnote_at_section_end = false;
+  int paper_first = -1, paper_other = -1;
+  std::vector<ColumnSpec> column_specs;
   int chapter_separator = -1, chapter_heading = -1, grid_char_space = -1;
   std::array<Border,4> page_borders;
   std::array<std::vector<Paragraph>,6> headers;
@@ -143,6 +155,9 @@ struct Table {
   std::vector<std::vector<Paragraph>> rows;
   std::vector<RowProperties> row_properties;
   std::array<Border,6> borders;
+  int style = -1;
+  int tblp_x = -1, tblp_y = -1;
+  std::array<int,4> from_text{{-1,-1,-1,-1}};
   int width = 5000, width_type = 2;
   bool auto_fit = false;
   int indent = -1, align = -1;

@@ -68,6 +68,7 @@ std::vector<model::Style> ReadStyles(Bytes table,Fib::Range r,const std::vector<
     if(src.small_caps_set){dst.small_caps=src.small_caps;dst.small_caps_set=true;}
     if(src.caps_set){dst.caps=src.caps;dst.caps_set=true;}
     if(src.underline_set){dst.underline=src.underline;dst.underline_set=true;}
+    if(src.emphasis>=0)dst.emphasis=src.emphasis;
     if(src.super_sub_set){dst.super_sub=src.super_sub;dst.super_sub_set=true;}
     if(src.spacing_set){dst.spacing=src.spacing;dst.spacing_set=true;}
     if(src.scale_set){dst.scale=src.scale;dst.scale_set=true;}
@@ -91,6 +92,7 @@ std::vector<model::Style> ReadStyles(Bytes table,Fib::Range r,const std::vector<
     if(src.page_break_before_set){dst.page_break_before=src.page_break_before;dst.page_break_before_set=true;}
     if(src.outline>=0)dst.outline=src.outline;
     if(src.list_id>=0){dst.list_id=src.list_id;dst.list_level=src.list_level;}
+    if(src.list_level_inc)dst.list_level_inc=src.list_level_inc;
     if(!src.tabs.empty())dst.tabs=src.tabs;
     for(size_t k=0;k<4;k++)if(src.borders[k].set)dst.borders[k]=src.borders[k];
     for(size_t k=0;k<3;k++)if(src.extra_borders[k].set)dst.extra_borders[k]=src.extra_borders[k];
@@ -125,7 +127,7 @@ model::Run InheritedRun(const model::Document& doc,int style) {
     // represented by the paragraph style in OOXML rather than direct rPr.
     value.font.clear();value.size=0;value.underline_set=false;
     value.super_sub_set=false;value.spacing_set=false;value.scale_set=false;
-    value.color=-1;value.highlight=-1;value.shade=-1;
+    value.color=-1;value.highlight=-1;value.shade=-1;value.emphasis=-1;
     value.shade_fore=-1;value.border={};
     value.bold_set=value.italic_set=value.strike_set=false;
     value.double_strike_set=value.hidden_set=false;
