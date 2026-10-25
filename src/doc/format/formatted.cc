@@ -128,43 +128,22 @@ struct FieldFrame {
   bool page = false;
 };
 
-// Two characters merge into one run only when every formatting field
-// matches; symbol runs never merge because they carry their own font.
+// Two characters merge into one run only when every formatting field matches.
+// Symbol and field-marker runs never merge: they carry their own font or emit a
+// dedicated element. The comparison itself is Run's defaulted operator== so it
+// stays exhaustive as the model grows.
 bool SameRunFormatting(const model::Run& prior, const model::Run& r) {
-  return r.symbol_character < 0 && r.field_char < 0 && r.instr_text.empty() &&
-         prior.field_char < 0 && prior.instr_text.empty() &&
-         prior.hyperlink == r.hyperlink && prior.page_field == r.page_field &&
-         prior.font == r.font && prior.size == r.size && prior.bold == r.bold &&
-         prior.italic == r.italic && prior.strike == r.strike &&
-         prior.double_strike == r.double_strike && prior.hidden == r.hidden &&
-         prior.bold_set == r.bold_set && prior.italic_set == r.italic_set &&
-         prior.strike_set == r.strike_set &&
-         prior.double_strike_set == r.double_strike_set &&
-         prior.hidden_set == r.hidden_set && prior.shadow == r.shadow &&
-         prior.shadow_set == r.shadow_set && prior.emboss == r.emboss &&
-         prior.emboss_set == r.emboss_set && prior.imprint == r.imprint &&
-         prior.imprint_set == r.imprint_set && prior.outline == r.outline &&
-         prior.outline_set == r.outline_set &&
-         prior.small_caps == r.small_caps &&
-         prior.small_caps_set == r.small_caps_set && prior.caps == r.caps &&
-         prior.caps_set == r.caps_set && prior.underline == r.underline &&
-         prior.underline_set == r.underline_set &&
-         prior.emphasis == r.emphasis && prior.super_sub == r.super_sub &&
-         prior.super_sub_set == r.super_sub_set && prior.spacing == r.spacing &&
-         prior.spacing_set == r.spacing_set && prior.scale == r.scale &&
-         prior.scale_set == r.scale_set && prior.color == r.color &&
-         prior.color_rgb == r.color_rgb && prior.highlight == r.highlight &&
-         prior.shade == r.shade && prior.shade_fore == r.shade_fore &&
-         prior.shade_pattern == r.shade_pattern &&
-         prior.border.set == r.border.set &&
-         prior.border.type == r.border.type &&
-         prior.border.width == r.border.width &&
-         prior.border.space == r.border.space &&
-         prior.border.color == r.border.color &&
-         prior.border.shadow == r.border.shadow &&
-         prior.border.frame == r.border.frame &&
-         prior.symbol_character == r.symbol_character &&
-         prior.symbol_font == r.symbol_font && prior.style == r.style;
+  if (r.symbol_character >= 0 || r.field_char >= 0 || !r.instr_text.empty()) {
+    return false;
+  }
+  if (prior.field_char >= 0 || !prior.instr_text.empty()) {
+    return false;
+  }
+  model::Run left = prior;
+  model::Run right = r;
+  left.text.clear();
+  right.text.clear();
+  return left == right;
 }
 
 // Applies the paragraph sprms of one PAPX to `para`, honouring its style.
@@ -182,7 +161,7 @@ void ApplyParagraphSprms(model::Paragraph& para, const FormatRange* pap,
 // Closes a table row: the TAPX operand of the row-end mark carries cell and row
 // properties, which must be applied before the row is appended.
 std::expected<void, Error> FinishTableRow(model::Table& table,
-                                          std::vector<model::Paragraph>& row,
+                                          std::vector<model::Cell>& row,
                                           model::Paragraph& para,
                                           const FormatRange* pap, Bytes data) {
   model::RowProperties properties;
@@ -241,8 +220,9 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (!sections.empty())
     doc.section = sections.back().second;
   model::Paragraph para;
+  model::Cell cell;
   model::Table current_table;
-  std::vector<model::Paragraph> row;
+  std::vector<model::Cell> row;
   bool in_table = false;
   std::vector<FieldFrame> fields;
   bool page_field = false;
@@ -344,6 +324,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
           row_end = v[0] != 0;
       });
     }
+    // The first in-table paragraph starts the table: its cell mark is still
+    // ahead, so waiting for \x07 would drop the cell's first paragraph.
+    if (table_flag && !in_table && ch.text != "\x07") {
+      in_table = true;
+      current_table = {};
+    }
     if (in_table && !table_flag && !row_end && ch.text != "\x07")
       add_table();
     if (ch.text == "\x07") {
@@ -351,13 +337,20 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         in_table = true;
       }
       if (row_end) {
+        // A cell that never saw its own mark still has to be kept.
+        if (!cell.paragraphs.empty()) {
+          row.push_back(std::move(cell));
+          cell = {};
+        }
         auto finished = FinishTableRow(current_table, row, para, pap, data);
         if (!finished) {
           return std::unexpected(finished.error());
         }
       } else {
         ApplyParagraphSprms(para, pap, data);
-        row.push_back(std::move(para));
+        cell.paragraphs.push_back(std::move(para));
+        row.push_back(std::move(cell));
+        cell = {};
         para = {};
       }
       continue;
@@ -365,7 +358,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (ch.newline) {
       ApplyParagraphSprms(para, pap, data);
       if (in_table)
-        row.push_back(std::move(para));
+        cell.paragraphs.push_back(std::move(para));
       else
         add_paragraph(std::move(para));
       para = {};
@@ -380,6 +373,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         doc.section_breaks.emplace_back(doc.paragraphs.size() - 1,
                                         sections[next_section].second);
         next_section++;
+      } else {
+        // Not a section boundary: a manual page break inside the paragraph.
+        model::Run page_break;
+        page_break.break_type = 1;
+        para.runs.push_back(std::move(page_break));
       }
       continue;
     }

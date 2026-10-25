@@ -179,7 +179,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ### 6.5 表格
 - ✅ 基本网格（TAP/rgtc）/单元格合并（横向 fVertMerge、纵向）/拆分
-- ◐ 单元格边框/底纹/边距/对齐/文字方向/浮动表格（sprmTPc 锚点、sprmTTlp 表样式选项）；嵌套表格仍按单层输出
+- ◐ 单元格边框/底纹/边距/对齐/文字方向/浮动表格（sprmTPc 锚点、sprmTTlp 表样式选项）、单元格内多段落；嵌套表格仍按单层输出（内层行并入外层）
 
 ### 6.6 对象与图形
 - ☐ 内联图片（PICF + Escher BLIP：png/jpg/wmf/emf 提取与格式保留）

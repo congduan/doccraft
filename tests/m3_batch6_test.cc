@@ -156,7 +156,8 @@ TEST(M3Batch6, ExistingAndNewTablePaths) {
       EXPECT_EQ(row.cells[44].shade, 0x00ffff);
     }
     if (op == 0x5400 || op == 0x3465) {
-      t.rows = {{{}}};
+      t.rows =
+          std::vector<std::vector<model::Cell>>(1, std::vector<model::Cell>(1));
       t.row_properties = {row};
       model::Document d;
       d.tables.push_back(t);

@@ -218,7 +218,8 @@ TEST(M3Batch8, TableStyleOptionsAndAnchors) {
   EXPECT_EQ(t.cell_margins[0], 108);
   EXPECT_EQ(t.row_band, 2);
   EXPECT_EQ(t.col_band, 1);
-  t.rows = {{{}}};
+  t.rows =
+      std::vector<std::vector<model::Cell>>(1, std::vector<model::Cell>(1));
   t.row_properties = {row};
   model::Document d;
   d.tables.push_back(t);

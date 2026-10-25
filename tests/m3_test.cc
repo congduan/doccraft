@@ -26,13 +26,12 @@
 
 namespace {
 std::vector<uint8_t> ReadFile(const std::string& name) {
-  std::string path = std::string(DOCCRAFT_SOURCE_DIR) + "/tests/" +
-                     ((name == "header-footer" || name == "landscape" ||
+  const bool fixture = name == "header-footer" || name == "landscape" ||
                        name == "style-override" || name == "color-shading" ||
-                       name == "character-effects")
-                          ? "fixtures/"
-                          : "corpus/corpus/") +
-                     name + ".doc";
+                       name == "character-effects" ||
+                       name == "table-multi-paragraph";
+  std::string path = std::string(DOCCRAFT_SOURCE_DIR) + "/tests/" +
+                     (fixture ? "fixtures/" : "corpus/corpus/") + name + ".doc";
   std::ifstream f(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(f), {}};
 }
@@ -53,6 +52,27 @@ doccraft::model::Document Parse(const std::string& name) {
     return {};
   auto d = doccraft::doc::ParseFormatted(*w, *t, *fib);
   return d ? *d : doccraft::model::Document{};
+}
+
+TEST(FormatTest, KeepsEveryCellParagraph) {
+  // A cell with two paragraphs must stay one cell with two paragraphs, not
+  // become two cells, and the first paragraph must not drift into the body.
+  auto d = Parse("table-multi-paragraph");
+  ASSERT_EQ(d.tables.size(), 1u);
+  const auto& table = d.tables[0];
+  ASSERT_EQ(table.rows.size(), 1u);
+  ASSERT_EQ(table.rows[0].size(), 2u);
+  ASSERT_EQ(table.rows[0][0].paragraphs.size(), 2u);
+  EXPECT_EQ(table.rows[0][0].paragraphs[0].runs[0].text, "P1");
+  EXPECT_EQ(table.rows[0][0].paragraphs[1].runs[0].text, "P2");
+  ASSERT_EQ(table.rows[0][1].paragraphs.size(), 1u);
+  EXPECT_EQ(table.rows[0][1].paragraphs[0].runs[0].text, "Q1");
+  // The body keeps its own paragraphs on both sides of the table.
+  ASSERT_EQ(d.blocks.size(), 3u);
+  EXPECT_FALSE(d.blocks[0].table);
+  EXPECT_TRUE(d.blocks[1].table);
+  EXPECT_FALSE(d.blocks[2].table);
+  EXPECT_EQ(d.paragraphs.size(), 2u);
 }
 
 TEST(FormatTest, ReadsDirectCharacterFormatting) {
@@ -138,8 +158,8 @@ TEST(FormatTest, ReadsTableGridAndCells) {
   ASSERT_EQ(d.tables.size(), 1u);
   EXPECT_EQ(d.tables[0].columns, (std::vector<int>{4985, 4987}));
   ASSERT_EQ(d.tables[0].rows.size(), 2u);
-  EXPECT_EQ(d.tables[0].rows[0][0].runs[0].text, "A1");
-  EXPECT_EQ(d.tables[0].rows[1][1].runs[0].text, "B2");
+  EXPECT_EQ(d.tables[0].rows[0][0].paragraphs[0].runs[0].text, "A1");
+  EXPECT_EQ(d.tables[0].rows[1][1].paragraphs[0].runs[0].text, "B2");
 }
 
 TEST(FormatTest, ReadsFirstOddEvenHeadersAndMargins) {

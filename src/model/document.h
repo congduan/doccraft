@@ -31,6 +31,8 @@ struct Border {
   bool set = false;
   int type = 0, width = 0, space = 0, color = -1;
   bool shadow = false, frame = false;
+
+  bool operator==(const Border&) const = default;
 };
 
 struct ColumnSpec {
@@ -79,6 +81,9 @@ struct Run {
   std::string symbol_font;
   // Complex field markers: 0 = begin, 1 = separator, 2 = end (w:fldChar).
   int field_char = -1;
+  // Manual break carried by this run: 1 = page (w:br/@w:type="page"),
+  // 2 = column. 0 means the run holds no break.
+  int break_type = 0;
   // Field instruction text, written as w:instrText between begin and separator.
   std::string instr_text;
   int object_offset = -1;
@@ -92,6 +97,10 @@ struct Run {
        ea_vert_compress = false;
   int ea_brackets = 0, ea_id = 0;
   int style = -1;
+
+  // Defaulted equality is what run merging compares: every field participates,
+  // so a newly added property can never be silently dropped from the merge.
+  bool operator==(const Run&) const = default;
 };
 
 struct TabStop {
@@ -231,6 +240,12 @@ struct CellProperties {
   bool no_wrap = false, fit_text = false, hide_mark = false;
 };
 
+// One table cell. A cell holds paragraphs only for now; nested tables are not
+// reconstructed yet (they are flattened by the parser).
+struct Cell {
+  std::vector<Paragraph> paragraphs;
+};
+
 struct RowProperties {
   std::vector<CellProperties> cells;
   std::vector<int> columns;
@@ -240,7 +255,7 @@ struct RowProperties {
 
 struct Table {
   std::vector<int> columns;
-  std::vector<std::vector<Paragraph>> rows;
+  std::vector<std::vector<Cell>> rows;
   std::vector<RowProperties> row_properties;
   std::array<Border, 6> borders;
   int style = -1;

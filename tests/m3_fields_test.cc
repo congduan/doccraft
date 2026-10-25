@@ -188,6 +188,16 @@ TEST(M3Fields, NestedFieldsNestTheirMarkers) {
   EXPECT_NE(xml.find("PAGEREF _Toc1"), std::string::npos);
 }
 
+TEST(M3Fields, ManualPageBreakIsKept) {
+  // \x0c that is not a section boundary is a manual page break.
+  const std::string xml = Convert(
+      "A\x0c"
+      "B");
+  EXPECT_NE(xml.find("<w:br w:type=\"page\"/>"), std::string::npos);
+  std::vector<std::string> runs = TextRuns(xml);
+  EXPECT_EQ(runs, (std::vector<std::string>{"A", "B"}));
+}
+
 TEST(M3Fields, FieldWithoutSeparatorStillCloses) {
   // A malformed field (no \x14) must not swallow the rest of the paragraph.
   const std::string text =

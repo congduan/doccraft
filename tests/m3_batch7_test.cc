@@ -242,7 +242,8 @@ TEST(M3Batch7, TableStyleAndFloatingPosition) {
   EXPECT_EQ(t.from_text[1], 200);
   EXPECT_EQ(t.from_text[2], 300);
   EXPECT_EQ(t.from_text[3], 400);
-  t.rows = {{{}}};
+  t.rows =
+      std::vector<std::vector<model::Cell>>(1, std::vector<model::Cell>(1));
   t.row_properties = {row};
   model::Document d;
   d.tables.push_back(t);
@@ -266,7 +267,8 @@ TEST(M3Batch7, TableRowShd80) {
   EXPECT_EQ(row.cells[0].shade, 0x00FFFF);
   EXPECT_EQ(row.cells[0].shade_fore, 0x0000FF);
   EXPECT_EQ(row.cells[1].shade, 0x0000FF);
-  t.rows = {{{}}};
+  t.rows =
+      std::vector<std::vector<model::Cell>>(1, std::vector<model::Cell>(1));
   t.row_properties = {row};
   model::Document d;
   d.tables.push_back(t);

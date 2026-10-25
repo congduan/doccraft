@@ -639,6 +639,9 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       const char* kinds[] = {"begin", "separate", "end"};
       Attr(rn.append_child("w:fldChar"), "w:fldCharType",
            r.field_char < 3 ? kinds[r.field_char] : "begin");
+    } else if (r.break_type > 0) {
+      auto br = rn.append_child("w:br");
+      Attr(br, "w:type", r.break_type == 2 ? "column" : "page");
     } else if (!r.instr_text.empty()) {
       auto instr = rn.append_child("w:instrText");
       Attr(instr, "xml:space", "preserve");
@@ -920,7 +923,13 @@ void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
     size_t span = CellGridSpan(t, rp, j, grid_index);
     WriteCellProperties(tcp, cp, cell_width, span);
     grid_index += span;
-    WriteParagraph(tc, row[j], nullptr, hyperlinks, revision_id);
+    // A w:tc must contain at least one paragraph.
+    if (row[j].paragraphs.empty()) {
+      WriteParagraph(tc, model::Paragraph{}, nullptr, hyperlinks, revision_id);
+    }
+    for (const auto& paragraph : row[j].paragraphs) {
+      WriteParagraph(tc, paragraph, nullptr, hyperlinks, revision_id);
+    }
   }
 }
 
