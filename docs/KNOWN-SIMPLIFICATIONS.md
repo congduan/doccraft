@@ -12,7 +12,8 @@
 - IR 仅包含段落、文本 run 和特殊控制码位置。`0x07` 单元格/行结束与 `0x0B` 换行在最小 DOCX 中写为换行，不重建表格；列表编号、样式、页眉脚注等留待后续里程碑。
 - 当前最小写出为达到语料 `plain-text.doc` 的像素验收，使用其默认字体（Liberation Serif，12pt）及 Letter 页面 1134 twip 页边距。尚未从 DOC 属性读取字体、字号和页面设置，因此其他语料的版式不保证一致。
 - 文本一致率测试把连续表格控制码折叠为单个换行，并剥除 LibreOffice TXT 导出中根据编号属性生成的 `•` 列表标记。这些标记不在 M2 抽取的主文本中；不计此差异时五份语料内容均为 100%。
-- 8-bit（compressed）piece 固定按 cp1252 解码，不读 FibBase/文档 codepage——CJK codepage（cp932/936/949/950）文档的压缩 piece 会乱码。五份语料正文全 ASCII，此路径无语料级覆盖。
+- 8-bit（compressed）piece 按 `FibBase.lid` 推导出的 ANSI 代码页解码（`src/base/charset.cc`）。两条残留限制：其一，解码依赖 iconv（glibc 内置 / libiconv），编译期未找到时退化为 CP1252，仅 cp1252 能正确解码；其二，LID 表中未列出的语言一律按 1252 处理（例如 cp1253 之外的希腊文变体、OEM 代码页）。DBCS 文本按规范总是存为 UTF-16 piece，所以压缩 piece 只需要代码页的单字节映射；若遇到违规的 DBCS 双字节序列，能解出时按两字节消费，否则该字节记为 U+FFFD。
+- 语料与 fixture 正文仍全为 ASCII/CP1252，代码页路径只有单测（`CharsetTest.*`、`PieceTableTest.DecodesCompressedPiecesInDocumentCodepage`）覆盖，尚无真实俄文/日文 `.doc` 样本验证。
 - `0x0C`（分页符）及其他未列于已处理集合的 <0x20 控制符被静默丢弃（分页边界信息不保留）。
 - 非 complex 文档若 piece 覆盖不足 `ccpText`，静默截断、无覆盖数校验。
 - U+FFFE/U+FFFF 不在 XML 1.0 Char 产生式内，替换为 U+FFFD 而非报错（防止损坏文件产出 not-well-formed 的 document.xml）。
@@ -30,6 +31,8 @@
 - SHD80 系列（`sprmCShd80`/`sprmPShd80`/`sprmTDefTableShd80`）走 16 色调色板，索引 0（自动色）不产生 `w:shd`；现代 SHD 操作数仍以 COLORREF 优先。
 - `sprmPIncLvl` 只在 `sprmPIlfo != 0` 时累加 `ilvl`，按规范应增量 `istd` 的段落样式分支未实现。
 - `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。
+- 域处理按「顶层特例 + 其余通用」分层：只有顶层 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。未保留 `fldLock`/`fldDirty`/`w:dirty`：域状态的脏标志与锁定语义在转换后丢失，Word 重新分页时会重算。
+- 域结果里的图片、对象、脚注引用等仍是 M5 载荷；嵌套在超链接结果中的域会把外层链接降级为普通文本。
 - 表样式（`sprmTIstd`、条件格式 `sprmTCnf`/`sprmPCnf`/`sprmCCnf`）没有真实 `.doc` 语料：LibreOffice 26.8 导出 `.doc` 时会把表样式摊平成单元格直接格式，`tests/fixtures` 与 corpus 中因此不存在带 TAPX 的表样式。这条链路由 `tests/m3_styles_test.cc` 直接构造 STSH 位流断言（`M3Styles.TableStyleDefaultsAndConditionals`），一旦拿到 Word 生成的样本应替换为 golden 样本。
 - 修订标记（`sprmCFRMarkDel`/`sprmCFRMarkIns`）输出为 `w:del`/`w:ins`，但作者固定写 `doccraft`、时间戳省略：作者名需要 `SttbfRMark`（M4），`w:id` 仅保证文件内自增唯一。
 - `sprmTTlp` 只把 `grfatl` 的 bit5–10 映射为 `w:tblLook`：首行/末行/首列/末列直接对应，band 位按「置位=启用带状」取反为 `noHBand`/`noVBand`；`itl`（自动格式索引）丢弃。

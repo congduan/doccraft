@@ -17,6 +17,7 @@
 #include <cstddef>
 
 #include "base/binary.h"
+#include "base/charset.h"
 
 namespace doccraft::doc {
 
@@ -33,6 +34,8 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.n_fib = U16(word, 2);
   if (f.n_fib < 0x00C1 || f.n_fib > 0x011A)
     return std::unexpected(Error{"unsupported nFib version"});
+  f.lid = U16(word, 6);
+  f.codepage = base::CodepageForLid(f.lid);
   const uint16_t flags = U16(word, 10);
   f.complex = flags & 0x0004;
   f.encrypted = flags & 0x0100;

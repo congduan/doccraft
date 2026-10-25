@@ -21,17 +21,12 @@
 #include <utility>
 #include <vector>
 
+#include "base/charset.h"
 #include "doc/format/internal.h"
 
 namespace doccraft::doc::detail {
-uint32_t Cp1252(uint8_t c) {
-  constexpr uint16_t map[32] = {
-      0x20ac, 0x81,   0x201a, 0x192,  0x201e, 0x2026, 0x2020, 0x2021,
-      0x2c6,  0x2030, 0x160,  0x2039, 0x152,  0x8d,   0x17d,  0x8f,
-      0x90,   0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
-      0x2dc,  0x2122, 0x161,  0x203a, 0x153,  0x9d,   0x17e,  0x178};
-  return c >= kCp1252First && c <= kCp1252Last ? map[c - kCp1252First] : c;
-}
+
+using base::DecodeAnsiChar;
 
 std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
                                                   const Fib& fib,
@@ -79,18 +74,34 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
     uint64_t bytes = static_cast<uint64_t>(length) * (compressed ? 1 : 2);
     if (start > word.size() || bytes > word.size() - start)
       return std::unexpected(Error{"piece outside WordDocument"});
-    for (uint32_t j = 0; j < length; j++) {
+    for (uint32_t j = 0; j < length;) {
       uint32_t character_cp = cp + j;
-      uint32_t c =
-          compressed ? Cp1252(word[start + j]) : U16(word, start + j * 2);
       uint32_t fc = start + j * (compressed ? 1 : 2);
-      if (!compressed && c >= kUtf16HighSurrogateMin &&
-          c <= kUtf16HighSurrogateMax && j + 1 < length) {
+      if (compressed) {
+        // Compressed pieces use the document's ANSI code page (FibBase.lid).
+        Char ch{{}, character_cp, fc, false};
+        size_t used =
+            DecodeAnsiChar(fib.codepage, word.subspan(start + j), ch.text);
+        if (used == 0 || used > length - j) {
+          ch.text.assign("\xEF\xBF\xBD");  // U+FFFD
+          used = 1;
+        }
+        ch.newline = ch.text == "\r" || ch.text == "\n";
+        if (ch.newline)
+          ch.text = "\n";
+        out.push_back(std::move(ch));
+        j += static_cast<uint32_t>(used);
+        continue;
+      }
+      uint32_t c = U16(word, start + j * 2);
+      uint32_t step = 1;
+      if (c >= kUtf16HighSurrogateMin && c <= kUtf16HighSurrogateMax &&
+          j + 1 < length) {
         uint32_t low = U16(word, start + (j + 1) * 2);
         if (low >= kUtf16LowSurrogateMin && low <= kUtf16LowSurrogateMax) {
           c = kUtf16SurrogateBase + ((c - kUtf16HighSurrogateMin) << 10) +
               (low - kUtf16LowSurrogateMin);
-          j++;
+          step = 2;
         }
       }
       if (c == kNonCharacterMin ||
@@ -101,6 +112,7 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
 
       AppendUtf8(ch.text, c == 13 ? 10 : c);
       out.push_back(std::move(ch));
+      j += step;
     }
   }
   return out;

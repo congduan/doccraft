@@ -36,10 +36,11 @@ void Put32(std::vector<uint8_t>& b, size_t p, uint32_t v) {
     b[p + i] = static_cast<uint8_t>(v >> (8 * i));
 }
 
-std::vector<uint8_t> Fib(uint16_t flags = 0) {
+std::vector<uint8_t> Fib(uint16_t flags = 0, uint16_t lid = 0) {
   std::vector<uint8_t> b(1024);
   Put16(b, 0, 0xA5EC);
   Put16(b, 2, 0x00C1);
+  Put16(b, 6, lid);
   Put16(b, 10, flags);
   Put32(b, 24, 512);
   Put32(b, 28, 520);
@@ -132,6 +133,57 @@ TEST(PieceTableTest, ReplacesNonXmlCharsWithReplacementChar) {
             "\xEF\xBF\xBD"
             "\xEF\xBF\xBD"
             "\nEF");
+}
+
+TEST(PieceTableTest, DecodesCompressedPiecesInDocumentCodepage) {
+  // A ru-RU document stores compressed pieces in CP1251. DBCS text is always
+  // written as UTF-16 pieces, so a compressed piece only ever needs the
+  // single-byte mapping of the document code page.
+  std::vector<uint8_t> word = Fib(0, 0x0419);
+  Put32(word, 158 + 33 * 8, 21);  // lcb_clx: Pcdt with a single piece
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib);
+  EXPECT_EQ(fib->codepage, 1251u);
+  EXPECT_EQ(fib->lcb_clx, 21u);
+  std::vector<uint8_t> table(80);
+  table[40] = 2;
+  Put32(table, 41, 16);  // Pcdt: 2 CPs (8 bytes) + 1 PCD (8 bytes)
+  Put32(table, 45, 0);
+  Put32(table, 49, 2);
+  Put16(table, 53, 0);                         // PCD flags
+  Put32(table, 55, 0x40000000u | (512u * 2));  // compressed, byte offset 512
+  Put16(table, 59, 0);                         // PCD prm
+  word[512] = 0xC0;                            // A
+  word[513] = 0xC1;                            // B
+  auto text = doccraft::doc::ExtractText(word, table, *fib);
+  ASSERT_TRUE(text) << text.error().message;
+  EXPECT_EQ(*text, "\xD0\x90\xD0\x91");
+}
+
+TEST(PieceTableTest, DecodesCp932HalfWidthKatakana) {
+  std::vector<uint8_t> word = Fib(0, 0x0411);
+  Put32(word, 158 + 33 * 8, 21);
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib);
+  EXPECT_EQ(fib->codepage, 932u);
+  std::vector<uint8_t> table(80);
+  table[40] = 2;
+  Put32(table, 41, 16);
+  Put32(table, 45, 0);
+  Put32(table, 49, 1);
+  Put16(table, 53, 0);
+  Put32(table, 55, 0x40000000u | (512u * 2));
+  Put16(table, 59, 0);
+  word[512] = 0xB1;
+  auto text = doccraft::doc::ExtractText(word, table, *fib);
+  ASSERT_TRUE(text) << text.error().message;
+  EXPECT_EQ(*text, "\xEF\xBD\xB1");
+}
+
+TEST(PieceTableTest, UnknownCodepageKeepsCp1252) {
+  auto fib = doccraft::doc::ParseFib(Fib(0, 0x0409));
+  ASSERT_TRUE(fib);
+  EXPECT_EQ(fib->codepage, 1252u);
 }
 
 TEST(PieceTableTest, RejectsOverlappingPiecesThatOverCoverWordDocument) {

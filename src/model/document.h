@@ -21,6 +21,12 @@
 #include <utility>
 #include <vector>
 namespace doccraft::model {
+
+// Run::field_char markers, matching w:fldChar/@w:fldCharType.
+inline constexpr int kFieldCharBegin = 0;
+inline constexpr int kFieldCharSeparate = 1;
+inline constexpr int kFieldCharEnd = 2;
+
 struct Border {
   bool set = false;
   int type = 0, width = 0, space = 0, color = -1;
@@ -71,6 +77,10 @@ struct Run {
   bool color_rgb = false;
   int symbol_character = -1;
   std::string symbol_font;
+  // Complex field markers: 0 = begin, 1 = separator, 2 = end (w:fldChar).
+  int field_char = -1;
+  // Field instruction text, written as w:instrText between begin and separator.
+  std::string instr_text;
   int object_offset = -1;
   bool binary_data = false, ole_object = false, embedded_object = false;
   bool revision_insert = false, revision_delete = false,

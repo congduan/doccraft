@@ -25,6 +25,9 @@ struct Error {
 
 struct Fib {
   uint16_t n_fib = 0;
+  // FibBase.lid selects the ANSI code page of compressed ("8-bit") pieces.
+  uint16_t lid = 0;
+  uint32_t codepage = 1252;
   bool complex = false;
   bool encrypted = false;
   bool which_table = false;

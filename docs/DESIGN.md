@@ -47,7 +47,7 @@ Word 97-2003 Binary File Format（[MS-DOC]）：
 - **FIB**（File Information Block）：版本探测（nFib 0x00C1→Word97 … 0x011A→Word2007）、
   flag 位解析（fComplex、fEncrypted、fWhichTblStrm）、各表偏移
 - **Table Stream**（0Table/1Table 选择）: STSH、PLCF 系列、修订信息
-- **文本获取**：-piece table（PLCF of PCD），支持 fcCompressed（CP1252 压缩）与
+- **文本获取**：-piece table（PLCF of PCD），支持 fcCompressed（按 `FibBase.lid` 的 ANSI 代码页压缩，经 iconv 解码）与
   UTF-16 双编码、fExtChar；fast-saved（fComplex）文档的Revision/原位置重建
 - **字符/段落/节属性**：CHPX/PAPX 二叉桶（grpprl 解包）、SEPX、
   sprm 操作符全量分派（sprmP/sprmT/sprmCR/sprmPH…）
@@ -114,6 +114,9 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
   - ZIP 容器：**miniz**（M3 起，替换 M2 手写 store+CRC32；deflate 支持顺带获得）
   - XML 生成：**pugixml**（M3 起，样式表生成与转义）
   - 加密原语（M6 RC4 等）：用成熟实现，密码学不自造
+  - 字符集解码：**iconv**（libc 设施：glibc 内置，macOS/Linux 走 libiconv；
+    不新增传递依赖，未找到时编译期退化到内置 CP1252 表）。见
+    `src/base/charset.cc`。
   - 测试：googletest、libFuzzer
 - 选库标准：业界广泛使用、license 宽松（public domain/MIT/Apache）、
   可 FetchContent 单一来源引入、不引入传递依赖
@@ -151,10 +154,10 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 验收口径：每项 = golden 样本 + roundtrip diff 通过。状态：☐ 未开始 ◐ 部分 ✅ 完成
 
 ### 6.1 文本与编码
-- ✅☐ 基本文本抽取（piece table、CP1252/UTF-16 双模式）
+- ✅ 基本文本抽取（piece table、文档 ANSI 代码页/UTF-16 双模式）
 - ☐ fast-saved 文档（fComplex）完整重建
 - ◐ 特殊字符：tab/CR/VT/非断行空格/连字符/SYM 字符（图片/脚注/批注/绘图等特殊字符随 M4/M5）
-- ☐ 域代码文本与结果（fldChar 层次）
+- ◐ 域代码文本与结果（fldChar 层次）：通用复杂域输出 `w:fldChar` begin/separate/end + `w:instrText`，`HYPERLINK` 仍映射为 `w:hyperlink`、页码类域映射为 `w:fldSimple`；`fldLock`/`dirty` 标志与域结果中的图片/对象未保留
 - ✅ 多语言/复杂文种（RTL 标记、bidi、复杂文种颜色与字号）
 
 ### 6.2 字符格式（CHP）
@@ -184,7 +187,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ☐ 文本框（Ftxbx/textbox 文本链）
 - ☐ 基本形状/艺术字占位（可降级为占位图，文档化降级策略）
 - ☐ OLE 嵌入对象（对象流透传 + 预览图）
-- ☐ 脚注/尾注/批注/书签/交叉引用域/目录域
+- ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（交叉引用与目录域的指令与结果文本已按通用复杂域输出，脚注/尾注/批注/书签实体未解析）
 
 ### 6.7 样式系统
 - ✅ STSH 全量解析（基于样式继承链展开）

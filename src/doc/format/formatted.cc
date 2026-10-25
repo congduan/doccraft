@@ -112,10 +112,27 @@ void ApplyFieldInstruction(const std::string& instruction,
   *page_field = instruction.find("PAGE") != std::string::npos;
 }
 
+// One open complex field ([MS-DOC] §2.5.1 \x13 instruction \x14 result \x15).
+enum class FieldMode {
+  kPending,
+  kHyperlink,  // rewritten as w:hyperlink, no fldChar remains
+  kPage,       // rewritten as w:fldSimple
+  kGeneric,    // w:fldChar begin/instrText/separate ... end
+};
+
+struct FieldFrame {
+  std::string instruction;
+  bool in_instruction = true;
+  FieldMode mode = FieldMode::kPending;
+  std::string hyperlink;
+  bool page = false;
+};
+
 // Two characters merge into one run only when every formatting field
 // matches; symbol runs never merge because they carry their own font.
 bool SameRunFormatting(const model::Run& prior, const model::Run& r) {
-  return r.symbol_character < 0 && r.symbol_character < 0 &&
+  return r.symbol_character < 0 && r.field_char < 0 && r.instr_text.empty() &&
+         prior.field_char < 0 && prior.instr_text.empty() &&
          prior.hyperlink == r.hyperlink && prior.page_field == r.page_field &&
          prior.font == r.font && prior.size == r.size && prior.bold == r.bold &&
          prior.italic == r.italic && prior.strike == r.strike &&
@@ -227,9 +244,9 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   model::Table current_table;
   std::vector<model::Paragraph> row;
   bool in_table = false;
-  int field_depth = 0;
-  bool field_instruction = false, page_field = false;
-  std::string instruction, hyperlink;
+  std::vector<FieldFrame> fields;
+  bool page_field = false;
+  std::string hyperlink;
   size_t next_section = 0;
   auto add_paragraph = [&](model::Paragraph value) {
     doc.blocks.push_back({false, doc.paragraphs.size()});
@@ -250,31 +267,71 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   };
   for (size_t i = 0; i < chars->size(); i++) {
     const Char& ch = (*chars)[i];
+    // The hyperlink/page target of a field applies to the runs after its
+    // separator; pop restores the enclosing field's target.
+    auto sync_field_state = [&]() {
+      hyperlink.clear();
+      page_field = false;
+      for (auto frame = fields.rbegin(); frame != fields.rend(); ++frame) {
+        if (frame->in_instruction)
+          continue;
+        hyperlink = frame->hyperlink;
+        page_field = frame->page;
+        break;
+      }
+    };
+    auto emit_field_char = [&](int kind) {
+      model::Run marker;
+      marker.field_char = kind;
+      para.runs.push_back(std::move(marker));
+    };
+    auto emit_instruction = [&](const std::string& text) {
+      if (text.empty())
+        return;
+      model::Run marker;
+      marker.instr_text = text;
+      para.runs.push_back(std::move(marker));
+    };
     if (ch.text == "\x13") {
-      if (field_depth++ == 0) {
-        instruction.clear();
-        hyperlink.clear();
-        page_field = false;
-        field_instruction = true;
+      fields.push_back({});
+      continue;
+    }
+    if (!fields.empty() && fields.back().in_instruction && ch.text == "\x14") {
+      FieldFrame& frame = fields.back();
+      frame.in_instruction = false;
+      ApplyFieldInstruction(frame.instruction, &frame.hyperlink, &frame.page);
+      // Only a top-level HYPERLINK/PAGE field keeps its dedicated mapping;
+      // nested fields and everything else become generic complex fields.
+      if (fields.size() == 1 && !frame.hyperlink.empty())
+        frame.mode = FieldMode::kHyperlink;
+      else if (fields.size() == 1 && frame.page)
+        frame.mode = FieldMode::kPage;
+      else
+        frame.mode = FieldMode::kGeneric;
+      if (frame.mode == FieldMode::kGeneric) {
+        emit_field_char(model::kFieldCharBegin);
+        emit_instruction(frame.instruction);
+        emit_field_char(model::kFieldCharSeparate);
       }
+      sync_field_state();
       continue;
     }
-    if (ch.text == "\x14" && field_depth == 1) {
-      field_instruction = false;
-      ApplyFieldInstruction(instruction, &hyperlink, &page_field);
-      continue;
-    }
-    if (ch.text == "\x15" && field_depth > 0) {
-      if (--field_depth == 0) {
-        instruction.clear();
-        hyperlink.clear();
-        page_field = false;
-        field_instruction = false;
+    if (!fields.empty() && ch.text == "\x15") {
+      // A field that closes before its separator is malformed: keep its
+      // instruction as an unmatched begin/end pair instead of dropping it.
+      if (fields.back().mode == FieldMode::kPending) {
+        emit_field_char(model::kFieldCharBegin);
+        emit_instruction(fields.back().instruction);
       }
+      if (fields.back().mode != FieldMode::kHyperlink &&
+          fields.back().mode != FieldMode::kPage)
+        emit_field_char(model::kFieldCharEnd);
+      fields.pop_back();
+      sync_field_state();
       continue;
     }
-    if (field_depth > 0 && field_instruction) {
-      instruction += ch.text;
+    if (!fields.empty() && fields.back().in_instruction) {
+      fields.back().instruction += ch.text;
       continue;
     }
     const auto* pap = Find(*papx, ch.fc);

@@ -20,7 +20,7 @@ src/doc/    layer2  [MS-DOC] parser (FIB, piece table, FKP, sprm, styles, lists,
 src/model/  layer3  format-neutral IR (Document/Paragraph/Run/Table/Style/Section), twips
 src/docx/   layer4  ECMA-376 transitional writer (miniz for zip, pugixml for XML)
 src/cli/            CLI wiring (convert / inspect)
-src/base/           shared leaf: byte reads (`Bytes`, `U16`, `U32`, `U64`, `S16`) + `AppendUtf8`
+src/base/           shared leaf: byte reads (`Bytes`, `U16`, `U32`, `U64`, `S16`), `AppendUtf8`, ANSI code page decoding (`charset.h`)
 ```
 
 Dependency direction must hold: `cli -> {cfb, doc, docx}`, `docx -> model`,

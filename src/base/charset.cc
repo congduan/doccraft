@@ -1,0 +1,257 @@
+// Copyright 2026 The doccraft Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "base/charset.h"
+
+#include <array>
+
+#include "base/utf8.h"
+
+#ifdef DOCCRAFT_HAVE_ICONV
+#include <iconv.h>
+#endif
+
+namespace doccraft::base {
+namespace {
+
+// CP1252 keeps its five undefined positions and maps 0x80-0x9F through this
+// table; it is the fallback decoder when no iconv is available.
+constexpr uint32_t kCp1252High(uint8_t c) {
+  switch (c) {
+    case 0x80:
+      return 0x20AC;
+    case 0x82:
+      return 0x201A;
+    case 0x83:
+      return 0x0192;
+    case 0x84:
+      return 0x201E;
+    case 0x85:
+      return 0x2026;
+    case 0x86:
+      return 0x2020;
+    case 0x87:
+      return 0x2021;
+    case 0x88:
+      return 0x02C6;
+    case 0x89:
+      return 0x2030;
+    case 0x8A:
+      return 0x0160;
+    case 0x8B:
+      return 0x2039;
+    case 0x8C:
+      return 0x0152;
+    case 0x8E:
+      return 0x017D;
+    case 0x91:
+      return 0x2018;
+    case 0x92:
+      return 0x2019;
+    case 0x93:
+      return 0x201C;
+    case 0x94:
+      return 0x201D;
+    case 0x95:
+      return 0x2022;
+    case 0x96:
+      return 0x2013;
+    case 0x97:
+      return 0x2014;
+    case 0x98:
+      return 0x02DC;
+    case 0x99:
+      return 0x2122;
+    case 0x9A:
+      return 0x0161;
+    case 0x9B:
+      return 0x203A;
+    case 0x9C:
+      return 0x0153;
+    case 0x9E:
+      return 0x017E;
+    case 0x9F:
+      return 0x0178;
+    default:
+      return c;  // 0x81/0x8D/0x8F/0x90/0x9D and 0xA0-0xFF pass through
+  }
+}
+
+#ifdef DOCCRAFT_HAVE_ICONV
+const char* IconvName(uint32_t codepage) {
+  switch (codepage) {
+    case 874:
+      return "CP874";
+    case 932:
+      return "CP932";
+    case 936:
+      return "CP936";
+    case 949:
+      return "CP949";
+    case 950:
+      return "CP950";
+    case 1250:
+      return "CP1250";
+    case 1251:
+      return "CP1251";
+    case 1252:
+      return "CP1252";
+    case 1253:
+      return "CP1253";
+    case 1254:
+      return "CP1254";
+    case 1255:
+      return "CP1255";
+    case 1256:
+      return "CP1256";
+    case 1257:
+      return "CP1257";
+    case 1258:
+      return "CP1258";
+    case 10000:
+      return "MACINTOSH";
+    default:
+      return nullptr;
+  }
+}
+
+// One conversion descriptor per thread is enough: a document has a single
+// code page and the decoder is not re-entrant anyway.
+iconv_t CachedIconv(uint32_t codepage) {
+  static thread_local uint32_t cached_key = 0;
+  static thread_local iconv_t cached_cd = reinterpret_cast<iconv_t>(-1);
+  // +1 so that the "nothing cached yet" state (0) never matches a real code
+  // page; CP1252 stays the most common case and keeps its descriptor.
+  const uint32_t key = codepage + 1;
+  if (key == cached_key) {
+    return cached_cd;
+  }
+  if (cached_cd != reinterpret_cast<iconv_t>(-1)) {
+    iconv_close(cached_cd);
+  }
+  const char* name = IconvName(codepage);
+  cached_cd = name ? iconv_open("UTF-8", name) : reinterpret_cast<iconv_t>(-1);
+  cached_key = key;
+  return cached_cd;
+}
+#endif  // DOCCRAFT_HAVE_ICONV
+
+}  // namespace
+
+uint32_t CodepageForLid(uint16_t lid) {
+  switch (lid) {
+    // CJK: the ANSI code page of the document.
+    case 0x0404:  // zh-TW
+    case 0x0C04:  // zh-HK
+    case 0x1404:  // zh-MO
+      return 950;
+    case 0x0804:  // zh-CN
+    case 0x1004:  // zh-SG
+      return 936;
+    case 0x0411:  // ja-JP
+      return 932;
+    case 0x0412:  // ko-KR
+      return 949;
+    // Central European, Cyrillic, Greek, Turkish, Hebrew, Arabic, Baltic,
+    // Vietnamese and Thai all have a Windows single-byte code page.
+    case 0x0405:  // cs-CZ
+    case 0x040E:  // hu-HU
+    case 0x0415:  // pl-PL
+    case 0x0418:  // ro-RO
+    case 0x041A:  // hr-HR
+    case 0x041B:  // sk-SK
+    case 0x0424:  // sl-SI
+      return 1250;
+    case 0x0402:  // bg-BG
+    case 0x0419:  // ru-RU
+    case 0x0422:  // uk-UA
+    case 0x0423:  // be-BY
+    case 0x042F:  // mk-MK
+      return 1251;
+    case 0x0408:  // el-GR
+      return 1253;
+    case 0x041F:  // tr-TR
+    case 0x042C:  // az-Latn-AZ
+      return 1254;
+    case 0x040D:  // he-IL
+      return 1255;
+    case 0x0401:  // ar-SA
+    case 0x0429:  // fa-IR
+    case 0x0801:  // ar-IQ
+      return 1256;
+    case 0x0425:  // et-EE
+    case 0x0426:  // lv-LV
+    case 0x0427:  // lt-LT
+      return 1257;
+    case 0x042A:  // vi-VN
+      return 1258;
+    case 0x041E:  // th-TH
+      return 874;
+    default:
+      return kDefaultCodepage;
+  }
+}
+
+bool SupportsCodepage(uint32_t codepage) {
+#ifdef DOCCRAFT_HAVE_ICONV
+  return IconvName(codepage) != nullptr;
+#else
+  return codepage == kDefaultCodepage;
+#endif
+}
+
+size_t DecodeAnsiChar(uint32_t codepage, Bytes in, std::string& out) {
+  if (in.empty()) {
+    return 0;
+  }
+  if (codepage == 0 || codepage == kDefaultCodepage) {
+    codepage = kDefaultCodepage;
+  }
+  if (in[0] < 0x80) {
+    out.push_back(static_cast<char>(in[0]));
+    return 1;
+  }
+#ifdef DOCCRAFT_HAVE_ICONV
+  if (codepage != kDefaultCodepage || SupportsCodepage(codepage) == false) {
+    iconv_t cd = CachedIconv(codepage);
+    if (cd == reinterpret_cast<iconv_t>(-1)) {
+      return 0;
+    }
+    // Try a single byte first; a DBCS lead byte fails with EINVAL and the
+    // two-byte attempt below picks up the pair that follows it.
+    for (size_t len = 1; len <= 2; ++len) {
+      if (in.size() < len) {
+        break;
+      }
+      iconv(cd, nullptr, nullptr, nullptr, nullptr);  // reset shift state
+      std::array<char, 8> buffer{};
+      char* source =
+          const_cast<char*>(reinterpret_cast<const char*>(in.data()));
+      size_t source_left = len;
+      char* target = buffer.data();
+      size_t target_left = buffer.size();
+      size_t result = iconv(cd, &source, &source_left, &target, &target_left);
+      if (result != static_cast<size_t>(-1) && source_left == 0) {
+        out.append(buffer.data(), buffer.size() - target_left);
+        return len;
+      }
+    }
+    return 0;
+  }
+#endif  // DOCCRAFT_HAVE_ICONV
+  AppendUtf8(out, kCp1252High(in[0]));
+  return 1;
+}
+
+}  // namespace doccraft::base

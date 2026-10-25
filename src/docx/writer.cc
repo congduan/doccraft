@@ -635,7 +635,15 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
     }
     auto rn = wrapper.append_child("w:r");
     RunPr(rn, r);
-    if (r.symbol_character >= 0 && !r.symbol_font.empty()) {
+    if (r.field_char >= 0) {
+      const char* kinds[] = {"begin", "separate", "end"};
+      Attr(rn.append_child("w:fldChar"), "w:fldCharType",
+           r.field_char < 3 ? kinds[r.field_char] : "begin");
+    } else if (!r.instr_text.empty()) {
+      auto instr = rn.append_child("w:instrText");
+      Attr(instr, "xml:space", "preserve");
+      instr.text().set(r.instr_text.c_str());
+    } else if (r.symbol_character >= 0 && !r.symbol_font.empty()) {
       auto sym = rn.append_child("w:sym");
       Attr(sym, "w:font", r.symbol_font);
       char code[5];
