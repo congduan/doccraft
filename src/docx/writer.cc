@@ -784,6 +784,16 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       owner = pn.append_child("w:fldSimple");
       Attr(owner, "w:instr", "PAGE");
     }
+    if (r.bookmark_id >= 0) {
+      // Bookmarks are paragraph-level markers, not run content.
+      auto mark = pn.append_child(r.bookmark_start ? "w:bookmarkStart"
+                                                   : "w:bookmarkEnd");
+      IntAttr(mark, "w:id", r.bookmark_id);
+      if (r.bookmark_start) {
+        Attr(mark, "w:name", r.bookmark_name);
+      }
+      continue;
+    }
     if (r.comment_ref >= 0) {
       // The anchor is a point: the range opens and closes around this run.
       IntAttr(pn.append_child("w:commentRangeStart"), "w:id", r.comment_ref);

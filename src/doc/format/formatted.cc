@@ -46,6 +46,7 @@ using detail::kSprmPItap;
 using detail::kSprmTDefTable;
 using detail::kSprmTDefTableObsolete;
 using detail::kUndefinedU32;
+using detail::ReadBookmarks;
 using detail::ReadChars;
 using detail::ReadCommentAnchors;
 using detail::ReadComments;
@@ -236,6 +237,10 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (!comment_anchors) {
     return std::unexpected(comment_anchors.error());
   }
+  auto bookmarks = ReadBookmarks(table, fib);
+  if (!bookmarks) {
+    return std::unexpected(bookmarks.error());
+  }
   // CP -> comment id (index + 1), matching w:commentReference/@w:id.
   std::map<uint32_t, int> comment_index;
   for (size_t i = 0; i < comment_anchors->size(); i++) {
@@ -320,8 +325,22 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     while (static_cast<int>(frames.size()) < depth)
       frames.emplace_back();
   };
+  auto emit_bookmarks = [&](uint32_t cp) {
+    auto found = bookmarks->marks.find(cp);
+    if (found == bookmarks->marks.end()) {
+      return;
+    }
+    for (const auto& mark : found->second) {
+      model::Run run;
+      run.bookmark_id = mark.id;
+      run.bookmark_name = mark.name;
+      run.bookmark_start = mark.start;
+      para.runs.push_back(std::move(run));
+    }
+  };
   for (size_t i = 0; i < chars->size(); i++) {
     const Char& ch = (*chars)[i];
+    emit_bookmarks(ch.cp);
     // The hyperlink/page target of a field applies to the runs after its
     // separator; pop restores the enclosing field's target.
     auto sync_field_state = [&]() {

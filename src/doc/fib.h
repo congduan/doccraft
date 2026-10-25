@@ -43,6 +43,8 @@ struct Fib {
   // Comment anchors (PlcfandRef), comment text (PlcfandTxt) and the author
   // name array (GrpXstAtnOwners).
   Range and_ref, and_txt, atn_owners;
+  // Bookmark name table (SttbfBkmk) and the start/end PLCs (PlcfBkf/PlcfBkl).
+  Range sttb_bkmk, bkf, bkl;
   std::string table_stream() const {
     return which_table ? "1Table" : "0Table";
   }

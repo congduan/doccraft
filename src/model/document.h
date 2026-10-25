@@ -96,6 +96,10 @@ struct Run {
   bool note_endnote = false;
   // Comment anchor: index into Document::comments + 1 (w:commentReference id).
   int comment_ref = -1;
+  // Bookmark marker: w:bookmarkStart / w:bookmarkEnd with this id and name.
+  int bookmark_id = -1;
+  bool bookmark_start = false;
+  std::string bookmark_name;
   // sprmCFitText: width in twips a run is squeezed or stretched into.
   int fit_text = 0, fit_text_id = 0;
   // sprmCFELayout: East Asian layout unit (w:eastAsianLayout).

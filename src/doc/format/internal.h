@@ -17,6 +17,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -193,6 +194,19 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
     uint64_t base, uint32_t first, uint32_t last);
+
+// Bookmark markers keyed by their CP in the main story.
+struct BookmarkMark {
+  int id = 0;
+  std::string name;
+  bool start = false;
+};
+
+struct BookmarkMarks {
+  std::map<uint32_t, std::vector<BookmarkMark>> marks;
+};
+
+std::expected<BookmarkMarks, Error> ReadBookmarks(Bytes table, const Fib& fib);
 
 // Comment anchor CPs inside the main story, in document order. Comment i of
 // Document::comments is anchored at anchor[i].

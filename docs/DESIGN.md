@@ -187,7 +187,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ☐ 文本框（Ftxbx/textbox 文本链）
 - ☐ 基本形状/艺术字占位（可降级为占位图，文档化降级策略）
 - ☐ OLE 嵌入对象（对象流透传 + 预览图）
-- ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（脚注、尾注与批注已按 PLC 解析并输出 `footnotes.xml`/`endnotes.xml`/`comments.xml`；交叉引用与目录域的指令与结果文本按通用复杂域输出；书签实体未解析）
+- ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（脚注、尾注、批注与书签已按 PLC 解析并输出 `footnotes.xml`/`endnotes.xml`/`comments.xml`/`w:bookmarkStart`-`End`；交叉引用与目录域的指令与结果文本按通用复杂域输出）
 
 ### 6.7 样式系统
 - ✅ STSH 全量解析（基于样式继承链展开）
