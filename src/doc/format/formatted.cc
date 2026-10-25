@@ -32,6 +32,7 @@ using detail::ApplyTable;
 using detail::Bytes;
 using detail::Char;
 using detail::Find;
+using detail::FormatRange;
 using detail::InheritedRun;
 using detail::kSprmCPlain;
 using detail::kSprmPFInTable;
@@ -52,22 +53,9 @@ using detail::Valid;
 using detail::Walk;
 using detail::WalkParagraph;
 
-std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
-                                                     const Fib& fib,
-                                                     Bytes data) {
-  auto chars = ReadChars(word, table, fib, fib.ccp_text);
-  if (!chars)
-    return std::unexpected(chars.error());
-  auto chpx = ReadFkps(word, table, fib.chpx_bte, false);
-  if (!chpx)
-    return std::unexpected(chpx.error());
-  auto papx = ReadFkps(word, table, fib.papx_bte, true);
-  if (!papx)
-    return std::unexpected(papx.error());
-  model::Document doc;
-  doc.fonts = ReadFonts(table, fib.fonts);
-  doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
-  ReadLists(doc, table, fib);
+// Reads the section descriptor PLC (SED) and the SEPX of each section.
+std::expected<std::vector<std::pair<uint32_t, model::Section>>, Error>
+ReadSections(Bytes word, Bytes table, const Fib& fib) {
   std::vector<std::pair<uint32_t, model::Section>> sections;
   if (fib.sed.size) {
     if (!Valid(table, fib.sed) || fib.sed.size < 20 || (fib.sed.size - 4) % 16)
@@ -99,8 +87,142 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       sections.emplace_back(end, std::move(section));
     }
-    doc.section = sections.back().second;
   }
+  return sections;
+}
+
+// Extracts the HYPERLINK target and detects PAGE fields from a field
+// instruction string (the text between \x13 and \x14).
+void ApplyFieldInstruction(const std::string& instruction,
+                           std::string* hyperlink, bool* page_field) {
+  auto tag = instruction.find("HYPERLINK");
+  if (tag != std::string::npos) {
+    size_t p = tag + 9;
+    while (p < instruction.size() && instruction[p] == ' ')
+      p++;
+    if (p < instruction.size() && instruction[p] == '\"') {
+      size_t end = instruction.find('"', p + 1);
+      if (end != std::string::npos)
+        *hyperlink = instruction.substr(p + 1, end - p - 1);
+    } else {
+      size_t end = instruction.find(' ', p);
+      *hyperlink = instruction.substr(p, end - p);
+    }
+  }
+  *page_field = instruction.find("PAGE") != std::string::npos;
+}
+
+// Two characters merge into one run only when every formatting field
+// matches; symbol runs never merge because they carry their own font.
+bool SameRunFormatting(const model::Run& prior, const model::Run& r) {
+  return r.symbol_character < 0 && r.symbol_character < 0 &&
+         prior.hyperlink == r.hyperlink && prior.page_field == r.page_field &&
+         prior.font == r.font && prior.size == r.size && prior.bold == r.bold &&
+         prior.italic == r.italic && prior.strike == r.strike &&
+         prior.double_strike == r.double_strike && prior.hidden == r.hidden &&
+         prior.bold_set == r.bold_set && prior.italic_set == r.italic_set &&
+         prior.strike_set == r.strike_set &&
+         prior.double_strike_set == r.double_strike_set &&
+         prior.hidden_set == r.hidden_set && prior.shadow == r.shadow &&
+         prior.shadow_set == r.shadow_set && prior.emboss == r.emboss &&
+         prior.emboss_set == r.emboss_set && prior.imprint == r.imprint &&
+         prior.imprint_set == r.imprint_set && prior.outline == r.outline &&
+         prior.outline_set == r.outline_set &&
+         prior.small_caps == r.small_caps &&
+         prior.small_caps_set == r.small_caps_set && prior.caps == r.caps &&
+         prior.caps_set == r.caps_set && prior.underline == r.underline &&
+         prior.underline_set == r.underline_set &&
+         prior.emphasis == r.emphasis && prior.super_sub == r.super_sub &&
+         prior.super_sub_set == r.super_sub_set && prior.spacing == r.spacing &&
+         prior.spacing_set == r.spacing_set && prior.scale == r.scale &&
+         prior.scale_set == r.scale_set && prior.color == r.color &&
+         prior.color_rgb == r.color_rgb && prior.highlight == r.highlight &&
+         prior.shade == r.shade && prior.shade_fore == r.shade_fore &&
+         prior.shade_pattern == r.shade_pattern &&
+         prior.border.set == r.border.set &&
+         prior.border.type == r.border.type &&
+         prior.border.width == r.border.width &&
+         prior.border.space == r.border.space &&
+         prior.border.color == r.border.color &&
+         prior.border.shadow == r.border.shadow &&
+         prior.border.frame == r.border.frame &&
+         prior.symbol_character == r.symbol_character &&
+         prior.symbol_font == r.symbol_font && prior.style == r.style;
+}
+
+// Applies the paragraph sprms of one PAPX to `para`, honouring its style.
+void ApplyParagraphSprms(model::Paragraph& para, const FormatRange* pap,
+                         Bytes data) {
+  if (!pap) {
+    return;
+  }
+  para.style = pap->style;
+  WalkParagraph(pap->sprms, data, [&](uint16_t op, Bytes v) {
+    ApplyPara(para, op, v);
+  });
+}
+
+// Closes a table row: the TAPX operand of the row-end mark carries cell and row
+// properties, which must be applied before the row is appended.
+std::expected<void, Error> FinishTableRow(model::Table& table,
+                                          std::vector<model::Paragraph>& row,
+                                          model::Paragraph& para,
+                                          const FormatRange* pap, Bytes data) {
+  model::RowProperties properties;
+  bool valid = true;
+  uint16_t invalid_op = 0;
+  if (pap) {
+    valid =
+        WalkParagraph(pap->sprms, data,
+                      [&](uint16_t op, Bytes v) {
+                        if (valid && (op == kSprmTDefTable ||
+                                      op == kSprmTDefTableObsolete ||
+                                      (op >> 10 & 7) == 5)) {
+                          if (!(valid = ApplyTable(table, properties, op, v))) {
+                            invalid_op = op;
+                          }
+                        }
+                      }) &&
+        valid;
+  }
+  if (!valid) {
+    return std::unexpected(
+        Error{"invalid TAPX operand " + std::to_string(invalid_op)});
+  }
+  if (properties.cells.empty()) {
+    properties.cells.resize(row.size());
+  }
+  properties.columns = table.columns;
+  table.row_properties.push_back(std::move(properties));
+  table.rows.push_back(std::move(row));
+  row.clear();
+  para = {};
+  return {};
+}
+
+std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
+                                                     const Fib& fib,
+                                                     Bytes data) {
+  auto chars = ReadChars(word, table, fib, fib.ccp_text);
+  if (!chars)
+    return std::unexpected(chars.error());
+  auto chpx = ReadFkps(word, table, fib.chpx_bte, false);
+  if (!chpx)
+    return std::unexpected(chpx.error());
+  auto papx = ReadFkps(word, table, fib.papx_bte, true);
+  if (!papx)
+    return std::unexpected(papx.error());
+  model::Document doc;
+  doc.fonts = ReadFonts(table, fib.fonts);
+  doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
+  ReadLists(doc, table, fib);
+  auto sections_result = ReadSections(word, table, fib);
+  if (!sections_result)
+    return std::unexpected(sections_result.error());
+  std::vector<std::pair<uint32_t, model::Section>> sections =
+      std::move(*sections_result);
+  if (!sections.empty())
+    doc.section = sections.back().second;
   model::Paragraph para;
   model::Table current_table;
   std::vector<model::Paragraph> row;
@@ -139,21 +261,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     }
     if (ch.text == "\x14" && field_depth == 1) {
       field_instruction = false;
-      auto tag = instruction.find("HYPERLINK");
-      if (tag != std::string::npos) {
-        size_t p = tag + 9;
-        while (p < instruction.size() && instruction[p] == ' ')
-          p++;
-        if (p < instruction.size() && instruction[p] == '\"') {
-          size_t end = instruction.find('"', p + 1);
-          if (end != std::string::npos)
-            hyperlink = instruction.substr(p + 1, end - p - 1);
-        } else {
-          size_t end = instruction.find(' ', p);
-          hyperlink = instruction.substr(p, end - p);
-        }
-      }
-      page_field = instruction.find("PAGE") != std::string::npos;
+      ApplyFieldInstruction(instruction, &hyperlink, &page_field);
       continue;
     }
     if (ch.text == "\x15" && field_depth > 0) {
@@ -182,56 +290,23 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (in_table && !table_flag && !row_end && ch.text != "\x07")
       add_table();
     if (ch.text == "\x07") {
-      if (!in_table)
+      if (!in_table) {
         in_table = true;
+      }
       if (row_end) {
-        model::RowProperties properties;
-        bool valid = true;
-        uint16_t invalid_op = 0;
-        if (pap) {
-          valid =
-              WalkParagraph(pap->sprms, data,
-                            [&](uint16_t op, Bytes v) {
-                              if (valid && (op == kSprmTDefTable ||
-                                            op == kSprmTDefTableObsolete ||
-                                            (op >> 10 & 7) == 5)) {
-                                if (!(valid = ApplyTable(current_table,
-                                                         properties, op, v))) {
-                                  invalid_op = op;
-                                }
-                              }
-                            }) &&
-              valid;
+        auto finished = FinishTableRow(current_table, row, para, pap, data);
+        if (!finished) {
+          return std::unexpected(finished.error());
         }
-        if (!valid)
-          return std::unexpected(
-              Error{"invalid TAPX operand " + std::to_string(invalid_op)});
-        if (properties.cells.empty())
-          properties.cells.resize(row.size());
-        properties.columns = current_table.columns;
-        current_table.row_properties.push_back(std::move(properties));
-        current_table.rows.push_back(std::move(row));
-        row.clear();
-        para = {};
       } else {
-        if (pap) {
-          para.style = pap->style;
-          WalkParagraph(pap->sprms, data, [&](uint16_t op, Bytes v) {
-            ApplyPara(para, op, v);
-          });
-        }
+        ApplyParagraphSprms(para, pap, data);
         row.push_back(std::move(para));
         para = {};
       }
       continue;
     }
     if (ch.newline) {
-      if (pap) {
-        para.style = pap->style;
-        WalkParagraph(pap->sprms, data, [&](uint16_t op, Bytes v) {
-          ApplyPara(para, op, v);
-        });
-      }
+      ApplyParagraphSprms(para, pap, data);
       if (in_table)
         row.push_back(std::move(para));
       else
@@ -242,12 +317,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (ch.text.size() == 1 && ch.text[0] == '\x0c') {
       if (next_section + 1 < sections.size() &&
           ch.cp + 1 == sections[next_section].first) {
-        if (pap) {
-          para.style = pap->style;
-          WalkParagraph(pap->sprms, data, [&](uint16_t op, Bytes v) {
-            ApplyPara(para, op, v);
-          });
-        }
+        ApplyParagraphSprms(para, pap, data);
         add_paragraph(std::move(para));
         para = {};
         doc.section_breaks.emplace_back(doc.paragraphs.size() - 1,
@@ -277,40 +347,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       auto& back = para.runs.back();
       model::Run prior = back;
       prior.text.clear();
-      if (r.symbol_character < 0 && prior.hyperlink == r.hyperlink &&
-          prior.page_field == r.page_field && prior.font == r.font &&
-          prior.size == r.size && prior.bold == r.bold &&
-          prior.italic == r.italic && prior.strike == r.strike &&
-          prior.double_strike == r.double_strike && prior.hidden == r.hidden &&
-          prior.bold_set == r.bold_set && prior.italic_set == r.italic_set &&
-          prior.strike_set == r.strike_set &&
-          prior.double_strike_set == r.double_strike_set &&
-          prior.hidden_set == r.hidden_set && prior.shadow == r.shadow &&
-          prior.shadow_set == r.shadow_set && prior.emboss == r.emboss &&
-          prior.emboss_set == r.emboss_set && prior.imprint == r.imprint &&
-          prior.imprint_set == r.imprint_set && prior.outline == r.outline &&
-          prior.outline_set == r.outline_set &&
-          prior.small_caps == r.small_caps &&
-          prior.small_caps_set == r.small_caps_set && prior.caps == r.caps &&
-          prior.caps_set == r.caps_set && prior.underline == r.underline &&
-          prior.underline_set == r.underline_set &&
-          prior.emphasis == r.emphasis && prior.super_sub == r.super_sub &&
-          prior.super_sub_set == r.super_sub_set &&
-          prior.spacing == r.spacing && prior.spacing_set == r.spacing_set &&
-          prior.scale == r.scale && prior.scale_set == r.scale_set &&
-          prior.color == r.color && prior.color_rgb == r.color_rgb &&
-          prior.highlight == r.highlight && prior.shade == r.shade &&
-          prior.shade_fore == r.shade_fore &&
-          prior.shade_pattern == r.shade_pattern &&
-          prior.border.set == r.border.set &&
-          prior.border.type == r.border.type &&
-          prior.border.width == r.border.width &&
-          prior.border.space == r.border.space &&
-          prior.border.color == r.border.color &&
-          prior.border.shadow == r.border.shadow &&
-          prior.border.frame == r.border.frame &&
-          prior.symbol_character == r.symbol_character &&
-          prior.symbol_font == r.symbol_font && prior.style == r.style) {
+      if (SameRunFormatting(prior, r)) {
         back.text += ch.text;
         continue;
       }

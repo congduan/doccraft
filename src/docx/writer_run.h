@@ -18,16 +18,6 @@
 #include "third_party/pugixml/pugixml.hpp"
 namespace doccraft::docx {
 
-// COLORREF packing shared by the writer: red in bits 16-23, green in bits 8-15,
-// blue in bits 0-7. A saturated top byte marks the "automatic" colour.
-inline constexpr uint32_t kColorAutoFlag = 0xFF000000u;
-inline constexpr uint32_t kColorChannelMask = 0xFF;
-inline constexpr int kColorGreenShift = 8;
-inline constexpr int kColorRedShift = 16;
-
-// Low 16 bits of a symbol character code (MS-DOC CSymbolOperand).
-inline constexpr uint32_t kLow16Mask = 0xFFFF;
-
 void RunPr(pugi::xml_node parent, const model::Run& run);
 
 }  // namespace doccraft::docx

@@ -48,8 +48,174 @@ std::vector<std::string> ReadFonts(Bytes table, Fib::Range r) {
   return out;
 }
 
-std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
-                                     const std::vector<std::string>& fonts) {
+void OverlayRun(model::Run& dst, const model::Run& src) {
+  if (!src.font.empty())
+    dst.font = src.font;
+  if (src.size)
+    dst.size = src.size;
+  if (src.bold_set) {
+    dst.bold = src.bold;
+    dst.bold_set = true;
+  }
+  if (src.italic_set) {
+    dst.italic = src.italic;
+    dst.italic_set = true;
+  }
+  if (src.strike_set) {
+    dst.strike = src.strike;
+    dst.strike_set = true;
+  }
+  if (src.double_strike_set) {
+    dst.double_strike = src.double_strike;
+    dst.double_strike_set = true;
+  }
+  if (src.hidden_set) {
+    dst.hidden = src.hidden;
+    dst.hidden_set = true;
+  }
+  if (src.shadow_set) {
+    dst.shadow = src.shadow;
+    dst.shadow_set = true;
+  }
+  if (src.emboss_set) {
+    dst.emboss = src.emboss;
+    dst.emboss_set = true;
+  }
+  if (src.imprint_set) {
+    dst.imprint = src.imprint;
+    dst.imprint_set = true;
+  }
+  if (src.outline_set) {
+    dst.outline = src.outline;
+    dst.outline_set = true;
+  }
+  if (src.small_caps_set) {
+    dst.small_caps = src.small_caps;
+    dst.small_caps_set = true;
+  }
+  if (src.caps_set) {
+    dst.caps = src.caps;
+    dst.caps_set = true;
+  }
+  if (src.underline_set) {
+    dst.underline = src.underline;
+    dst.underline_set = true;
+  }
+  if (src.emphasis >= 0)
+    dst.emphasis = src.emphasis;
+  if (src.super_sub_set) {
+    dst.super_sub = src.super_sub;
+    dst.super_sub_set = true;
+  }
+  if (src.spacing_set) {
+    dst.spacing = src.spacing;
+    dst.spacing_set = true;
+  }
+  if (src.scale_set) {
+    dst.scale = src.scale;
+    dst.scale_set = true;
+  }
+  if (src.color >= 0) {
+    dst.color = src.color;
+    dst.color_rgb = src.color_rgb;
+  }
+  if (src.highlight >= 0)
+    dst.highlight = src.highlight;
+  if (src.shade >= 0)
+    dst.shade = src.shade;
+  if (src.shade_fore >= 0)
+    dst.shade_fore = src.shade_fore;
+  if (src.shade >= 0 || src.shade_fore >= 0)
+    dst.shade_pattern = src.shade_pattern;
+  if (src.border.set)
+    dst.border = src.border;
+}
+
+void OverlayParagraph(model::Paragraph& dst, const model::Paragraph& src) {
+  if (src.align >= 0)
+    dst.align = src.align;
+  if (src.left_set) {
+    dst.left = src.left;
+    dst.left_set = true;
+  }
+  if (src.right_set) {
+    dst.right = src.right;
+    dst.right_set = true;
+  }
+  if (src.first_set) {
+    dst.first = src.first;
+    dst.first_set = true;
+  }
+  if (src.before >= 0)
+    dst.before = src.before;
+  if (src.after >= 0)
+    dst.after = src.after;
+  if (src.line) {
+    dst.line = src.line;
+    dst.line_auto = src.line_auto;
+  }
+  if (src.keep_next_set) {
+    dst.keep_next = src.keep_next;
+    dst.keep_next_set = true;
+  }
+  if (src.keep_lines_set) {
+    dst.keep_lines = src.keep_lines;
+    dst.keep_lines_set = true;
+  }
+  if (src.page_break_before_set) {
+    dst.page_break_before = src.page_break_before;
+    dst.page_break_before_set = true;
+  }
+  if (src.outline >= 0)
+    dst.outline = src.outline;
+  if (src.list_id >= 0) {
+    dst.list_id = src.list_id;
+    dst.list_level = src.list_level;
+  }
+  if (src.list_level_inc)
+    dst.list_level_inc = src.list_level_inc;
+  if (!src.tabs.empty())
+    dst.tabs = src.tabs;
+  for (size_t k = 0; k < 4; k++)
+    if (src.borders[k].set)
+      dst.borders[k] = src.borders[k];
+  for (size_t k = 0; k < 3; k++)
+    if (src.extra_borders[k].set)
+      dst.extra_borders[k] = src.extra_borders[k];
+  if (src.shade >= 0)
+    dst.shade = src.shade;
+  if (src.shade_fore >= 0)
+    dst.shade_fore = src.shade_fore;
+  if (src.shade >= 0 || src.shade_fore >= 0)
+    dst.shade_pattern = src.shade_pattern;
+}
+
+// Resolves `base` chains into resolved_run/resolved_paragraph. A style that is
+// already being visited (state 1) terminates the chain, which breaks cycles.
+void ResolveStyle(std::vector<model::Style>& styles,
+                  std::vector<uint8_t>& state, size_t index) {
+  if (state[index] != 0) {
+    return;
+  }
+  state[index] = 1;
+  int base = styles[index].base;
+  if (base >= 0 && static_cast<size_t>(base) < styles.size() &&
+      static_cast<size_t>(base) != index) {
+    ResolveStyle(styles, state, base);
+    if (state[base] == 2) {
+      styles[index].resolved_run = styles[base].resolved_run;
+      styles[index].resolved_paragraph = styles[base].resolved_paragraph;
+    }
+  }
+  OverlayRun(styles[index].resolved_run, styles[index].run);
+  OverlayParagraph(styles[index].resolved_paragraph, styles[index].paragraph);
+  state[index] = 2;
+}
+
+// Reads the STD sheet (stsh): one record per style, each with its UPX array of
+// paragraph and character exception blocks.
+std::vector<model::Style> ReadStyleSheet(
+    Bytes table, Fib::Range r, const std::vector<std::string>& fonts) {
   std::vector<model::Style> out;
   if (!r.size || !Valid(table, r) || r.size < 20)
     return out;
@@ -113,170 +279,17 @@ std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
         x++;
     }
   }
-  auto overlay_run = [](model::Run& dst, const model::Run& src) {
-    if (!src.font.empty())
-      dst.font = src.font;
-    if (src.size)
-      dst.size = src.size;
-    if (src.bold_set) {
-      dst.bold = src.bold;
-      dst.bold_set = true;
-    }
-    if (src.italic_set) {
-      dst.italic = src.italic;
-      dst.italic_set = true;
-    }
-    if (src.strike_set) {
-      dst.strike = src.strike;
-      dst.strike_set = true;
-    }
-    if (src.double_strike_set) {
-      dst.double_strike = src.double_strike;
-      dst.double_strike_set = true;
-    }
-    if (src.hidden_set) {
-      dst.hidden = src.hidden;
-      dst.hidden_set = true;
-    }
-    if (src.shadow_set) {
-      dst.shadow = src.shadow;
-      dst.shadow_set = true;
-    }
-    if (src.emboss_set) {
-      dst.emboss = src.emboss;
-      dst.emboss_set = true;
-    }
-    if (src.imprint_set) {
-      dst.imprint = src.imprint;
-      dst.imprint_set = true;
-    }
-    if (src.outline_set) {
-      dst.outline = src.outline;
-      dst.outline_set = true;
-    }
-    if (src.small_caps_set) {
-      dst.small_caps = src.small_caps;
-      dst.small_caps_set = true;
-    }
-    if (src.caps_set) {
-      dst.caps = src.caps;
-      dst.caps_set = true;
-    }
-    if (src.underline_set) {
-      dst.underline = src.underline;
-      dst.underline_set = true;
-    }
-    if (src.emphasis >= 0)
-      dst.emphasis = src.emphasis;
-    if (src.super_sub_set) {
-      dst.super_sub = src.super_sub;
-      dst.super_sub_set = true;
-    }
-    if (src.spacing_set) {
-      dst.spacing = src.spacing;
-      dst.spacing_set = true;
-    }
-    if (src.scale_set) {
-      dst.scale = src.scale;
-      dst.scale_set = true;
-    }
-    if (src.color >= 0) {
-      dst.color = src.color;
-      dst.color_rgb = src.color_rgb;
-    }
-    if (src.highlight >= 0)
-      dst.highlight = src.highlight;
-    if (src.shade >= 0)
-      dst.shade = src.shade;
-    if (src.shade_fore >= 0)
-      dst.shade_fore = src.shade_fore;
-    if (src.shade >= 0 || src.shade_fore >= 0)
-      dst.shade_pattern = src.shade_pattern;
-    if (src.border.set)
-      dst.border = src.border;
-  };
-  auto overlay_para = [](model::Paragraph& dst, const model::Paragraph& src) {
-    if (src.align >= 0)
-      dst.align = src.align;
-    if (src.left_set) {
-      dst.left = src.left;
-      dst.left_set = true;
-    }
-    if (src.right_set) {
-      dst.right = src.right;
-      dst.right_set = true;
-    }
-    if (src.first_set) {
-      dst.first = src.first;
-      dst.first_set = true;
-    }
-    if (src.before >= 0)
-      dst.before = src.before;
-    if (src.after >= 0)
-      dst.after = src.after;
-    if (src.line) {
-      dst.line = src.line;
-      dst.line_auto = src.line_auto;
-    }
-    if (src.keep_next_set) {
-      dst.keep_next = src.keep_next;
-      dst.keep_next_set = true;
-    }
-    if (src.keep_lines_set) {
-      dst.keep_lines = src.keep_lines;
-      dst.keep_lines_set = true;
-    }
-    if (src.page_break_before_set) {
-      dst.page_break_before = src.page_break_before;
-      dst.page_break_before_set = true;
-    }
-    if (src.outline >= 0)
-      dst.outline = src.outline;
-    if (src.list_id >= 0) {
-      dst.list_id = src.list_id;
-      dst.list_level = src.list_level;
-    }
-    if (src.list_level_inc)
-      dst.list_level_inc = src.list_level_inc;
-    if (!src.tabs.empty())
-      dst.tabs = src.tabs;
-    for (size_t k = 0; k < 4; k++)
-      if (src.borders[k].set)
-        dst.borders[k] = src.borders[k];
-    for (size_t k = 0; k < 3; k++)
-      if (src.extra_borders[k].set)
-        dst.extra_borders[k] = src.extra_borders[k];
-    if (src.shade >= 0)
-      dst.shade = src.shade;
-    if (src.shade_fore >= 0)
-      dst.shade_fore = src.shade_fore;
-    if (src.shade >= 0 || src.shade_fore >= 0)
-      dst.shade_pattern = src.shade_pattern;
-  };
-
-  std::vector<uint8_t> state(out.size());
-  std::function<void(size_t)> resolve = [&](size_t i) {
-    if (state[i] == 2)
-      return;
-    if (state[i] == 1)
-      return;
-    state[i] = 1;
-    int base = out[i].base;
-    if (base >= 0 && static_cast<size_t>(base) < out.size() &&
-        static_cast<size_t>(base) != i) {
-      resolve(base);
-      if (state[base] == 2) {
-        out[i].resolved_run = out[base].resolved_run;
-        out[i].resolved_paragraph = out[base].resolved_paragraph;
-      }
-    }
-    overlay_run(out[i].resolved_run, out[i].run);
-    overlay_para(out[i].resolved_paragraph, out[i].paragraph);
-    state[i] = 2;
-  };
-  for (size_t i = 0; i < out.size(); i++)
-    resolve(i);
   return out;
+}
+
+std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
+                                     const std::vector<std::string>& fonts) {
+  std::vector<model::Style> styles = ReadStyleSheet(table, r, fonts);
+  std::vector<uint8_t> state(styles.size());
+  for (size_t i = 0; i < styles.size(); i++) {
+    ResolveStyle(styles, state, i);
+  }
+  return styles;
 }
 
 model::Run InheritedRun(const model::Document& doc, int style) {
