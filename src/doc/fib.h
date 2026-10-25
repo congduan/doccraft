@@ -1,5 +1,19 @@
-#ifndef DOCCRAFT_DOC_FIB_H_
-#define DOCCRAFT_DOC_FIB_H_
+// Copyright 2026 The doccraft Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#ifndef SRC_DOC_FIB_H_
+#define SRC_DOC_FIB_H_
 #include <cstdint>
 #include <expected>
 #include <span>
@@ -8,6 +22,7 @@ namespace doccraft::doc {
 struct Error {
   std::string message;
 };
+
 struct Fib {
   uint16_t n_fib = 0;
   bool complex = false;
@@ -16,10 +31,16 @@ struct Fib {
   uint32_t ccp_text = 0, ccp_ftn = 0, ccp_hdd = 0, ccp_atn = 0;
   uint32_t ccp_edn = 0, ccp_txbx = 0, ccp_hdr_txbx = 0;
   uint32_t fc_clx = 0, lcb_clx = 0;
-  struct Range { uint32_t offset = 0, size = 0; };
+  struct Range {
+    uint32_t offset = 0, size = 0;
+  };
   Range stsh, chpx_bte, papx_bte, sed, fonts, lists, list_overrides, headers;
-  std::string table_stream() const { return which_table ? "1Table" : "0Table"; }
+  std::string table_stream() const {
+    return which_table ? "1Table" : "0Table";
+  }
 };
+
 std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word);
 }  // namespace doccraft::doc
-#endif
+
+#endif  // SRC_DOC_FIB_H_

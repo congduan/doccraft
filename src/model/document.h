@@ -1,5 +1,19 @@
-#ifndef DOCCRAFT_MODEL_DOCUMENT_H_
-#define DOCCRAFT_MODEL_DOCUMENT_H_
+// Copyright 2026 The doccraft Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#ifndef SRC_MODEL_DOCUMENT_H_
+#define SRC_MODEL_DOCUMENT_H_
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -7,8 +21,16 @@
 #include <utility>
 #include <vector>
 namespace doccraft::model {
-struct Border { bool set = false; int type = 0, width = 0, space = 0, color = -1; bool shadow = false, frame = false; };
-struct ColumnSpec { int index = 0, width = -1, space = -1; };
+struct Border {
+  bool set = false;
+  int type = 0, width = 0, space = 0, color = -1;
+  bool shadow = false, frame = false;
+};
+
+struct ColumnSpec {
+  int index = 0, width = -1, space = -1;
+};
+
 struct Run {
   std::string text;
   std::string hyperlink;
@@ -23,7 +45,8 @@ struct Run {
   bool field_hidden = false, field_hidden_set = false;
   int color_cs = -1;
   bool no_proof_set = false, rtl_set = false, complex_script_set = false;
-  bool web_hidden_set = false, spec_vanish_set = false, snap_to_grid_set = false;
+  bool web_hidden_set = false, spec_vanish_set = false,
+       snap_to_grid_set = false;
   int size = 0;
   int size_cs = 0, kern = -1, position = 0;
   bool position_set = false;
@@ -50,10 +73,15 @@ struct Run {
   std::string symbol_font;
   int object_offset = -1;
   bool binary_data = false, ole_object = false, embedded_object = false;
-  bool revision_insert = false, revision_delete = false, property_revision = false;
+  bool revision_insert = false, revision_delete = false,
+       property_revision = false;
   int style = -1;
 };
-struct TabStop { int position = 0, align = 0, leader = 0; };
+
+struct TabStop {
+  int position = 0, align = 0, leader = 0;
+};
+
 struct Paragraph {
   std::vector<Run> runs;
   int style = -1;
@@ -65,7 +93,8 @@ struct Paragraph {
   bool bidi = false, bidi_set = false;
   bool suppress_hyphenation = false, suppress_hyphenation_set = false;
   bool before_auto = false, after_auto = false, contextual_spacing = false;
-  bool before_auto_set = false, after_auto_set = false, contextual_spacing_set = false;
+  bool before_auto_set = false, after_auto_set = false,
+       contextual_spacing_set = false;
   bool mirror_indents = false, mirror_indents_set = false;
   bool snap_to_grid = false, snap_to_grid_set = false;
   bool adjust_right = false, adjust_right_set = false;
@@ -77,7 +106,8 @@ struct Paragraph {
   bool auto_space_de = false, auto_space_de_set = false;
   bool auto_space_dn = false, auto_space_dn_set = false;
   bool keep_next = false, keep_lines = false, page_break_before = false;
-  bool keep_next_set = false, keep_lines_set = false, page_break_before_set = false;
+  bool keep_next_set = false, keep_lines_set = false,
+       page_break_before_set = false;
   int outline = -1, list_id = -1, list_level = 0;
   int list_level_inc = 0;
   int nest = 0;
@@ -88,11 +118,12 @@ struct Paragraph {
   int frame_h_space = -1, frame_v_space = -1;
   bool frame_lock = false, frame_lock_set = false;
   std::vector<TabStop> tabs;
-  std::array<Border,4> borders;
-  std::array<Border,3> extra_borders;
+  std::array<Border, 4> borders;
+  std::array<Border, 3> extra_borders;
   int shade = -1;
   int shade_fore = -1, shade_pattern = 0;
 };
+
 struct Style {
   std::string name;
   int type = 0, base = -1, next = -1;
@@ -102,6 +133,7 @@ struct Style {
   Paragraph resolved_paragraph;
   std::vector<uint8_t> table_sprms;
 };
+
 struct Section {
   int width = 12240, height = 15840;
   int left = 1134, right = 1134, top = 1134, bottom = 1134;
@@ -117,47 +149,53 @@ struct Section {
   bool page_restart = false;
   int grid_line_pitch = -1, grid_mode = -1, text_flow = -1;
   int line_count_by = 0, line_restart = 0, line_start = 0, line_distance = -1;
-  int footnote_position = -1, footnote_restart = -1, footnote_start = -1, footnote_format = -1;
+  int footnote_position = -1, footnote_restart = -1, footnote_start = -1,
+      footnote_format = -1;
   int endnote_restart = -1, endnote_start = -1, endnote_format = -1;
   bool endnote_at_section_end = false;
   int paper_first = -1, paper_other = -1;
   std::vector<ColumnSpec> column_specs;
   int chapter_separator = -1, chapter_heading = -1, grid_char_space = -1;
-  std::array<Border,4> page_borders;
-  std::array<std::vector<Paragraph>,6> headers;
+  std::array<Border, 4> page_borders;
+  std::array<std::vector<Paragraph>, 6> headers;
 };
+
 struct ListLevel {
   int format = 0, start = 1, left = 0, first = 0, suffix = 0;
   int style = -1;
   std::string text, font;
 };
+
 struct List {
   int id = 0;
   std::vector<ListLevel> levels;
 };
+
 struct CellProperties {
   int width = -1, width_type = 3;
-  std::array<Border,6> borders;
+  std::array<Border, 6> borders;
   int shade = -1, shade_fore = -1, shade_pattern = 0;
-  std::array<int,4> margins{{-1,-1,-1,-1}};
+  std::array<int, 4> margins{{-1, -1, -1, -1}};
   int vertical_merge = 0, horizontal_merge = 0, text_direction = -1;
   int vertical_align = -1;
   bool no_wrap = false, fit_text = false, hide_mark = false;
 };
+
 struct RowProperties {
   std::vector<CellProperties> cells;
   std::vector<int> columns;
   bool cant_split = false, header = false;
   int height = 0;
 };
+
 struct Table {
   std::vector<int> columns;
   std::vector<std::vector<Paragraph>> rows;
   std::vector<RowProperties> row_properties;
-  std::array<Border,6> borders;
+  std::array<Border, 6> borders;
   int style = -1;
   int tblp_x = -1, tblp_y = -1;
-  std::array<int,4> from_text{{-1,-1,-1,-1}};
+  std::array<int, 4> from_text{{-1, -1, -1, -1}};
   int width = 5000, width_type = 2;
   bool auto_fit = false;
   int indent = -1, align = -1;
@@ -165,21 +203,25 @@ struct Table {
   bool bidi = false, keep_next = false, no_overlap = false;
   int shade = -1, shade_fore = -1, shade_pattern = 0;
 };
+
 struct Block {
   bool table = false;
   size_t index = 0;
 };
+
 struct Document {
   std::vector<Paragraph> paragraphs;
   std::vector<Style> styles;
   Section section;
-  std::vector<std::pair<size_t,Section>> section_breaks;
+  std::vector<std::pair<size_t, Section>> section_breaks;
   std::vector<std::string> fonts;
   std::vector<List> lists;
   std::vector<int> list_overrides;
   std::vector<Table> tables;
   std::vector<Block> blocks;
 };
+
 Document FromText(const std::string& text);
 }  // namespace doccraft::model
-#endif
+
+#endif  // SRC_MODEL_DOCUMENT_H_

@@ -1,23 +1,41 @@
+// Copyright 2026 The doccraft Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cfb/cfb_reader.h"
-#include "cfb_test_util.h"
 #include "doc/fib.h"
 #include "doc/text.h"
 #include "docx/writer.h"
+#include "tests/cfb_test_util.h"
 
 namespace {
 void Put16(std::vector<uint8_t>& b, size_t p, uint16_t v) {
   b[p] = static_cast<uint8_t>(v);
   b[p + 1] = static_cast<uint8_t>(v >> 8);
 }
+
 void Put32(std::vector<uint8_t>& b, size_t p, uint32_t v) {
-  for (int i = 0; i < 4; ++i) b[p + i] = static_cast<uint8_t>(v >> (8 * i));
+  for (int i = 0; i < 4; ++i)
+    b[p + i] = static_cast<uint8_t>(v >> (8 * i));
 }
+
 std::vector<uint8_t> Fib(uint16_t flags = 0) {
   std::vector<uint8_t> b(1024);
   Put16(b, 0, 0xA5EC);
@@ -33,6 +51,7 @@ std::vector<uint8_t> Fib(uint16_t flags = 0) {
   Put32(b, 158 + 33 * 8, 33);
   return b;
 }
+
 TEST(FibTest, ParsesFlagsAndOffsets) {
   auto fib = doccraft::doc::ParseFib(Fib(0x0204));
   ASSERT_TRUE(fib.has_value());
@@ -44,11 +63,13 @@ TEST(FibTest, ParsesFlagsAndOffsets) {
   EXPECT_EQ(fib->fc_clx, 40u);
   EXPECT_EQ(fib->lcb_clx, 33u);
 }
+
 TEST(FibTest, RejectsEncryption) {
   auto fib = doccraft::doc::ParseFib(Fib(0x0100));
   ASSERT_FALSE(fib.has_value());
   EXPECT_NE(fib.error().message.find("unsupported (M6)"), std::string::npos);
 }
+
 TEST(PieceTableTest, RejectsFastSavedDocuments) {
   auto fib = doccraft::doc::ParseFib(Fib(0x0004));
   ASSERT_TRUE(fib);
@@ -58,6 +79,7 @@ TEST(PieceTableTest, RejectsFastSavedDocuments) {
   EXPECT_NE(text.error().message.find("unsupported (M2 known gap)"),
             std::string::npos);
 }
+
 TEST(PieceTableTest, ReadsCompressedAndUtf16Pieces) {
   auto fib = doccraft::doc::ParseFib(Fib());
   ASSERT_TRUE(fib);
@@ -80,6 +102,7 @@ TEST(PieceTableTest, ReadsCompressedAndUtf16Pieces) {
             "A\xE2\x82\xAC"
             "B\nC");
 }
+
 TEST(PieceTableTest, ReplacesNonXmlCharsWithReplacementChar) {
   // U+FFFE/U+FFFF are outside the XML 1.0 Char production; a corrupted UTF-16
   // piece must not be able to produce a not-well-formed document.xml.
@@ -110,6 +133,7 @@ TEST(PieceTableTest, ReplacesNonXmlCharsWithReplacementChar) {
             "\xEF\xBF\xBD"
             "\nEF");
 }
+
 TEST(PieceTableTest, RejectsOverlappingPiecesThatOverCoverWordDocument) {
   constexpr uint32_t kPieces = 9;
   constexpr uint32_t kPieceLength = 1024;
@@ -144,6 +168,7 @@ TEST(PieceTableTest, RejectsOverlappingPiecesThatOverCoverWordDocument) {
   ASSERT_FALSE(text);
   EXPECT_EQ(text.error().message, "piece table over-covers WordDocument");
 }
+
 TEST(ZipTest, CrcKnownVector) {
   EXPECT_EQ(doccraft::docx::Crc32("123456789"), 0xCBF43926u);
 }

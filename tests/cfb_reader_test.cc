@@ -1,7 +1,20 @@
 // Copyright 2026 The doccraft Authors. All Rights Reserved.
-// TDD contract for the CFB layer (M1). These tests are the specification:
-// they intentionally fail against the M1 stub until Codex implements the
-// reader. Fixture-derived tests document the [MS-CFB] behaviors we commit to.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "cfb/cfb_reader.h"
+
+#include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
@@ -9,11 +22,10 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "cfb/cfb_reader.h"
-#include "cfb_test_util.h"
-#include <gtest/gtest.h>
+#include "tests/cfb_test_util.h"
 
 namespace doccraft::cfb {
 namespace {
@@ -22,7 +34,8 @@ using test::CfbBuilder;
 using test::MakePayload;
 
 void Put32(std::vector<uint8_t>& bytes, size_t at, uint32_t value) {
-  for (size_t i = 0; i < 4; ++i) bytes[at + i] = static_cast<uint8_t>(value >> (8 * i));
+  for (size_t i = 0; i < 4; ++i)
+    bytes[at + i] = static_cast<uint8_t>(value >> (8 * i));
 }
 
 // A compact v4 container whose FAT table describes far more sectors than exist.
@@ -34,6 +47,7 @@ std::vector<uint8_t> AllFatV4() {
   constexpr uint32_t kFree = 0xFFFFFFFF;
   std::vector<uint8_t> bytes((kDifatSector + 2) * kSectorSize, 0);
   const uint8_t signature[] = {0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1};
+
   std::copy(std::begin(signature), std::end(signature), bytes.begin());
   bytes[26] = 4;
   bytes[28] = 0xFE;
@@ -47,27 +61,32 @@ std::vector<uint8_t> AllFatV4() {
   Put32(bytes, 60, kEnd);
   Put32(bytes, 68, kDifatSector);
   Put32(bytes, 72, 1);
-  for (uint32_t i = 0; i < 109; ++i) Put32(bytes, 76 + 4 * i, i + 1);
+  for (uint32_t i = 0; i < 109; ++i)
+    Put32(bytes, 76 + 4 * i, i + 1);
   const size_t difat_at = (static_cast<size_t>(kDifatSector) + 1) * kSectorSize;
   for (uint32_t i = 0; i < 1023; ++i) {
     Put32(bytes, difat_at + 4 * i, i < kFatCount - 109 ? i + 110 : kFree);
   }
+
   Put32(bytes, difat_at + kSectorSize - 4, kEnd);
   for (uint32_t i = 0; i < kFatCount; ++i) {
     const size_t at = (static_cast<size_t>(i) + 2) * kSectorSize;
-    for (uint32_t j = 0; j < 1024; ++j) Put32(bytes, at + 4 * j, kFree);
+    for (uint32_t j = 0; j < 1024; ++j)
+      Put32(bytes, at + 4 * j, kFree);
   }
   auto fat = [&](uint32_t sector, uint32_t value) {
     const size_t at = (static_cast<size_t>(sector / 1024) + 2) * kSectorSize;
     Put32(bytes, at + 4 * (sector % 1024), value);
   };
   fat(0, kEnd);
-  for (uint32_t i = 1; i <= kFatCount; ++i) fat(i, 0xFFFFFFFD);
+  for (uint32_t i = 1; i <= kFatCount; ++i)
+    fat(i, 0xFFFFFFFD);
   fat(kDifatSector, 0xFFFFFFFC);
   auto entry = [&](size_t at, const char* name, uint8_t type, uint32_t child,
                    uint32_t start, uint64_t size) {
     const size_t length = std::strlen(name);
-    for (size_t i = 0; i < length; ++i) bytes[at + 2 * i] = static_cast<uint8_t>(name[i]);
+    for (size_t i = 0; i < length; ++i)
+      bytes[at + 2 * i] = static_cast<uint8_t>(name[i]);
     bytes[at + 64] = static_cast<uint8_t>((length + 1) * 2);
     bytes[at + 66] = type;
     Put32(bytes, at + 68, kFree);
@@ -133,14 +152,16 @@ TEST(CfbReaderTest, ReadsMiniStreamAndNestedDirectory) {
   ASSERT_TRUE(stream.has_value()) << stream.error().message;
   EXPECT_EQ(*stream, payload);
   std::vector<std::string> paths;
-  auto visited = reader->Visit([&](const DirEntry&, std::string_view path, bool) {
-    paths.emplace_back(path);
-    return true;
-  });
+  auto visited =
+      reader->Visit([&](const DirEntry&, std::string_view path, bool) {
+        paths.emplace_back(path);
+        return true;
+      });
   ASSERT_TRUE(visited.has_value());
-  EXPECT_EQ(paths, (std::vector<std::string>{"Root Entry", "Root Entry/ObjectPool",
-                                             "Root Entry/ObjectPool/Item",
-                                             "Root Entry/ObjectPool/Item/Data"}));
+  EXPECT_EQ(paths,
+            (std::vector<std::string>{"Root Entry", "Root Entry/ObjectPool",
+                                      "Root Entry/ObjectPool/Item",
+                                      "Root Entry/ObjectPool/Item/Data"}));
   paths.clear();
   visited = reader->Visit([&](const DirEntry&, std::string_view path, bool) {
     paths.emplace_back(path);
@@ -192,15 +213,17 @@ TEST(CfbReaderTest, RejectsCorruptLinksAndTruncation) {
   EXPECT_EQ(dir_result.error().code, ErrorCode::kCorruptDirectory);
   auto bad_sector = good;
   // First DIFAT entry refers outside the file.
-  for (size_t i = 0; i < 4; ++i) bad_sector[76 + i] = 0x7F;
+  for (size_t i = 0; i < 4; ++i)
+    bad_sector[76 + i] = 0x7F;
   EXPECT_FALSE(CfbReader::Open(bad_sector).has_value());
   auto bad_chain = good;
   // First stream FAT link is invalid.
-  const uint32_t fat_sector = static_cast<uint32_t>(good[76]) |
-                              (static_cast<uint32_t>(good[77]) << 8);
+  const uint32_t fat_sector =
+      static_cast<uint32_t>(good[76]) | (static_cast<uint32_t>(good[77]) << 8);
   const size_t fat_offset = (static_cast<size_t>(fat_sector) + 1) * 512;
   // Directory is sector zero, stream starts at one.
-  for (size_t i = 0; i < 4; ++i) bad_chain[fat_offset + 4 + i] = 0xFF;
+  for (size_t i = 0; i < 4; ++i)
+    bad_chain[fat_offset + 4 + i] = 0xFF;
   auto opened = CfbReader::Open(bad_chain);
   ASSERT_TRUE(opened.has_value());
   EXPECT_FALSE(opened->ReadStream("Data").has_value());
@@ -221,13 +244,15 @@ TEST(CfbReaderTest, RejectsRootSiblingWithoutThrowing) {
   } catch (...) {
     threw = true;
   }
+
   EXPECT_FALSE(threw);
 }
 
 TEST(CfbReaderTest, RejectsExcessiveStorageDepthWithoutThrowing) {
   CfbBuilder builder;
   std::string path;
-  for (int i = 0; i < 257; ++i) path += "s/";
+  for (int i = 0; i < 257; ++i)
+    path += "s/";
   builder.AddStream(path + "Data", MakePayload(1, 0x42));
   auto bytes = builder.Build();
   bool threw = false;
@@ -238,6 +263,7 @@ TEST(CfbReaderTest, RejectsExcessiveStorageDepthWithoutThrowing) {
   } catch (...) {
     threw = true;
   }
+
   EXPECT_FALSE(threw);
 }
 
@@ -248,10 +274,12 @@ TEST(CfbReaderTest, FiveStorageLevelsKeepCorrectPath) {
   auto reader = CfbReader::Open(bytes);
   ASSERT_TRUE(reader.has_value());
   std::string stream_path;
-  auto visited = reader->Visit([&](const DirEntry& entry, std::string_view path, bool) {
-    if (entry.type == EntryType::kStream) stream_path = path;
-    return true;
-  });
+  auto visited =
+      reader->Visit([&](const DirEntry& entry, std::string_view path, bool) {
+        if (entry.type == EntryType::kStream)
+          stream_path = path;
+        return true;
+      });
   ASSERT_TRUE(visited.has_value());
   EXPECT_EQ(stream_path, "Root Entry/a/b/c/d/e/Data");
 }
@@ -269,6 +297,7 @@ TEST(CfbReaderTest, RejectsInflatedAllFatStreamWithoutThrowing) {
   } catch (...) {
     threw = true;
   }
+
   EXPECT_FALSE(threw);
 }
 
@@ -292,8 +321,9 @@ TEST(CfbReaderTest, HandlesMutatedHeadersAndDirectoryWithoutCrashing) {
 }
 
 TEST(CfbReaderTest, ReadsLibreOfficePlainTextCorpus) {
-  std::ifstream file(std::string(DOCCRAFT_SOURCE_DIR) +
-                     "/tests/corpus/corpus/plain-text.doc", std::ios::binary);
+  std::ifstream file(
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/corpus/corpus/plain-text.doc",
+      std::ios::binary);
   ASSERT_TRUE(file.good());
   std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
   auto reader = CfbReader::Open(bytes);
@@ -301,71 +331,85 @@ TEST(CfbReaderTest, ReadsLibreOfficePlainTextCorpus) {
   std::vector<std::string> names;
   uint64_t word_size = 0;
   uint64_t table_size = 0;
-  auto visited = reader->Visit([&](const DirEntry& entry, std::string_view, bool) {
-    if (entry.type == EntryType::kStream) {
-      names.push_back(entry.name);
-      if (entry.name == "WordDocument") word_size = entry.size;
-      if (entry.name == "1Table") table_size = entry.size;
-    }
-    return true;
-  });
+  auto visited =
+      reader->Visit([&](const DirEntry& entry, std::string_view, bool) {
+        if (entry.type == EntryType::kStream) {
+          names.push_back(entry.name);
+          if (entry.name == "WordDocument")
+            word_size = entry.size;
+          if (entry.name == "1Table")
+            table_size = entry.size;
+        }
+        return true;
+      });
   ASSERT_TRUE(visited.has_value());
   for (const char* name : {"WordDocument", "1Table"}) {
     EXPECT_NE(std::find(names.begin(), names.end(), name), names.end());
     auto stream = reader->ReadStream(name);
     ASSERT_TRUE(stream.has_value()) << name << ": " << stream.error().message;
     EXPECT_FALSE(stream->empty());
-    EXPECT_EQ(stream->size(), std::string_view(name) == "WordDocument" ? word_size : table_size);
+    EXPECT_EQ(stream->size(), std::string_view(name) == "WordDocument"
+                                  ? word_size
+                                  : table_size);
   }
+
   EXPECT_EQ(std::find(names.begin(), names.end(), "Data"), names.end());
-  EXPECT_EQ(reader->ReadStream("Data").error().code, ErrorCode::kStreamNotFound);
+  EXPECT_EQ(reader->ReadStream("Data").error().code,
+            ErrorCode::kStreamNotFound);
 }
 
 TEST(CfbReaderTest, ReadsEveryStreamInDocCorpus) {
-  for (const char* filename : {"plain-text.doc", "alignment-indents.doc",
-                               "headings-list.doc", "simple-table.doc",
-                               "bold-italic-underline.doc"}) {
+  for (const char* filename :
+       {"plain-text.doc", "alignment-indents.doc", "headings-list.doc",
+        "simple-table.doc", "bold-italic-underline.doc"}) {
     SCOPED_TRACE(filename);
-    std::ifstream file(std::string(DOCCRAFT_SOURCE_DIR) +
-                       "/tests/corpus/corpus/" + filename, std::ios::binary);
+    std::ifstream file(
+        std::string(DOCCRAFT_SOURCE_DIR) + "/tests/corpus/corpus/" + filename,
+        std::ios::binary);
     ASSERT_TRUE(file.good());
     std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
     auto reader = CfbReader::Open(bytes);
     ASSERT_TRUE(reader.has_value()) << reader.error().message;
     size_t stream_count = 0;
-    auto visited = reader->Visit([&](const DirEntry& entry, std::string_view path, bool) {
-      if (entry.type != EntryType::kStream) return true;
-      ++stream_count;
-      auto stream = reader->ReadStream(path);
-      EXPECT_TRUE(stream.has_value()) << path << ": "
-                                      << (stream ? "" : stream.error().message);
-      if (stream) {
-        EXPECT_EQ(stream->size(), entry.size) << path;
-      }
-      return true;
-    });
+    auto visited =
+        reader->Visit([&](const DirEntry& entry, std::string_view path, bool) {
+          if (entry.type != EntryType::kStream)
+            return true;
+          ++stream_count;
+          auto stream = reader->ReadStream(path);
+          EXPECT_TRUE(stream.has_value())
+              << path << ": " << (stream ? "" : stream.error().message);
+          if (stream) {
+            EXPECT_EQ(stream->size(), entry.size) << path;
+          }
+          return true;
+        });
     ASSERT_TRUE(visited.has_value()) << visited.error().message;
     EXPECT_GT(stream_count, 0u);
   }
 }
 
 TEST(CfbReaderTest, BuilderRepackagesLibreOfficeStreams) {
-  std::ifstream file(std::string(DOCCRAFT_SOURCE_DIR) +
-                     "/tests/corpus/corpus/plain-text.doc", std::ios::binary);
+  std::ifstream file(
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/corpus/corpus/plain-text.doc",
+      std::ios::binary);
   ASSERT_TRUE(file.good());
   std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
   auto original = CfbReader::Open(bytes);
   ASSERT_TRUE(original.has_value());
   CfbBuilder builder;
   std::vector<std::string> names;
-  auto visited = original->Visit([&](const DirEntry& entry, std::string_view, bool) {
-    if (entry.type != EntryType::kStream) return true;
-    auto stream = original->ReadStream(entry.name);
-    if (!stream) return false;
-    names.push_back(entry.name);
-    builder.AddStream(entry.name, std::move(*stream));
-    return true;
-  });
+  auto visited =
+      original->Visit([&](const DirEntry& entry, std::string_view, bool) {
+        if (entry.type != EntryType::kStream)
+          return true;
+        auto stream = original->ReadStream(entry.name);
+        if (!stream)
+          return false;
+        names.push_back(entry.name);
+        builder.AddStream(entry.name, std::move(*stream));
+        return true;
+      });
   ASSERT_TRUE(visited.has_value());
   auto rebuilt_bytes = builder.Build();
   auto rebuilt = CfbReader::Open(rebuilt_bytes);

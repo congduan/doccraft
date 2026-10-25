@@ -1,17 +1,34 @@
+// Copyright 2026 The doccraft Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "doc/fib.h"
 
 #include <cstddef>
 namespace doccraft::doc {
 namespace {
 uint16_t U16(std::span<const uint8_t> b, size_t p) {
-  return uint16_t(b[p]) | uint16_t(b[p + 1]) << 8;
+  return static_cast<uint16_t>(b[p]) | static_cast<uint16_t>(b[p + 1]) << 8;
 }
+
 uint32_t U32(std::span<const uint8_t> b, size_t p) {
-  return uint32_t(U16(b, p)) | uint32_t(U16(b, p + 2)) << 16;
+  return static_cast<uint32_t>(U16(b, p)) | static_cast<uint32_t>(U16(b, p + 2))
+                                                << 16;
 }
 }  // namespace
 std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
-  if (word.size() < 34) return std::unexpected(Error{"truncated FIB base"});
+  if (word.size() < 34)
+    return std::unexpected(Error{"truncated FIB base"});
   if (U16(word, 0) != 0xA5EC)
     return std::unexpected(Error{"invalid WordDocument signature"});
   Fib f;
@@ -24,12 +41,12 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.which_table = flags & 0x0200;
   if (f.encrypted)
     return std::unexpected(Error{"encrypted document unsupported (M6)"});
-  const size_t lw_count_pos = 34u + size_t(U16(word, 32)) * 2;
+  const size_t lw_count_pos = 34u + static_cast<size_t>(U16(word, 32)) * 2;
   if (lw_count_pos + 2 > word.size())
     return std::unexpected(Error{"truncated FIB csw"});
   const uint16_t cslw = U16(word, lw_count_pos);
   const size_t lw = lw_count_pos + 2;
-  if (size_t(cslw) * 4 > word.size() - lw || cslw < 11)
+  if (static_cast<size_t>(cslw) * 4 > word.size() - lw || cslw < 11)
     return std::unexpected(Error{"truncated FIB cslw"});
   f.ccp_text = U32(word, lw + 12);
   f.ccp_ftn = U32(word, lw + 16);
@@ -38,19 +55,19 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.ccp_edn = U32(word, lw + 32);
   f.ccp_txbx = U32(word, lw + 36);
   f.ccp_hdr_txbx = U32(word, lw + 40);
-  const size_t pair_count_pos = lw + size_t(cslw) * 4;
+  const size_t pair_count_pos = lw + static_cast<size_t>(cslw) * 4;
   if (pair_count_pos + 2 > word.size())
     return std::unexpected(Error{"truncated FIB pairs"});
   const uint16_t pairs = U16(word, pair_count_pos);
   const size_t pair_start = pair_count_pos + 2;
-  if (size_t(pairs) * 8 > word.size() - pair_start || pairs < 34)
+  if (static_cast<size_t>(pairs) * 8 > word.size() - pair_start || pairs < 34)
     return std::unexpected(Error{"truncated FIB fc/lcb pairs"});
   f.fc_clx = U32(word, pair_start + 33 * 8);
   f.lcb_clx = U32(word, pair_start + 33 * 8 + 4);
   auto pair = [&](size_t i) -> Fib::Range {
-    if (i >= pairs) return {};
-    return {U32(word, pair_start + i * 8),
-            U32(word, pair_start + i * 8 + 4)};
+    if (i >= pairs)
+      return {};
+    return {U32(word, pair_start + i * 8), U32(word, pair_start + i * 8 + 4)};
   };
   f.stsh = pair(0);
   f.sed = pair(6);
@@ -60,7 +77,7 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.headers = pair(11);
   f.lists = pair(73);
   f.list_overrides = pair(74);
-  const size_t new_pos = pair_start + size_t(pairs) * 8;
+  const size_t new_pos = pair_start + static_cast<size_t>(pairs) * 8;
   if (new_pos + 2 <= word.size()) {
     const size_t csw_new = U16(word, new_pos);
     if (csw_new && csw_new * 2 <= word.size() - new_pos - 2) {

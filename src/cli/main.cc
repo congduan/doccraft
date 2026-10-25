@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cinttypes>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
@@ -42,20 +43,22 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "inspect: cannot open %s\n", argv[2]);
       return 1;
     }
+
     std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
     auto reader = doccraft::cfb::CfbReader::Open(bytes);
     if (!reader) {
       std::fprintf(stderr, "inspect: %s\n", reader.error().message.c_str());
       return 1;
     }
+
     std::printf("CFB version %u, sector size %u\n", reader->major_version(),
                 reader->sector_size());
-    auto visited = reader->Visit(
-        [](const doccraft::cfb::DirEntry& entry, std::string_view path, bool) {
-          std::printf("%.*s (%llu bytes)\n", static_cast<int>(path.size()),
-                      path.data(), static_cast<unsigned long long>(entry.size));
-          return true;
-        });
+    auto visited = reader->Visit([](const doccraft::cfb::DirEntry& entry,
+                                    std::string_view path, bool) {
+      std::printf("%.*s (%" PRIu64 " bytes)\n", static_cast<int>(path.size()),
+                  path.data(), static_cast<uint64_t>(entry.size));
+      return true;
+    });
     if (!visited) {
       std::fprintf(stderr, "inspect: %s\n", visited.error().message.c_str());
       return 1;
@@ -64,17 +67,19 @@ int main(int argc, char** argv) {
   }
   if (cmd == "convert" && argc >= 3) {
     std::string output = std::string(argv[2]) + "x";
-    if (argc == 5 && std::string(argv[3]) == "-o")
+    if (argc == 5 && std::string(argv[3]) == "-o") {
       output = argv[4];
-    else if (argc != 3) {
+    } else if (argc != 3) {
       std::fprintf(stderr, "convert: usage: convert in.doc [-o out.docx]\n");
       return 2;
     }
+
     std::ifstream file(argv[2], std::ios::binary);
     if (!file) {
       std::fprintf(stderr, "convert: cannot open input\n");
       return 1;
     }
+
     std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
     if (!file.eof() && file.fail()) {
       std::fprintf(stderr, "convert: input read failed\n");
@@ -101,8 +106,9 @@ int main(int argc, char** argv) {
       return 1;
     }
     auto data = cfb->ReadStream("Data");
-    auto extracted = data ? doccraft::doc::ParseFormatted(*word, *table, *fib, *data)
-                          : doccraft::doc::ParseFormatted(*word, *table, *fib);
+    auto extracted =
+        data ? doccraft::doc::ParseFormatted(*word, *table, *fib, *data)
+             : doccraft::doc::ParseFormatted(*word, *table, *fib);
     if (!extracted) {
       std::fprintf(stderr, "convert: %s\n", extracted.error().message.c_str());
       return 1;
@@ -112,6 +118,7 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "convert: %s\n", archive.error().message.c_str());
       return 1;
     }
+
     std::ofstream out(output, std::ios::binary);
     if (!out) {
       std::fprintf(stderr, "convert: cannot open output\n");
@@ -125,6 +132,7 @@ int main(int argc, char** argv) {
     }
     return 0;
   }
+
   std::fprintf(stderr, "unknown command: %s\n", cmd.c_str());
   return 2;
 }
