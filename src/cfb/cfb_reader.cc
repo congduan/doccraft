@@ -156,7 +156,11 @@ std::expected<Difat, Error> ParseDifat(std::span<const uint8_t> bytes,
     }
     at = U32(p, header.sector_size - 4);
   }
-  if (at != kEnd || difat.entries.size() != header.fat_count) {
+  // LibreOffice writes FREESECT in the final DIFAT link. MS-CFB requires
+  // ENDOFCHAIN, but accepting this terminator after the declared sector count
+  // keeps its large DOC files readable without relaxing chain validation.
+  const bool valid_end = at == kEnd || (header.difat_count > 0 && at == kFree);
+  if (!valid_end || difat.entries.size() != header.fat_count) {
     return std::unexpected(
         Fail(ErrorCode::kCorruptFat, "DIFAT count mismatch"));
   }

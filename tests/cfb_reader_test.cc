@@ -195,6 +195,26 @@ TEST(CfbReaderTest, ReadsDifatExtension) {
   EXPECT_EQ(*stream, MakePayload(7 * 1024 * 1024, 0x37));
 }
 
+TEST(CfbReaderTest, ReadsLibreOfficeFreeTerminatedDifat) {
+  CfbBuilder b;
+  b.AddStream("Large", MakePayload(7 * 1024 * 1024, 0x37));
+  auto bytes = b.Build();
+  auto u32 = [&](size_t at) {
+    return static_cast<uint32_t>(bytes[at]) |
+           (static_cast<uint32_t>(bytes[at + 1]) << 8) |
+           (static_cast<uint32_t>(bytes[at + 2]) << 16) |
+           (static_cast<uint32_t>(bytes[at + 3]) << 24);
+  };
+  ASSERT_GT(u32(72), 0u);
+  const size_t difat_at = (static_cast<size_t>(u32(68)) + 2) * 512 - 4;
+  Put32(bytes, difat_at, 0xFFFFFFFFu);  // LibreOffice's final DIFAT link.
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  auto stream = reader->ReadStream("Large");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(7 * 1024 * 1024, 0x37));
+}
+
 TEST(CfbReaderTest, RejectsCorruptLinksAndTruncation) {
   CfbBuilder b;
   b.AddStream("Data", MakePayload(4096, 0x31));

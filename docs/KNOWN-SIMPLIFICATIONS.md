@@ -21,6 +21,8 @@
 
 ## M3 当前范围
 
+- 大于约 7 MiB 的 LibreOffice 导出 `.doc` 使用 DIFAT 扩展，最后一个 DIFAT 扇区的 next 字段写 `FREESECT`；[MS-CFB] §2.5 要求 `ENDOFCHAIN`。读取器仅在声明的 DIFAT 扇区数已走完且 FAT 扇区数匹配时兼容这个终止符。合成测试 `CfbReaderTest.ReadsLibreOfficeFreeTerminatedDifat` 与 20/50 MiB 语料覆盖此兼容路径。
+
 - `footnote-endnote.doc` 的 `.doc` 经 LibreOffice 渲染为 1 页，而 doccraft 输出的 OOXML 经同一 LibreOffice 渲染为 2 页：尾注被放到独立的文末区域。已核对尾注正文及编号；把尾注改成脚注的对照实验仍为 1 页，说明这是 LibreOffice 对两种容器的尾注布局解释差异。像素对拍用 `tests/fixtures/footnote-endnote.allow` 精确限定 A=1、B=2 的已知例外，并保留重叠页差异统计（0.164%）。
 
 - CHP/PAP/SEP 的常用 sprm、STSH 样式链、LSTF/LVL 列表、首节页眉页脚和基础表格网格已读写。表格单元格合并、复杂边框底纹、浮雕/阴影等效果仍简化；复杂格式需要独立样本验证。
