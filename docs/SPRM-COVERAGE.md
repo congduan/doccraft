@@ -155,10 +155,10 @@
 | ✅ | `0x6646` | sprmPHugePapx | A 4-byte unsigned integer that specifies a location in the Data Stream. | 段落 PAP §2.6.2；M3Batch7.IndirectParagraphSprms |
 | ✅ | `0x2447` | sprmPFUsePgsuSettings | A Bool8 value that specifies whether the paragraph adheres to the vertical components of the document grid. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
 | ✅ | `0x2448` | sprmPFAdjustRight | A Bool8 value that specifies whether this paragraph is set to automatically adjust the right indent when a document grid for East Asian characters is defined. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
-| N/A | `0x6649` | sprmPItap | An integer value that specifies the table depth of this paragraph. | 段落 PAP §2.6.2；表深内部计数；docx 用显式表格嵌套结构表达 |
-| N/A | `0x664A` | sprmPDtap | A signed integer that specifies an addition or subtraction to the existing table depth of this paragraph. | 段落 PAP §2.6.2；表深增量内部计数；同 sprmPItap |
+| ✅ | `0x6649` | sprmPItap | An integer value that specifies the table depth of this paragraph. | 段落 PAP §2.6.2；sprmPItap 作为表格嵌套深度的权威来源；M3NestedTable.DepthTwoTableLivesInTheEnclosingCell |
+| ✅ | `0x664A` | sprmPDtap | A signed integer that specifies an addition or subtraction to the existing table depth of this paragraph. | 段落 PAP §2.6.2；深度增量形式，累加到 sprmPItap；M3NestedTable.DeltaDepthIsAccumulated |
 | N/A | `0x244B` | sprmPFInnerTableCell | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table cell. | 段落 PAP §2.6.2；嵌套表单元格增量保存簿记；不影响格式 |
-| N/A | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2；嵌套表行增量保存簿记；同 sprmPFInnerTableCell |
+| ✅ | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2；嵌套表行结束标记；M3NestedTable.WriterNestsTableElements |
 | ✅ | `0xC64D` | sprmPShd | A SHDOperand value that specifies the background shading for the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xC64E` | sprmPBrcTop | A BrcOperand value which specifies the top border of the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xC64F` | sprmPBrcLeft | A BrcOperand value that specifies the logical left border of the paragraph. | 段落 PAP §2.6.2；M3Batch6.ExistingParagraphAndCharacterPaths |
@@ -346,14 +346,14 @@
 | 类别 | 总数 | ✅ | ◐ | ☐ | N/A | 覆盖率（✅ / 适用项） |
 |---|---:|---:|---:|---:|---:|---:|
 | 字符 CHP | 84 | 58 | 0 | 0 | 26 | 100% |
-| 段落 PAP | 91 | 75 | 0 | 0 | 16 | 100% |
+| 段落 PAP | 91 | 78 | 0 | 0 | 13 | 100% |
 | 表格 TAP | 80 | 73 | 0 | 0 | 7 | 100% |
 | 节 SEP | 59 | 55 | 0 | 0 | 4 | 100% |
-| **合计** | 314 | 261 | 0 | 0 | 53 | 100% |
+| **合计** | 314 | 264 | 0 | 0 | 50 | 100% |
 
 **口径说明（重要）**：本表只统计 [MS-DOC] §2.6 四张 sprm 表的**属性**覆盖。✅ 表示该 opcode 的解析、IR 字段与 OOXML 输出齐备且有一条断言（相当比例是合成位流断言，而非真实 Word 文档）。它**不等于**格式还原率或产品完成度：结构级特性（图片、文本框、OLE、脚注尾注批注书签、嵌套表格、多节页眉页脚、fast-save、加密）不在本表计数内，见 `DESIGN.md` §6 与 `KNOWN-SIMPLIFICATIONS.md`。
 
-基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，覆盖率达到 100%（261 / 261 适用项）。
+基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，覆盖率达到 100%；后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现（264 / 264 适用项）。
 
 ## 规范外旧账别名（不计入 314）
 
@@ -436,5 +436,5 @@
 | M5 图片/OLE 载荷 | `0x6A03` `0x0806` `0x080A` `0x0856` `0x0855` `0x6887` `0x4888` `0x2471` | BLIP/OLE/图片项目符号/文本框环绕需要 M5 的 media 与 drawing 链，本层只保留操作数 |
 | M4 修订元数据 | `0xCA89` | 作者与时间戳需要 SttbfRMark，与 `sprmCPropRMark90` 同处理 |
 | 规范允许忽略 | `0xC81A` | §2.6.1 脚注 145 允许实现忽略；公式由 OMML 重排 |
-| 编辑期/增量保存内部状态 | `0xC601` `0xCA31` `0x6649` `0x664A` `0x244B` `0x244C` `0x245A` `0x6465` `0x7469` `0xCA47` | 样式置换表、表深计数、嵌套表簿记、PGPInfo id；docx 用显式结构或同源读取表达，最终格式等价 |
+| 编辑期/增量保存内部状态 | `0xC601` `0xCA31` `0x244B` `0x245A` `0x6465` `0x7469` `0xCA47` | 样式置换表、嵌套表簿记、PGPInfo id；docx 用显式结构或同源读取表达，最终格式等价 |
 | 无 docx 对应属性 | `0x2879` `0x484E` `0x2A86` `0x2462` `0xC66C` `0xF617` `0xF618` `0xD662` `0x5026` | 换行类型/断词提示/字体替换/框架防重叠/表级缩进/纸张 tie-breaker；条件格式已由 CNF 三兄弟输出 |

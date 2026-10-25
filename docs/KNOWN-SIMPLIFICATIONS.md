@@ -33,8 +33,8 @@
 - `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。
 - 域处理按「顶层特例 + 其余通用」分层：只有顶层 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。未保留 `fldLock`/`fldDirty`/`w:dirty`：域状态的脏标志与锁定语义在转换后丢失，Word 重新分页时会重算。
 - 域结果里的图片、对象、脚注引用等仍是 M5 载荷；嵌套在超链接结果中的域会把外层链接降级为普通文本。
-- 表格单元格现可容纳多个段落（`model::Cell::paragraphs`），但**嵌套表格仍未重建**：内层表格的行会被并入外层表格的行序列，需要按 `sprmPFInnerTableCell`/`sprmPFInnerTtp` 建立真实的递归结构并做专项验收。
-- 单元格内不支持「段落 + 嵌套表」交替的块序列：`Cell` 目前只有段落列表，没有 Block 序列。
+- 嵌套表格按 `sprmPItap`（绝对深度）建立递归结构：`Cell::blocks` 与正文一样是 Block 序列，深度下降时把内层表格挂到外层单元格上。两条限制：其一，深度信息只来自 `sprmPItap`/`sprmPDtap`，若生产者不写这两个 sprm（缺失时按「在表格内 = 一层」推断），嵌套仍会被摊平；其二，LibreOffice 导出 `.doc` 时会把嵌套表格摊平成段落，所以本级只有合成位流样本（`tests/m3_nested_table_test.cc`），没有真实 Word 样本。
+- `sprmPFInnerTableCell` 仍未使用：结构与深度已由 `sprmPItap` 决定，该标记不参与判定。
 - 表样式（`sprmTIstd`、条件格式 `sprmTCnf`/`sprmPCnf`/`sprmCCnf`）没有真实 `.doc` 语料：LibreOffice 26.8 导出 `.doc` 时会把表样式摊平成单元格直接格式，`tests/fixtures` 与 corpus 中因此不存在带 TAPX 的表样式。这条链路由 `tests/m3_styles_test.cc` 直接构造 STSH 位流断言（`M3Styles.TableStyleDefaultsAndConditionals`），一旦拿到 Word 生成的样本应替换为 golden 样本。
 - 修订标记（`sprmCFRMarkDel`/`sprmCFRMarkIns`）输出为 `w:del`/`w:ins`，但作者固定写 `doccraft`、时间戳省略：作者名需要 `SttbfRMark`（M4），`w:id` 仅保证文件内自增唯一。
 - `sprmTTlp` 只把 `grfatl` 的 bit5–10 映射为 `w:tblLook`：首行/末行/首列/末列直接对应，band 位按「置位=启用带状」取反为 `noHBand`/`noVBand`；`itl`（自动格式索引）丢弃。

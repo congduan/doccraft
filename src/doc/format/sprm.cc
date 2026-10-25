@@ -1102,6 +1102,17 @@ void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v) {
       p.after_lines = S16(v, 0);
       p.after_lines_set = true;
       break;
+    case kSprmPItap:
+      // spra 3: the absolute table depth is a 4-byte integer.
+      if (S32(v, 0) >= 0 && S32(v, 0) <= kMaxTableDepth)
+        p.table_depth = S32(v, 0);
+      break;
+    case kSprmPDtap: {
+      int depth = p.table_depth + S32(v, 0);
+      if (depth >= 0 && depth <= kMaxTableDepth)
+        p.table_depth = depth;
+      break;
+    }
     default:
       break;
   }

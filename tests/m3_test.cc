@@ -62,17 +62,21 @@ TEST(FormatTest, KeepsEveryCellParagraph) {
   const auto& table = d.tables[0];
   ASSERT_EQ(table.rows.size(), 1u);
   ASSERT_EQ(table.rows[0].size(), 2u);
-  ASSERT_EQ(table.rows[0][0].paragraphs.size(), 2u);
-  EXPECT_EQ(table.rows[0][0].paragraphs[0].runs[0].text, "P1");
-  EXPECT_EQ(table.rows[0][0].paragraphs[1].runs[0].text, "P2");
-  ASSERT_EQ(table.rows[0][1].paragraphs.size(), 1u);
-  EXPECT_EQ(table.rows[0][1].paragraphs[0].runs[0].text, "Q1");
+  const auto text_at = [&d](const doccraft::model::Block& block) {
+    return d.paragraphs[block.index].runs[0].text;
+  };
+  ASSERT_EQ(table.rows[0][0].blocks.size(), 2u);
+  EXPECT_EQ(text_at(table.rows[0][0].blocks[0]), "P1");
+  EXPECT_EQ(text_at(table.rows[0][0].blocks[1]), "P2");
+  ASSERT_EQ(table.rows[0][1].blocks.size(), 1u);
+  EXPECT_EQ(text_at(table.rows[0][1].blocks[0]), "Q1");
   // The body keeps its own paragraphs on both sides of the table.
   ASSERT_EQ(d.blocks.size(), 3u);
   EXPECT_FALSE(d.blocks[0].table);
   EXPECT_TRUE(d.blocks[1].table);
   EXPECT_FALSE(d.blocks[2].table);
-  EXPECT_EQ(d.paragraphs.size(), 2u);
+  EXPECT_EQ(text_at(d.blocks[0]), "Before");
+  EXPECT_EQ(text_at(d.blocks[2]), "After");
 }
 
 TEST(FormatTest, ReadsDirectCharacterFormatting) {
@@ -158,8 +162,11 @@ TEST(FormatTest, ReadsTableGridAndCells) {
   ASSERT_EQ(d.tables.size(), 1u);
   EXPECT_EQ(d.tables[0].columns, (std::vector<int>{4985, 4987}));
   ASSERT_EQ(d.tables[0].rows.size(), 2u);
-  EXPECT_EQ(d.tables[0].rows[0][0].paragraphs[0].runs[0].text, "A1");
-  EXPECT_EQ(d.tables[0].rows[1][1].paragraphs[0].runs[0].text, "B2");
+  const auto cell_text = [&d](const doccraft::model::Block& block) {
+    return d.paragraphs[block.index].runs[0].text;
+  };
+  EXPECT_EQ(cell_text(d.tables[0].rows[0][0].blocks[0]), "A1");
+  EXPECT_EQ(cell_text(d.tables[0].rows[1][1].blocks[0]), "B2");
 }
 
 TEST(FormatTest, ReadsFirstOddEvenHeadersAndMargins) {

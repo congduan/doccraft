@@ -48,6 +48,10 @@ inline uint64_t U64(Bytes b, size_t p) {
 }
 
 // Two's-complement 16-bit operand (e.g. sprmSDxaLeft in [MS-DOC] §2.6.1).
+inline int32_t S32(Bytes b, size_t p) {
+  return static_cast<int32_t>(U32(b, p));
+}
+
 inline int16_t S16(Bytes b, size_t p) {
   return static_cast<int16_t>(U16(b, p));
 }

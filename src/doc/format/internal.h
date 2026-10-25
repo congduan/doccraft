@@ -30,6 +30,7 @@ namespace doccraft::doc::detail {
 using base::AppendUtf8;
 using base::Bytes;
 using base::S16;
+using base::S32;
 using base::U16;
 using base::U32;
 
@@ -116,6 +117,9 @@ inline constexpr uint8_t kCssaWidthTypeOffset = 4;
 inline constexpr size_t kCssaWidthOffset = 5;
 inline constexpr uint8_t kFtsDxa = 3;
 inline constexpr uint8_t kCssaAllSides = 15;
+
+// sprmPItap: nested tables deeper than this are clamped (Word stops at 4).
+inline constexpr int kMaxTableDepth = 8;
 
 // sprmTCHorzBands / sprmTCVertBands accept 1-3 rows or columns per band.
 inline constexpr uint8_t kMaxBandSize = 3;

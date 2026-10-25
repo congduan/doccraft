@@ -903,7 +903,12 @@ void WriteCellProperties(pugi::xml_node tcp, const model::CellProperties* cp,
   }
 }
 
+void WriteTable(pugi::xml_node parent, const model::Table& t,
+                const model::Document& document,
+                std::map<std::string, int>& hyperlinks, int& revision_id);
+
 void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
+                   const model::Document& document,
                    std::map<std::string, int>& hyperlinks, int& revision_id) {
   const auto& row = t.rows[index];
   const model::RowProperties* rp =
@@ -924,25 +929,34 @@ void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
     WriteCellProperties(tcp, cp, cell_width, span);
     grid_index += span;
     // A w:tc must contain at least one paragraph.
-    if (row[j].paragraphs.empty()) {
+    if (row[j].blocks.empty()) {
       WriteParagraph(tc, model::Paragraph{}, nullptr, hyperlinks, revision_id);
     }
-    for (const auto& paragraph : row[j].paragraphs) {
-      WriteParagraph(tc, paragraph, nullptr, hyperlinks, revision_id);
+    for (const auto& block : row[j].blocks) {
+      if (block.table) {
+        if (block.index < document.tables.size()) {
+          WriteTable(tc, document.tables[block.index], document, hyperlinks,
+                     revision_id);
+        }
+      } else if (block.index < document.paragraphs.size()) {
+        WriteParagraph(tc, document.paragraphs[block.index], nullptr,
+                       hyperlinks, revision_id);
+      }
     }
   }
 }
 
-void WriteTable(pugi::xml_node body, const model::Table& t,
+void WriteTable(pugi::xml_node parent, const model::Table& t,
+                const model::Document& document,
                 std::map<std::string, int>& hyperlinks, int& revision_id) {
-  auto tn = body.append_child("w:tbl");
+  auto tn = parent.append_child("w:tbl");
   WriteTableProperties(tn, t);
   auto grid = tn.append_child("w:tblGrid");
   for (int column : t.columns) {
     IntAttr(grid.append_child("w:gridCol"), "w:w", column);
   }
   for (size_t i = 0; i < t.rows.size(); i++) {
-    WriteTableRow(tn, t, i, hyperlinks, revision_id);
+    WriteTableRow(tn, t, i, document, hyperlinks, revision_id);
   }
 }
 
@@ -968,7 +982,8 @@ void WriteBody(pugi::xml_node body, const model::Document& document,
   }
   for (const auto& block : document.blocks) {
     if (block.table && block.index < document.tables.size()) {
-      WriteTable(body, document.tables[block.index], hyperlinks, revision_id);
+      WriteTable(body, document.tables[block.index], document, hyperlinks,
+                 revision_id);
     } else if (!block.table && block.index < document.paragraphs.size()) {
       WriteParagraph(body, document.paragraphs[block.index],
                      SectionBreakFor(document, block.index), hyperlinks,

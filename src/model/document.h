@@ -135,6 +135,8 @@ struct Paragraph {
        page_break_before_set = false;
   int outline = -1, list_id = -1, list_level = 0;
   int list_level_inc = 0;
+  // sprmPItap/sprmPDtap: absolute table depth (0 = not in a table).
+  int table_depth = 0;
   int nest = 0;
   bool nest_set = false;
   int frame_wrap = -1, frame_anchor = -1;
@@ -240,10 +242,16 @@ struct CellProperties {
   bool no_wrap = false, fit_text = false, hide_mark = false;
 };
 
-// One table cell. A cell holds paragraphs only for now; nested tables are not
-// reconstructed yet (they are flattened by the parser).
+struct Block {
+  bool table = false;
+  size_t index = 0;
+};
+
+// One table cell: an ordered block sequence, like the document body. Blocks
+// index Document::paragraphs / Document::tables, so nested tables are just
+// tables that happen to be reachable from a cell.
 struct Cell {
-  std::vector<Paragraph> paragraphs;
+  std::vector<Block> blocks;
 };
 
 struct RowProperties {
@@ -274,11 +282,6 @@ struct Table {
   int cell_spacing = -1, left_origin = -1, gap_half = 0;
   bool bidi = false, keep_next = false, no_overlap = false;
   int shade = -1, shade_fore = -1, shade_pattern = 0;
-};
-
-struct Block {
-  bool table = false;
-  size_t index = 0;
 };
 
 struct Document {

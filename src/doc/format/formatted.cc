@@ -36,8 +36,12 @@ using detail::Find;
 using detail::FormatRange;
 using detail::InheritedRun;
 using detail::kSprmCPlain;
+using detail::kSprmPDtap;
+using detail::kSprmPFInnerTableCell;
+using detail::kSprmPFInnerTtp;
 using detail::kSprmPFInTable;
 using detail::kSprmPFTtp;
+using detail::kSprmPItap;
 using detail::kSprmTDefTable;
 using detail::kSprmTDefTableObsolete;
 using detail::kUndefinedU32;
@@ -220,10 +224,14 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (!sections.empty())
     doc.section = sections.back().second;
   model::Paragraph para;
-  model::Cell cell;
-  model::Table current_table;
-  std::vector<model::Cell> row;
-  bool in_table = false;
+  // One open table per nesting level. sprmPItap/sprmPDtap give a paragraph's
+  // absolute depth, so the stack height follows the document, not the marks.
+  struct TableFrame {
+    model::Table table;
+    std::vector<model::Cell> row;
+    model::Cell cell;
+  };
+  std::vector<TableFrame> frames;
   std::vector<FieldFrame> fields;
   bool page_field = false;
   std::string hyperlink;
@@ -232,18 +240,48 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     doc.blocks.push_back({false, doc.paragraphs.size()});
     doc.paragraphs.push_back(std::move(value));
   };
-  auto add_table = [&]() {
-    if (!in_table)
-      return;
-    if (!row.empty()) {
-      current_table.rows.push_back(std::move(row));
-      current_table.row_properties.emplace_back();
-      row.clear();
+  auto attach_paragraph = [&](model::Paragraph value) {
+    doc.paragraphs.push_back(std::move(value));
+    frames.back().cell.blocks.push_back({false, doc.paragraphs.size() - 1});
+  };
+  // A cell mark always yields a cell, even an empty one (merged cells carry no
+  // content); the row-end mark only keeps a cell that still has content.
+  auto close_cell = [&](bool keep_empty) {
+    TableFrame& frame = frames.back();
+    if (keep_empty || !frame.cell.blocks.empty())
+      frame.row.push_back(std::move(frame.cell));
+    frame.cell = {};
+  };
+  auto close_row = [&]() {
+    TableFrame& frame = frames.back();
+    close_cell(false);
+    if (!frame.row.empty()) {
+      frame.table.rows.push_back(std::move(frame.row));
+      frame.table.row_properties.emplace_back();
+      frame.row.clear();
     }
-    doc.blocks.push_back({true, doc.tables.size()});
-    doc.tables.push_back(std::move(current_table));
-    current_table = {};
-    in_table = false;
+  };
+  // Pops the innermost table and hands it to its parent: a block of the
+  // document body at depth 1, or a block of the enclosing cell below that.
+  auto close_table = [&]() {
+    if (frames.empty())
+      return;
+    close_row();
+    const size_t index = doc.tables.size();
+    doc.tables.push_back(std::move(frames.back().table));
+    frames.pop_back();
+    if (frames.empty())
+      doc.blocks.push_back({true, index});
+    else
+      frames.back().cell.blocks.push_back({true, index});
+  };
+  auto set_table_depth = [&](int depth) {
+    if (depth < 0)
+      return;
+    while (static_cast<int>(frames.size()) > depth)
+      close_table();
+    while (static_cast<int>(frames.size()) < depth)
+      frames.emplace_back();
   };
   for (size_t i = 0; i < chars->size(); i++) {
     const Char& ch = (*chars)[i];
@@ -316,51 +354,61 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     }
     const auto* pap = Find(*papx, ch.fc);
     bool table_flag = false, row_end = false;
+    int depth = 0;
     if (pap) {
       WalkParagraph(pap->sprms, data, [&](uint16_t op, Bytes v) {
         if (op == kSprmPFInTable)
           table_flag = v[0] != 0;
-        if (op == kSprmPFTtp)
+        if (op == kSprmPFTtp || op == kSprmPFInnerTtp)
           row_end = v[0] != 0;
+        if (op == kSprmPItap)
+          depth = U16(v, 0);
+        if (op == kSprmPDtap)
+          depth = std::max(0, depth + S16(v, 0));
       });
     }
-    // The first in-table paragraph starts the table: its cell mark is still
-    // ahead, so waiting for \x07 would drop the cell's first paragraph.
-    if (table_flag && !in_table && ch.text != "\x07") {
-      in_table = true;
-      current_table = {};
+    // Depth is authoritative when the document carries sprmPItap; otherwise an
+    // in-table paragraph means "one level deep", which is what pre-Word-97
+    // producers and LibreOffice write.
+    if (pap) {
+      const int wanted = depth > 0 ? depth : (table_flag ? 1 : 0);
+      set_table_depth(wanted);
     }
-    if (in_table && !table_flag && !row_end && ch.text != "\x07")
-      add_table();
     if (ch.text == "\x07") {
-      if (!in_table) {
-        in_table = true;
-      }
+      if (frames.empty())
+        set_table_depth(1);
       if (row_end) {
-        // A cell that never saw its own mark still has to be kept.
-        if (!cell.paragraphs.empty()) {
-          row.push_back(std::move(cell));
-          cell = {};
+        // The row-end mark is itself a paragraph (the TTP): keep any content
+        // that belongs to the last cell before the row closes.
+        if (!para.runs.empty()) {
+          ApplyParagraphSprms(para, pap, data);
+          frames.back().cell.blocks.push_back({false, doc.paragraphs.size()});
+          doc.paragraphs.push_back(std::move(para));
+          para = {};
         }
-        auto finished = FinishTableRow(current_table, row, para, pap, data);
+        close_cell(false);
+        auto finished = FinishTableRow(frames.back().table, frames.back().row,
+                                       para, pap, data);
         if (!finished) {
           return std::unexpected(finished.error());
         }
       } else {
-        ApplyParagraphSprms(para, pap, data);
-        cell.paragraphs.push_back(std::move(para));
-        row.push_back(std::move(cell));
-        cell = {};
-        para = {};
+        if (!para.runs.empty()) {
+          ApplyParagraphSprms(para, pap, data);
+          frames.back().cell.blocks.push_back({false, doc.paragraphs.size()});
+          doc.paragraphs.push_back(std::move(para));
+          para = {};
+        }
+        close_cell(true);
       }
       continue;
     }
     if (ch.newline) {
       ApplyParagraphSprms(para, pap, data);
-      if (in_table)
-        cell.paragraphs.push_back(std::move(para));
-      else
+      if (frames.empty())
         add_paragraph(std::move(para));
+      else
+        attach_paragraph(std::move(para));
       para = {};
       continue;
     }
@@ -410,7 +458,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     r.text = ch.text;
     para.runs.push_back(std::move(r));
   }
-  add_table();
+  while (!frames.empty())
+    close_table();
   if (!para.runs.empty() || doc.blocks.empty())
     add_paragraph(std::move(para));
   auto headers = ReadHeaders(doc, word, table, fib, *chpx, *papx);
