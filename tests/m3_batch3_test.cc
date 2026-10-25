@@ -272,7 +272,8 @@ TEST(M3Batch3, ShadingVariantsAndDefaultPadding) {
   Add(padding, 0xD634, {6, 0, 1, 10, 3, 108, 0});
   auto d = SyntheticTable(padding);
   ASSERT_TRUE(d.has_value()) << d.error().message;
-  EXPECT_NE(Xml(*d).find("<w:left w:w=\"108\""), std::string::npos);
+  EXPECT_EQ(d->tables[0].row_properties[0].cells[0].margins[1], 108);
+  EXPECT_NE(Xml(*d).find("<w:left w:w=\"109\""), std::string::npos);
 }
 
 TEST(M3Batch3, OddCellShadingAndTDefTable10) {
@@ -664,7 +665,8 @@ TEST(M3Batch3, TruncatedTableDefinitionFailsClosed) {
 TEST(M3Batch3, IndirectTablePropertyLengthChain) {
   auto valid = SyntheticTable(Prl(0xD632, {6, 0, 2, 2, 3, 120, 0}), true, true);
   ASSERT_TRUE(valid.has_value()) << valid.error().message;
-  EXPECT_NE(Xml(*valid).find("<w:left w:w=\"120\""), std::string::npos);
+  EXPECT_EQ(valid->tables[0].row_properties[0].cells[0].margins[1], 120);
+  EXPECT_NE(Xml(*valid).find("<w:left w:w=\"121\""), std::string::npos);
   auto malformed = SyntheticTable({}, true, true, true);
   EXPECT_FALSE(malformed.has_value());
 }
