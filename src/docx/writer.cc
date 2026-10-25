@@ -915,7 +915,8 @@ void WriteTableProperties(pugi::xml_node tn, const model::Table& t) {
   }
   if (t.look >= 0) {
     char mask[8];
-    std::snprintf(mask, sizeof(mask), "%04X", t.look);
+    const unsigned look_bits = static_cast<unsigned>(t.look) & 0xFFFFu;
+    std::snprintf(mask, sizeof(mask), "%04X", look_bits);
     Attr(pr.append_child("w:tblLook"), "w:val", mask);
   }
 }
