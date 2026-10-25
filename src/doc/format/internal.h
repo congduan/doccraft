@@ -14,6 +14,7 @@
 
 #ifndef SRC_DOC_FORMAT_INTERNAL_H_
 #define SRC_DOC_FORMAT_INTERNAL_H_
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -186,10 +187,23 @@ void ReadLists(model::Document& doc, Bytes table, const Fib& fib);
 
 model::Run InheritedRun(const model::Document& doc, int style);
 
-std::expected<void, Error> ReadHeaders(model::Document& doc, Bytes word,
-                                       Bytes table, const Fib& fib,
-                                       const std::vector<FormatRange>& chpx,
-                                       const std::vector<FormatRange>& papx);
+// The six header/footer stories ([MS-DOC] §2.8.2) of one section:
+// even/odd/default header, then even/odd/default footer.
+using SectionHeaders = std::array<std::vector<model::Paragraph>, 6>;
+
+std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
+    model::Document& doc, Bytes word, Bytes table, const Fib& fib,
+    const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
+    size_t sections);
 }  // namespace doccraft::doc::detail
+
+namespace doccraft::doc {
+
+// True when two adjacent characters may share one run: every character
+// property matches. Symbol and field-marker runs never merge. Shared by the
+// body parser and the header/footer stories.
+bool SameRunFormatting(const model::Run& prior, const model::Run& r);
+
+}  // namespace doccraft::doc
 
 #endif  // SRC_DOC_FORMAT_INTERNAL_H_

@@ -10,7 +10,8 @@ per-sprm acceptance ledger.
 doccraft is a pure C++ `.doc` (Word 97-2003 binary) to `.docx` high-fidelity converter:
 single binary, no runtime dependencies. Current progress: M1 (CFB container) and M2
 (FIB / piece table / text path) are done; M3 (CHP/PAP/SEP sprms, styles, lists, basic
-tables, headers and footers) is being delivered in batches (latest: M3 batch 7).
+tables, headers and footers) is being delivered in batches (latest: M3 batch 8,
+plus the structure fixes for run merging, cell blocks and per-section headers).
 
 Core invariant: **four layers, one-way data flow, the IR is the only hub.**
 

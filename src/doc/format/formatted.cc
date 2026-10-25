@@ -462,9 +462,29 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     close_table();
   if (!para.runs.empty() || doc.blocks.empty())
     add_paragraph(std::move(para));
-  auto headers = ReadHeaders(doc, word, table, fib, *chpx, *papx);
+  // Header/footer stories are per section: PlcfHdd holds six per section, in
+  // document order, so section k reads entries 6k..6k+5.
+  const size_t section_count =
+      doc.section_breaks.empty() ? 1 : doc.section_breaks.size() + 1;
+  auto headers =
+      ReadHeaders(doc, word, table, fib, *chpx, *papx, section_count);
   if (!headers)
     return std::unexpected(headers.error());
+  for (size_t k = 0; k < section_count; k++) {
+    detail::SectionHeaders& stories = (*headers)[k];
+    model::Section* target = nullptr;
+    if (k + 1 == section_count)
+      target = &doc.section;
+    else if (k < doc.section_breaks.size())
+      target = &doc.section_breaks[k].second;
+    if (target == nullptr)
+      continue;
+    target->headers = stories;
+    if (!stories[4].empty() || !stories[5].empty())
+      target->first_page_different = true;
+    if (!stories[0].empty() || !stories[2].empty())
+      target->odd_even_different = true;
+  }
   return doc;
 }
 }  // namespace doccraft::doc

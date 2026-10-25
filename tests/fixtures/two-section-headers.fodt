@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:styles>
+<style:style style:name="PFirst" style:family="paragraph" style:master-page-name="FirstPage"/>
+<style:style style:name="PSecond" style:family="paragraph" style:master-page-name="SecondPage">
+ <style:paragraph-properties fo:break-before="page"/>
+</style:style>
+</office:styles>
+<office:automatic-styles>
+<style:page-layout style:name="pm1">
+  <style:page-layout-properties fo:page-width="8.5in" fo:page-height="11in" fo:margin="1in"/>
+</style:page-layout>
+</office:automatic-styles>
+<office:master-styles>
+<style:master-page style:name="FirstPage" style:page-layout-name="pm1">
+  <style:header><text:p>HEADER ONE</text:p></style:header>
+</style:master-page>
+<style:master-page style:name="SecondPage" style:page-layout-name="pm1">
+  <style:header><text:p>HEADER TWO</text:p></style:header>
+</style:master-page>
+</office:master-styles>
+<office:body><office:text>
+<text:p text:style-name="PFirst">Body of section one.</text:p>
+<text:p text:style-name="PSecond">Body of section two.</text:p>
+</office:text></office:body>
+</office:document>

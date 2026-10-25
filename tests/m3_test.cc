@@ -177,8 +177,10 @@ TEST(FormatTest, ReadsFirstOddEvenHeadersAndMargins) {
   EXPECT_TRUE(d.section.odd_even_different);
   for (const auto& story : d.section.headers)
     ASSERT_FALSE(story.empty());
-  EXPECT_EQ(d.section.headers[0][0].runs[0].text, "E");
-  EXPECT_EQ(d.section.headers[4][0].runs[0].text, "F");
+  // Header text is merged into one run per formatting change.
+  EXPECT_EQ(d.section.headers[0][0].runs.size(), 1u);
+  EXPECT_EQ(d.section.headers[0][0].runs[0].text, "Even header");
+  EXPECT_EQ(d.section.headers[4][0].runs[0].text, "First header");
 }
 
 TEST(FormatTest, ReadsLandscapePageGeometry) {

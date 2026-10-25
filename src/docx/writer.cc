@@ -91,6 +91,34 @@ constexpr char kSettingsPart[] =
     "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
     "<w:evenAndOddHeaders/></w:settings>";
 
+// One part of the resulting OPC package (path inside the ZIP plus payload).
+struct Part {
+  std::string name;
+  std::string data;
+};
+
+// State shared by the whole writer pass: hyperlink targets, revision ids and
+// the header/footer parts discovered while walking the sections. rId1/rId2 are
+// reserved for the styles and numbering parts.
+struct WriteContext {
+  std::map<std::string, int> hyperlinks;
+  int revision_id = 0;
+  int next_rid = 3;
+  int next_part = 1;
+  bool odd_even = false;
+  std::vector<std::pair<int, std::string>> relations;  // rId -> part name
+  std::vector<Part> parts;
+};
+
+std::string Save(const pugi::xml_document& d);
+
+void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
+                    const model::Section* break_section, WriteContext& ctx);
+
+// Returns false when `section` has no header/footer story to reference.
+bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
+                            WriteContext& ctx);
+
 void WriteFramePr(pugi::xml_node pr, const model::Paragraph& p) {
   if (p.frame_wrap < 0 && p.frame_anchor < 0 && p.frame_x < 0 &&
       p.frame_y < 0 && p.frame_width < 0 && p.frame_height < 0 &&
@@ -556,7 +584,8 @@ void WriteEndnoteProperties(pugi::xml_node sec, const model::Section& section) {
   }
 }
 
-void SectionPr(pugi::xml_node sec, const model::Section& section) {
+void SectionPr(pugi::xml_node sec, const model::Section& section,
+               WriteContext* ctx) {
   if (section.break_specified) {
     const char* types[] = {"continuous", "nextColumn", "nextPage", "evenPage",
                            "oddPage"};
@@ -591,6 +620,9 @@ void SectionPr(pugi::xml_node sec, const model::Section& section) {
   WriteLineNumbering(sec, section);
   WriteFootnoteProperties(sec, section);
   WriteEndnoteProperties(sec, section);
+  if (ctx != nullptr) {
+    WriteSectionReferences(sec, section, *ctx);
+  }
 }
 
 std::string Save(const pugi::xml_document& d) {
@@ -599,25 +631,58 @@ std::string Save(const pugi::xml_document& d) {
   return out.str();
 }
 
-// One part of the resulting OPC package (path inside the ZIP plus payload).
-struct Part {
-  std::string name;
-  std::string data;
-};
+// Emits the w:headerReference / w:footerReference of one section and registers
+// its part plus relationship, so every section carries its own stories.
+bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
+                            WriteContext& ctx) {
+  bool any = false;
+  for (size_t i = 0; i < 6; i++) {
+    if (section.headers[i].empty()) {
+      continue;
+    }
+    any = true;
+    const bool is_header = i == 0 || i == 1 || i == 4;
+    const int rid = ctx.next_rid++;
+    const std::string name = (is_header ? "header" : "footer") +
+                             std::to_string(ctx.next_part++) + ".xml";
+    auto ref =
+        sec.append_child(is_header ? "w:headerReference" : "w:footerReference");
+    Attr(ref, "w:type",
+         i == 0 || i == 2   ? "even"
+         : i == 1 || i == 3 ? "default"
+                            : "first");
+    Attr(ref, "r:id", "rId" + std::to_string(rid));
+    ctx.relations.emplace_back(rid, name);
+    pugi::xml_document part;
+    auto root = part.append_child(is_header ? "w:hdr" : "w:ftr");
+    Attr(root, "xmlns:w", kWordmlNamespace);
+    Attr(root, "xmlns:r", kRelationshipsNamespace);
+    for (const auto& paragraph : section.headers[i]) {
+      WriteParagraph(root, paragraph, nullptr, ctx);
+    }
+    ctx.parts.push_back({name, Save(part)});
+  }
+  if (section.first_page_different) {
+    One(sec, "w:titlePg");
+  }
+  if (section.odd_even_different) {
+    ctx.odd_even = true;
+  }
+  return any;
+}
 
 void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
-                    const model::Section* break_section,
-                    std::map<std::string, int>& hyperlinks, int& revision_id) {
+                    const model::Section* break_section, WriteContext& ctx) {
   auto pn = parent.append_child("w:p");
   ParaPr(pn, p);
   if (break_section) {
-    SectionPr(pn.child("w:pPr").append_child("w:sectPr"), *break_section);
+    SectionPr(pn.child("w:pPr").append_child("w:sectPr"), *break_section, &ctx);
   }
   for (const auto& r : p.runs) {
     pugi::xml_node owner = pn;
     if (!r.hyperlink.empty()) {
-      auto [it, inserted] = hyperlinks.try_emplace(
-          r.hyperlink, static_cast<int>(hyperlinks.size()) + 10);
+      auto [it, inserted] =
+          ctx.hyperlinks.try_emplace(r.hyperlink, ctx.next_rid++);
       (void)inserted;
       owner = pn.append_child("w:hyperlink");
       Attr(owner, "r:id", "rId" + std::to_string(it->second));
@@ -630,7 +695,7 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
     bool deleted = r.revision_delete;
     if (deleted || r.revision_insert) {
       wrapper = owner.append_child(deleted ? "w:del" : "w:ins");
-      IntAttr(wrapper, "w:id", ++revision_id);
+      IntAttr(wrapper, "w:id", ++ctx.revision_id);
       Attr(wrapper, "w:author", "doccraft");
     }
     auto rn = wrapper.append_child("w:r");
@@ -904,12 +969,10 @@ void WriteCellProperties(pugi::xml_node tcp, const model::CellProperties* cp,
 }
 
 void WriteTable(pugi::xml_node parent, const model::Table& t,
-                const model::Document& document,
-                std::map<std::string, int>& hyperlinks, int& revision_id);
+                const model::Document& document, WriteContext& ctx);
 
 void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
-                   const model::Document& document,
-                   std::map<std::string, int>& hyperlinks, int& revision_id) {
+                   const model::Document& document, WriteContext& ctx) {
   const auto& row = t.rows[index];
   const model::RowProperties* rp =
       index < t.row_properties.size() ? &t.row_properties[index] : nullptr;
@@ -930,25 +993,22 @@ void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
     grid_index += span;
     // A w:tc must contain at least one paragraph.
     if (row[j].blocks.empty()) {
-      WriteParagraph(tc, model::Paragraph{}, nullptr, hyperlinks, revision_id);
+      WriteParagraph(tc, model::Paragraph{}, nullptr, ctx);
     }
     for (const auto& block : row[j].blocks) {
       if (block.table) {
         if (block.index < document.tables.size()) {
-          WriteTable(tc, document.tables[block.index], document, hyperlinks,
-                     revision_id);
+          WriteTable(tc, document.tables[block.index], document, ctx);
         }
       } else if (block.index < document.paragraphs.size()) {
-        WriteParagraph(tc, document.paragraphs[block.index], nullptr,
-                       hyperlinks, revision_id);
+        WriteParagraph(tc, document.paragraphs[block.index], nullptr, ctx);
       }
     }
   }
 }
 
 void WriteTable(pugi::xml_node parent, const model::Table& t,
-                const model::Document& document,
-                std::map<std::string, int>& hyperlinks, int& revision_id) {
+                const model::Document& document, WriteContext& ctx) {
   auto tn = parent.append_child("w:tbl");
   WriteTableProperties(tn, t);
   auto grid = tn.append_child("w:tblGrid");
@@ -956,7 +1016,7 @@ void WriteTable(pugi::xml_node parent, const model::Table& t,
     IntAttr(grid.append_child("w:gridCol"), "w:w", column);
   }
   for (size_t i = 0; i < t.rows.size(); i++) {
-    WriteTableRow(tn, t, i, document, hyperlinks, revision_id);
+    WriteTableRow(tn, t, i, document, ctx);
   }
 }
 
@@ -972,22 +1032,20 @@ const model::Section* SectionBreakFor(const model::Document& document,
 }
 
 void WriteBody(pugi::xml_node body, const model::Document& document,
-               std::map<std::string, int>& hyperlinks, int& revision_id) {
+               WriteContext& ctx) {
   if (document.blocks.empty()) {
     for (size_t i = 0; i < document.paragraphs.size(); i++) {
       WriteParagraph(body, document.paragraphs[i], SectionBreakFor(document, i),
-                     hyperlinks, revision_id);
+                     ctx);
     }
     return;
   }
   for (const auto& block : document.blocks) {
     if (block.table && block.index < document.tables.size()) {
-      WriteTable(body, document.tables[block.index], document, hyperlinks,
-                 revision_id);
+      WriteTable(body, document.tables[block.index], document, ctx);
     } else if (!block.table && block.index < document.paragraphs.size()) {
       WriteParagraph(body, document.paragraphs[block.index],
-                     SectionBreakFor(document, block.index), hyperlinks,
-                     revision_id);
+                     SectionBreakFor(document, block.index), ctx);
     }
   }
 }
@@ -1232,43 +1290,9 @@ pugi::xml_document WriteNumbering(const model::Document& document) {
   return numbering;
 }
 
-// Emits w:headerReference / w:footerReference and the matching header/footer
-// parts. References are numbered rId3-rId8; hyperlinks start at rId10.
-void WriteSectionReferences(pugi::xml_node sec, const model::Document& document,
-                            std::map<std::string, int>& hyperlinks,
-                            std::vector<Part>* parts, int& revision_id) {
-  for (size_t i = 0; i < 6; i++) {
-    if (document.section.headers[i].empty()) {
-      continue;
-    }
-    bool is_header = i == 0 || i == 1 || i == 4;
-    std::string name =
-        (is_header ? "header" : "footer") + std::to_string(i + 1) + ".xml";
-    auto ref =
-        sec.append_child(is_header ? "w:headerReference" : "w:footerReference");
-    Attr(ref, "w:type",
-         i == 0 || i == 2   ? "even"
-         : i == 1 || i == 3 ? "default"
-                            : "first");
-    Attr(ref, "r:id", "rId" + std::to_string(i + 3));
-    pugi::xml_document part;
-    auto root = part.append_child(is_header ? "w:hdr" : "w:ftr");
-    Attr(root, "xmlns:w", kWordmlNamespace);
-    Attr(root, "xmlns:r", kRelationshipsNamespace);
-    for (const auto& p : document.section.headers[i]) {
-      WriteParagraph(root, p, nullptr, hyperlinks, revision_id);
-    }
-    parts->push_back({name, Save(part)});
-  }
-  if (document.section.first_page_different) {
-    One(sec, "w:titlePg");
-  }
-}
-
-std::string BuildContentTypes(const model::Document& document,
-                              const std::vector<Part>& header_parts) {
+std::string BuildContentTypes(const WriteContext& ctx) {
   std::string out = kContentTypesPrefix;
-  for (const auto& part : header_parts) {
+  for (const auto& part : ctx.parts) {
     bool header = part.name.starts_with("header");
     out += "<Override PartName=\"/word/" + part.name +
            "\" "
@@ -1277,60 +1301,46 @@ std::string BuildContentTypes(const model::Document& document,
            (header ? std::string("header") : std::string("footer")) +
            "+xml\"/>";
   }
-  if (document.section.odd_even_different) {
+  if (ctx.odd_even) {
     out += kSettingsContentType;
   }
   out += "</Types>";
   return out;
 }
 
-pugi::xml_document BuildRelationships(
-    const model::Document& document,
-    const std::map<std::string, int>& hyperlinks) {
+pugi::xml_document BuildRelationships(const WriteContext& ctx) {
+  constexpr const char* kRelBase =
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
   pugi::xml_document docrels;
   auto relations = docrels.append_child("Relationships");
   Attr(relations, "xmlns",
        "http://schemas.openxmlformats.org/package/2006/relationships");
   auto style_rel = relations.append_child("Relationship");
   Attr(style_rel, "Id", "rId1");
-  Attr(style_rel, "Type",
-       "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
-       "styles");
+  Attr(style_rel, "Type", std::string(kRelBase) + "styles");
   Attr(style_rel, "Target", "styles.xml");
   auto number_rel = relations.append_child("Relationship");
   Attr(number_rel, "Id", "rId2");
-  Attr(number_rel, "Type",
-       "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
-       "numbering");
+  Attr(number_rel, "Type", std::string(kRelBase) + "numbering");
   Attr(number_rel, "Target", "numbering.xml");
-  for (size_t i = 0; i < 6; i++) {
-    if (document.section.headers[i].empty()) {
-      continue;
-    }
-    bool header = i == 0 || i == 1 || i == 4;
+  const int settings_id = ctx.odd_even ? ctx.next_rid : 0;
+  for (const auto& [rid, target] : ctx.relations) {
+    const bool header = target.starts_with("header");
     auto rel = relations.append_child("Relationship");
-    Attr(rel, "Id", "rId" + std::to_string(i + 3));
-    Attr(rel, "Type",
-         std::string("http://schemas.openxmlformats.org/officeDocument/2006/"
-                     "relationships/") +
-             (header ? "header" : "footer"));
-    Attr(rel, "Target",
-         (header ? "header" : "footer") + std::to_string(i + 1) + ".xml");
+    Attr(rel, "Id", "rId" + std::to_string(rid));
+    Attr(rel, "Type", std::string(kRelBase) + (header ? "header" : "footer"));
+    Attr(rel, "Target", target);
   }
-  if (document.section.odd_even_different) {
+  if (settings_id != 0) {
     auto rel = relations.append_child("Relationship");
-    Attr(rel, "Id", "rId9");
-    Attr(rel, "Type",
-         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
-         "settings");
+    Attr(rel, "Id", "rId" + std::to_string(settings_id));
+    Attr(rel, "Type", std::string(kRelBase) + "settings");
     Attr(rel, "Target", "settings.xml");
   }
-  for (const auto& [url, id] : hyperlinks) {
+  for (const auto& [url, id] : ctx.hyperlinks) {
     auto link = relations.append_child("Relationship");
     Attr(link, "Id", "rId" + std::to_string(id));
-    Attr(link, "Type",
-         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
-         "hyperlink");
+    Attr(link, "Type", std::string(kRelBase) + "hyperlink");
     Attr(link, "Target", url);
     Attr(link, "TargetMode", "External");
   }
@@ -1377,36 +1387,32 @@ uint32_t Crc32(std::string_view bytes) {
 
 std::expected<std::vector<uint8_t>, Error> Write(
     const model::Document& document) {
-  std::map<std::string, int> hyperlinks;
-  int revision_id = 0;
+  WriteContext ctx;
   pugi::xml_document doc;
   auto root = doc.append_child("w:document");
   Attr(root, "xmlns:w", kWordmlNamespace);
   Attr(root, "xmlns:r", kRelationshipsNamespace);
   auto body = root.append_child("w:body");
-  WriteBody(body, document, hyperlinks, revision_id);
+  WriteBody(body, document, ctx);
 
   auto sec = body.append_child("w:sectPr");
-  SectionPr(sec, document.section);
-  std::vector<Part> header_parts;
-  WriteSectionReferences(sec, document, hyperlinks, &header_parts, revision_id);
+  SectionPr(sec, document.section, &ctx);
 
   pugi::xml_document styles = WriteStyles(document);
   pugi::xml_document numbering = WriteNumbering(document);
-  pugi::xml_document docrels = BuildRelationships(document, hyperlinks);
+  pugi::xml_document docrels = BuildRelationships(ctx);
 
   std::vector<Part> parts;
-  parts.push_back(
-      {"[Content_Types].xml", BuildContentTypes(document, header_parts)});
+  parts.push_back({"[Content_Types].xml", BuildContentTypes(ctx)});
   parts.push_back({"_rels/.rels", kRootRelationships});
   parts.push_back({"word/_rels/document.xml.rels", Save(docrels)});
   parts.push_back({"word/document.xml", Save(doc)});
   parts.push_back({"word/styles.xml", Save(styles)});
   parts.push_back({"word/numbering.xml", Save(numbering)});
-  for (const auto& part : header_parts) {
+  for (const auto& part : ctx.parts) {
     parts.push_back({"word/" + part.name, part.data});
   }
-  if (document.section.odd_even_different) {
+  if (ctx.odd_even) {
     parts.push_back({"word/settings.xml", kSettingsPart});
   }
   return PackParts(parts);
