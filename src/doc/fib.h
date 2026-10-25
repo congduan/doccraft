@@ -40,6 +40,9 @@ struct Fib {
   Range stsh, chpx_bte, papx_bte, sed, fonts, lists, list_overrides, headers;
   // Footnote/endnote reference and text PLCs ([MS-DOC] §2.8.4, §2.8.5).
   Range fnd_ref, fnd_txt, end_ref, end_txt;
+  // Comment anchors (PlcfandRef), comment text (PlcfandTxt) and the author
+  // name array (GrpXstAtnOwners).
+  Range and_ref, and_txt, atn_owners;
   std::string table_stream() const {
     return which_table ? "1Table" : "0Table";
   }

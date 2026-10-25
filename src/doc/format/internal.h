@@ -194,6 +194,17 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
     uint64_t base, uint32_t first, uint32_t last);
 
+// Comment anchor CPs inside the main story, in document order. Comment i of
+// Document::comments is anchored at anchor[i].
+std::expected<std::vector<uint32_t>, Error> ReadCommentAnchors(Bytes table,
+                                                               const Fib& fib);
+
+// Fills Document::comments with the comment bodies and their authors.
+std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
+                                        Bytes table, const Fib& fib,
+                                        const std::vector<FormatRange>& chpx,
+                                        const std::vector<FormatRange>& papx);
+
 // Reference sites of footnotes/endnotes inside the main story, in document
 // order. Note i of Document::notes is footnote i, then endnote i.
 struct NoteReferenceSet {

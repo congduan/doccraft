@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p>Main text with <text:span>an annotated phrase</text:span><office:annotation><dc:creator>Alice</dc:creator><dc:date>2026-01-02T03:04:05</dc:date><text:p>First comment body.</text:p><text:p>Second comment paragraph.</text:p></office:annotation> and the rest.</text:p>
+<text:p>Second paragraph<office:annotation><dc:creator>Bob</dc:creator><text:p>Another comment.</text:p></office:annotation> tail.</text:p>
+</office:text></office:body></office:document>

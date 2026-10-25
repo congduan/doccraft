@@ -94,6 +94,8 @@ struct Run {
   // w:footnoteReference / w:endnoteReference. -1 = not a reference.
   int note_ref = -1;
   bool note_endnote = false;
+  // Comment anchor: index into Document::comments + 1 (w:commentReference id).
+  int comment_ref = -1;
   // sprmCFitText: width in twips a run is squeezed or stretched into.
   int fit_text = 0, fit_text_id = 0;
   // sprmCFELayout: East Asian layout unit (w:eastAsianLayout).
@@ -251,6 +253,13 @@ struct Block {
   size_t index = 0;
 };
 
+// A comment: author metadata plus the note body.
+struct Comment {
+  std::string author;
+  std::string initials;
+  std::vector<Paragraph> paragraphs;
+};
+
 // A footnote or endnote: the note body plus its identity.
 struct Note {
   bool endnote = false;
@@ -302,6 +311,7 @@ struct Document {
   std::vector<std::string> fonts;
   std::vector<List> lists;
   std::vector<Note> notes;
+  std::vector<Comment> comments;
   std::vector<int> list_overrides;
   std::vector<Table> tables;
   std::vector<Block> blocks;

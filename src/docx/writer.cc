@@ -119,6 +119,9 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
 // registers the parts and relationships.
 void WriteNoteParts(const model::Document& document, WriteContext& ctx);
 
+// Emits comments.xml when the document has comments and registers the part.
+void WriteCommentPart(const model::Document& document, WriteContext& ctx);
+
 // Returns false when `section` has no header/footer story to reference.
 bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
                             WriteContext& ctx);
@@ -732,6 +735,36 @@ void WriteNoteParts(const model::Document& document, WriteContext& ctx) {
   }
 }
 
+void WriteCommentPart(const model::Document& document, WriteContext& ctx) {
+  if (document.comments.empty()) {
+    return;
+  }
+  pugi::xml_document doc;
+  auto root = doc.append_child("w:comments");
+  Attr(root, "xmlns:w", kWordmlNamespace);
+  Attr(root, "xmlns:r", kRelationshipsNamespace);
+  int id = 0;
+  for (const auto& comment : document.comments) {
+    id++;
+    auto node = root.append_child("w:comment");
+    IntAttr(node, "w:id", id);
+    Attr(node, "w:author",
+         comment.author.empty() ? "doccraft" : comment.author);
+    if (!comment.initials.empty()) {
+      Attr(node, "w:initials", comment.initials);
+    }
+    if (comment.paragraphs.empty()) {
+      node.append_child("w:p");
+    }
+    for (const auto& paragraph : comment.paragraphs) {
+      WriteParagraph(node, paragraph, nullptr, ctx);
+    }
+  }
+  const int rid = ctx.next_rid++;
+  ctx.relations.emplace_back(rid, "comments.xml");
+  ctx.parts.push_back({"comments.xml", Save(doc)});
+}
+
 void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
                     const model::Section* break_section, WriteContext& ctx) {
   auto pn = parent.append_child("w:p");
@@ -751,6 +784,10 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       owner = pn.append_child("w:fldSimple");
       Attr(owner, "w:instr", "PAGE");
     }
+    if (r.comment_ref >= 0) {
+      // The anchor is a point: the range opens and closes around this run.
+      IntAttr(pn.append_child("w:commentRangeStart"), "w:id", r.comment_ref);
+    }
     // sprmCFRMarkDel / sprmCFRMarkIns: tracked text lives inside w:del / w:ins.
     pugi::xml_node wrapper = owner;
     bool deleted = r.revision_delete;
@@ -761,7 +798,10 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
     }
     auto rn = wrapper.append_child("w:r");
     RunPr(rn, r);
-    if (r.note_ref >= 0) {
+    if (r.comment_ref >= 0) {
+      IntAttr(rn.append_child("w:commentRangeEnd"), "w:id", r.comment_ref);
+      IntAttr(rn.append_child("w:commentReference"), "w:id", r.comment_ref);
+    } else if (r.note_ref >= 0) {
       // A note reference is an empty run carrying the reference element.
       IntAttr(rn.append_child(r.note_endnote ? "w:endnoteReference"
                                              : "w:footnoteReference"),
@@ -1374,6 +1414,10 @@ std::string BuildContentTypes(const WriteContext& ctx) {
           "ContentType=\"application/"
           "vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml\"/"
           ">";
+    } else if (part.name == "comments.xml") {
+      out +=
+          "<Override PartName=\"/word/comments.xml\" ContentType=\"application/"
+          "vnd.openxmlformats-officedocument.wordprocessingml.comments+xml\"/>";
     } else if (part.name == "endnotes.xml") {
       out +=
           "<Override PartName=\"/word/endnotes.xml\" ContentType=\"application/"
@@ -1411,6 +1455,8 @@ pugi::xml_document BuildRelationships(const WriteContext& ctx) {
       type = "footnotes";
     } else if (target == "endnotes.xml") {
       type = "endnotes";
+    } else if (target == "comments.xml") {
+      type = "comments";
     }
     auto rel = relations.append_child("Relationship");
     Attr(rel, "Id", "rId" + std::to_string(rid));
@@ -1482,6 +1528,7 @@ std::expected<std::vector<uint8_t>, Error> Write(
   WriteBody(body, document, ctx);
 
   WriteNoteParts(document, ctx);
+  WriteCommentPart(document, ctx);
   auto sec = body.append_child("w:sectPr");
   SectionPr(sec, document.section, &ctx);
 

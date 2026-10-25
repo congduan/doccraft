@@ -47,6 +47,8 @@ using detail::kSprmTDefTable;
 using detail::kSprmTDefTableObsolete;
 using detail::kUndefinedU32;
 using detail::ReadChars;
+using detail::ReadCommentAnchors;
+using detail::ReadComments;
 using detail::ReadFkps;
 using detail::ReadFonts;
 using detail::ReadLists;
@@ -229,6 +231,15 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   auto note_refs = ReadNoteReferences(table, fib);
   if (!note_refs) {
     return std::unexpected(note_refs.error());
+  }
+  auto comment_anchors = ReadCommentAnchors(table, fib);
+  if (!comment_anchors) {
+    return std::unexpected(comment_anchors.error());
+  }
+  // CP -> comment id (index + 1), matching w:commentReference/@w:id.
+  std::map<uint32_t, int> comment_index;
+  for (size_t i = 0; i < comment_anchors->size(); i++) {
+    comment_index.emplace((*comment_anchors)[i], static_cast<int>(i) + 1);
   }
   // CP -> note index, so a 0x02 in the main story can be resolved to the note
   // whose body was read into Document::notes.
@@ -455,6 +466,16 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       continue;
     }
+    if (ch.text == "\x05") {
+      // Comment reference mark: the comment itself is written to comments.xml.
+      auto found = comment_index.find(ch.cp);
+      if (found != comment_index.end()) {
+        model::Run mark;
+        mark.comment_ref = found->second;
+        para.runs.push_back(std::move(mark));
+      }
+      continue;
+    }
     if (ch.text == "\x02") {
       auto found = note_index.find(ch.cp);
       if (found != note_index.end()) {
@@ -501,6 +522,10 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   auto notes = ReadNotes(doc, word, table, fib, *chpx, *papx);
   if (!notes) {
     return std::unexpected(notes.error());
+  }
+  auto comments = ReadComments(doc, word, table, fib, *chpx, *papx);
+  if (!comments) {
+    return std::unexpected(comments.error());
   }
   // Header/footer stories are per section: PlcfHdd holds six per section, in
   // document order, so section k reads entries 6k..6k+5.

@@ -76,6 +76,9 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.papx_bte = pair(13);
   f.fonts = pair(15);
   f.headers = pair(11);
+  f.and_ref = pair(4);
+  f.and_txt = pair(5);
+  f.atn_owners = pair(36);
   f.fnd_ref = pair(2);
   f.fnd_txt = pair(3);
   // FibRgFcLcb97 pairs 44/45 are fcPms/fcFormFldSttbs; the endnote PLCs are
