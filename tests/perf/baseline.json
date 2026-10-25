@@ -1,0 +1,22 @@
+{
+  "1": {
+    "size_bytes": 1052160,
+    "wall_seconds": 0.487157,
+    "peak_rss_kb": 79728
+  },
+  "5": {
+    "size_bytes": 5244928,
+    "wall_seconds": 2.841093,
+    "peak_rss_kb": 386656
+  },
+  "20": {
+    "size_bytes": 20975104,
+    "wall_seconds": 13.928849,
+    "peak_rss_kb": 1387492
+  },
+  "50": {
+    "size_bytes": 52679680,
+    "wall_seconds": 14.839633,
+    "peak_rss_kb": 1449364
+  }
+}

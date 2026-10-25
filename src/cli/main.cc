@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <chrono>
 #include <cinttypes>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -66,6 +68,8 @@ int main(int argc, char** argv) {
     return 0;
   }
   if (cmd == "convert" && argc >= 3) {
+    using Clock = std::chrono::steady_clock;
+    const auto t_start = Clock::now();
     std::string output = std::string(argv[2]) + "x";
     if (argc == 5 && std::string(argv[3]) == "-o") {
       output = argv[4];
@@ -81,11 +85,13 @@ int main(int argc, char** argv) {
     }
 
     std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
+    const auto t_read = Clock::now();
     if (!file.eof() && file.fail()) {
       std::fprintf(stderr, "convert: input read failed\n");
       return 1;
     }
     auto cfb = doccraft::cfb::CfbReader::Open(bytes);
+    const auto t_cfb = Clock::now();
     if (!cfb) {
       std::fprintf(stderr, "convert: %s\n", cfb.error().message.c_str());
       return 1;
@@ -106,6 +112,7 @@ int main(int argc, char** argv) {
       return 1;
     }
     auto data = cfb->ReadStream("Data");
+    const auto t_streams = Clock::now();
     auto extracted =
         data ? doccraft::doc::ParseFormatted(*word, *table, *fib, *data)
              : doccraft::doc::ParseFormatted(*word, *table, *fib);
@@ -113,16 +120,28 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "convert: %s\n", extracted.error().message.c_str());
       return 1;
     }
+    const auto t_format = Clock::now();
     auto archive = doccraft::docx::Write(*extracted);
     if (!archive) {
       std::fprintf(stderr, "convert: %s\n", archive.error().message.c_str());
       return 1;
     }
+    const auto t_writer = Clock::now();
 
     std::ofstream out(output, std::ios::binary);
     if (!out) {
       std::fprintf(stderr, "convert: cannot open output\n");
       return 1;
+    }
+    if (std::getenv("DOCCRAFT_PROFILE")) {
+      auto ms = [](Clock::time_point a, Clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+      };
+      std::fprintf(stderr,
+                   "PROFILE read_ms=%.3f cfb_ms=%.3f streams_ms=%.3f "
+                   "format_ms=%.3f writer_ms=%.3f\n",
+                   ms(t_start, t_read), ms(t_read, t_cfb), ms(t_cfb, t_streams),
+                   ms(t_streams, t_format), ms(t_format, t_writer));
     }
     out.write(reinterpret_cast<const char*>(archive->data()),
               static_cast<std::streamsize>(archive->size()));

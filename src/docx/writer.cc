@@ -15,6 +15,7 @@
 #include "docx/writer.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -247,6 +248,8 @@ uint32_t Crc32(std::string_view bytes) {
 
 std::expected<std::vector<uint8_t>, Error> Write(
     const model::Document& document) {
+  using Clock = std::chrono::steady_clock;
+  const auto t_start = Clock::now();
   WriteContext ctx;
   pugi::xml_document doc;
   auto root = doc.append_child("w:document");
@@ -276,6 +279,15 @@ std::expected<std::vector<uint8_t>, Error> Write(
   if (ctx.odd_even) {
     parts.push_back({"word/settings.xml", kSettingsPart});
   }
-  return PackParts(parts);
+  const auto t_xml = Clock::now();
+  auto archive = PackParts(parts);
+  if (std::getenv("DOCCRAFT_PROFILE")) {
+    auto ms = [](Clock::time_point a, Clock::time_point b) {
+      return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    std::fprintf(stderr, "PROFILE xml_ms=%.3f zip_ms=%.3f\n",
+                 ms(t_start, t_xml), ms(t_xml, Clock::now()));
+  }
+  return archive;
 }
 }  // namespace doccraft::docx
