@@ -119,6 +119,7 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
 // Emits footnotes.xml / endnotes.xml when the document has notes, and
 // registers the parts and relationships.
 void WriteNoteParts(const model::Document& document, WriteContext& ctx);
+void WriteCommentPart(const model::Document& document, WriteContext& ctx);
 
 // Returns false when `section` has no header/footer story to reference.
 bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
@@ -153,6 +154,10 @@ std::string BuildContentTypes(const WriteContext& ctx) {
       out +=
           "<Override PartName=\"/word/endnotes.xml\" ContentType=\"application/"
           "vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml\"/>";
+    } else if (part.name == "comments.xml") {
+      out +=
+          "<Override PartName=\"/word/comments.xml\" ContentType=\"application/"
+          "vnd.openxmlformats-officedocument.wordprocessingml.comments+xml\"/>";
     }
   }
   if (ctx.odd_even) {
@@ -259,6 +264,7 @@ std::expected<std::vector<uint8_t>, Error> Write(
   WriteBody(body, document, ctx);
 
   WriteNoteParts(document, ctx);
+  WriteCommentPart(document, ctx);
   auto sec = body.append_child("w:sectPr");
   SectionPr(sec, document.section, &ctx);
 

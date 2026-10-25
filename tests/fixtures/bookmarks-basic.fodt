@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p>Intro <text:bookmark-start text:name="MarkRange"/>marked words<text:bookmark-end text:name="MarkRange"/> tail.</text:p>
+<text:p><text:bookmark text:name="MarkPoint"/>Point paragraph.</text:p>
+</office:text></office:body></office:document>

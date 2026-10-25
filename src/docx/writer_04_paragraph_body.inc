@@ -41,7 +41,24 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
     }
     auto rn = wrapper.append_child("w:r");
     RunPr(rn, r);
-    if (r.note_ref >= 0) {
+    if (r.bookmark_id >= 0) {
+      // Bookmarks are paragraph-level markers, not run content.
+      auto mark = pn.append_child(r.bookmark_start ? "w:bookmarkStart"
+                                                   : "w:bookmarkEnd");
+      IntAttr(mark, "w:id", r.bookmark_id);
+      if (r.bookmark_start) {
+        Attr(mark, "w:name", r.bookmark_name);
+      }
+      continue;
+    }
+    if (r.comment_ref >= 0) {
+      // The anchor is a point: the range opens and closes around this run.
+      IntAttr(pn.append_child("w:commentRangeStart"), "w:id", r.comment_ref);
+    }
+    if (r.comment_ref >= 0) {
+      IntAttr(rn.append_child("w:commentRangeEnd"), "w:id", r.comment_ref);
+      IntAttr(rn.append_child("w:commentReference"), "w:id", r.comment_ref);
+    } else if (r.note_ref >= 0) {
       // A note reference is an empty run carrying the reference element.
       IntAttr(rn.append_child(r.note_endnote ? "w:endnoteReference"
                                              : "w:footnoteReference"),

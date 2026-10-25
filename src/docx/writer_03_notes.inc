@@ -115,3 +115,33 @@ void WriteNoteParts(const model::Document& document, WriteContext& ctx) {
   }
 }
 
+
+void WriteCommentPart(const model::Document& document, WriteContext& ctx) {
+  if (document.comments.empty()) {
+    return;
+  }
+  pugi::xml_document doc;
+  auto root = doc.append_child("w:comments");
+  Attr(root, "xmlns:w", kWordmlNamespace);
+  Attr(root, "xmlns:r", kRelationshipsNamespace);
+  int id = 0;
+  for (const auto& comment : document.comments) {
+    id++;
+    auto node = root.append_child("w:comment");
+    IntAttr(node, "w:id", id);
+    Attr(node, "w:author",
+         comment.author.empty() ? "doccraft" : comment.author);
+    if (!comment.initials.empty()) {
+      Attr(node, "w:initials", comment.initials);
+    }
+    if (comment.paragraphs.empty()) {
+      node.append_child("w:p");
+    }
+    for (const auto& paragraph : comment.paragraphs) {
+      WriteParagraph(node, paragraph, nullptr, ctx);
+    }
+  }
+  const int rid = ctx.next_rid++;
+  ctx.relations.emplace_back(rid, "comments.xml");
+  ctx.parts.push_back({"comments.xml", Save(doc)});
+}
