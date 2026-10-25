@@ -24,6 +24,7 @@
 - 大于约 7 MiB 的 LibreOffice 导出 `.doc` 使用 DIFAT 扩展，最后一个 DIFAT 扇区的 next 字段写 `FREESECT`；[MS-CFB] §2.5 要求 `ENDOFCHAIN`。读取器仅在声明的 DIFAT 扇区数已走完且 FAT 扇区数匹配时兼容这个终止符。合成测试 `CfbReaderTest.ReadsLibreOfficeFreeTerminatedDifat` 与 20/50 MiB 语料覆盖此兼容路径。
 
 - `footnote-endnote.doc` 的 `.doc` 经 LibreOffice 渲染为 1 页，而 doccraft 输出的 OOXML 经同一 LibreOffice 渲染为 2 页：尾注被放到独立的文末区域。已核对尾注正文及编号；把尾注改成脚注的对照实验仍为 1 页，说明这是 LibreOffice 对两种容器的尾注布局解释差异。像素对拍用 `tests/fixtures/footnote-endnote.allow` 精确限定 A=1、B=2 的已知例外，并保留重叠页差异统计（0.164%）。
+- 对拍的非零下限受 LibreOffice 自身 `.doc`/`.docx` 导入差异影响。同一 `.doc` 由 LibreOffice 另存 `.docx` 后回读，`cjk-text` 仍为 1470 bad_px（0.068%）、`table-merge-direction` 为 785（0.037%）、`complex-table` 为 38（0.002%）；`table-borders-shading` 则为 0。热力图显示前三者的差异集中在文字笔画或位置，并非推断中的表格边框宽度错误。doccraft 的单元格左内边距补偿使 `table-borders-shading` 降至 0，`table-merge-direction` 降至 282（0.013%）；其余差异不按像素零差目标盲目改写规范属性。
 
 - CHP/PAP/SEP 的常用 sprm、STSH 样式链、LSTF/LVL 列表、首节页眉页脚和基础表格网格已读写。表格单元格合并、复杂边框底纹、浮雕/阴影等效果仍简化；复杂格式需要独立样本验证。
 - 多节文档逐节写出属性切换、行号与脚注位置，并为每节生成独立的页眉页脚部件（PlcfHdd 每节 6 个故事，首个故事前有 6 个保留 CP）。两条限制：其一，节内页眉里的图片、域代码与表格只保留文本与段落格式，不含 drawing 部件；其二，故事末段落是守卫标记，会被丢弃，因此「仅有一个空段落」的页眉在输出中不存在。
