@@ -192,7 +192,12 @@ void WriteCellBorders(pugi::xml_node tcp, const model::CellProperties& cp) {
   }
 }
 
-void WriteCellMargins(pugi::xml_node tcp, const model::CellProperties& cp) {
+void WriteCellMargins(pugi::xml_node tcp, const model::CellProperties& cp,
+                      bool correct_left_inset) {
+  // DOC cell insets round one twip lower when LibreOffice imports OOXML.
+  // The left correction preserves the original DOC text origin.
+  constexpr size_t kLeftMarginIndex = 1;
+  constexpr int kInsetRoundTripTwip = 1;
   bool any_margin = false;
   for (int m : cp.margins) {
     any_margin |= m >= 0;
@@ -205,14 +210,17 @@ void WriteCellMargins(pugi::xml_node tcp, const model::CellProperties& cp) {
   for (size_t k = 0; k < 4; k++) {
     if (cp.margins[k] >= 0) {
       auto m = mar.append_child(sides[k]);
-      IntAttr(m, "w:w", cp.margins[k]);
+      IntAttr(m, "w:w",
+              cp.margins[k] + (correct_left_inset && k == kLeftMarginIndex
+                                   ? kInsetRoundTripTwip
+                                   : 0));
       Attr(m, "w:type", "dxa");
     }
   }
 }
 
 void WriteCellProperties(pugi::xml_node tcp, const model::CellProperties* cp,
-                         int cell_width, size_t span) {
+                         int cell_width, size_t span, bool correct_left_inset) {
   if (cell_width >= 0) {
     auto cw = tcp.append_child("w:tcW");
     IntAttr(cw, "w:w", cell_width);
@@ -226,7 +234,7 @@ void WriteCellProperties(pugi::xml_node tcp, const model::CellProperties* cp,
   }
   WriteCellBorders(tcp, *cp);
   ShadePr(tcp, cp->shade, cp->shade_fore, cp->shade_pattern);
-  WriteCellMargins(tcp, *cp);
+  WriteCellMargins(tcp, *cp, correct_left_inset);
   if (cp->vertical_merge) {
     Attr(tcp.append_child("w:vMerge"), "w:val",
          cp->vertical_merge == 2 ? "restart" : "continue");
@@ -261,7 +269,8 @@ void WriteTable(pugi::xml_node parent, const model::Table& t,
                 const model::Document& document, WriteContext& ctx);
 
 void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
-                   const model::Document& document, WriteContext& ctx) {
+                   const model::Document& document, WriteContext& ctx,
+                   bool correct_left_inset) {
   const auto& row = t.rows[index];
   const model::RowProperties* rp =
       index < t.row_properties.size() ? &t.row_properties[index] : nullptr;
@@ -278,7 +287,7 @@ void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
                      : j < t.columns.size()         ? t.columns[j]
                                                     : -1;
     size_t span = CellGridSpan(t, rp, j, grid_index);
-    WriteCellProperties(tcp, cp, cell_width, span);
+    WriteCellProperties(tcp, cp, cell_width, span, correct_left_inset);
     grid_index += span;
     // A w:tc must contain at least one paragraph.
     if (row[j].blocks.empty()) {
@@ -298,6 +307,15 @@ void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
 
 void WriteTable(pugi::xml_node parent, const model::Table& t,
                 const model::Document& document, WriteContext& ctx) {
+  bool correct_left_inset = false;
+  for (const auto& row : t.row_properties) {
+    for (const auto& cell : row.cells) {
+      correct_left_inset |= cell.margins[1] > 0;
+      for (const auto& border : cell.borders) {
+        correct_left_inset |= border.set && border.type > 0;
+      }
+    }
+  }
   auto tn = parent.append_child("w:tbl");
   WriteTableProperties(tn, t);
   auto grid = tn.append_child("w:tblGrid");
@@ -305,7 +323,7 @@ void WriteTable(pugi::xml_node parent, const model::Table& t,
     IntAttr(grid.append_child("w:gridCol"), "w:w", column);
   }
   for (size_t i = 0; i < t.rows.size(); i++) {
-    WriteTableRow(tn, t, i, document, ctx);
+    WriteTableRow(tn, t, i, document, ctx, correct_left_inset);
   }
 }
 
