@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p>Before complex table</text:p>
+<table:table table:name="T1">
+<table:table-column table:number-columns-repeated="3"/>
+<table:table-row>
+<table:table-cell table:number-columns-spanned="2" table:number-rows-spanned="1"><text:p>Merged two</text:p></table:table-cell>
+<table:table-cell><text:p>C1</text:p></table:table-cell>
+</table:table-row>
+<table:table-row>
+<table:table-cell><text:p>Multi one</text:p><text:p>Multi two</text:p></table:table-cell>
+<table:table-cell><text:p>B2</text:p></table:table-cell>
+<table:table-cell><text:p>C2</text:p></table:table-cell>
+</table:table-row>
+</table:table>
+<text:p>After complex table</text:p>
+</office:text></office:body></office:document>

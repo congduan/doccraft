@@ -3,6 +3,11 @@
 
 Creates minimal .doc files covering the feature checklist, plus matching
 .docx references for roundtrip diff testing.
+
+Text baselines (tests/corpus/baseline/*.txt) are a separate step:
+    soffice --headless --convert-to txt --outdir <tmp> <sample>.doc
+then replace TAB with newline (LibreOffice separates table cells with TAB, the
+checked-in baselines use one line per cell) and keep the UTF-8 BOM.
 """
 import subprocess
 import sys
@@ -83,6 +88,44 @@ SAMPLES = {
 <text:h text:outline-level="2">Heading 2</text:h>
 <text:list><text:list-item><text:p>Item one</text:p></text:list-item>
 <text:list-item><text:p>Item two</text:p></text:list-item></text:list>
+</office:text></office:body></office:document>""",
+    "cjk-text": """<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p>中文段落：文档转换需要保留全部字符。</text:p>
+<text:p>日本語の段落です。文字化けしてはいけません。</text:p>
+<text:p>Mixed 中文 and Latin text 混排。</text:p>
+</office:text></office:body></office:document>""",
+    "cyrillic-text": """<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p>Первый абзац на русском языке.</text:p>
+<text:p>Второй абзац с числами 123 и символами №.</text:p>
+</office:text></office:body></office:document>""",
+    "complex-table": """<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p>Before complex table</text:p>
+<table:table table:name="T1">
+<table:table-column table:number-columns-repeated="3"/>
+<table:table-row>
+<table:table-cell table:number-columns-spanned="2" table:number-rows-spanned="1"><text:p>Merged two</text:p></table:table-cell>
+<table:table-cell><text:p>C1</text:p></table:table-cell>
+</table:table-row>
+<table:table-row>
+<table:table-cell><text:p>Multi one</text:p><text:p>Multi two</text:p></table:table-cell>
+<table:table-cell><text:p>B2</text:p></table:table-cell>
+<table:table-cell><text:p>C2</text:p></table:table-cell>
+</table:table-row>
+</table:table>
+<text:p>After complex table</text:p>
 </office:text></office:body></office:document>""",
 }
 

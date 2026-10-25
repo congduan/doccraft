@@ -13,7 +13,7 @@
 - 当前最小写出为达到语料 `plain-text.doc` 的像素验收，使用其默认字体（Liberation Serif，12pt）及 Letter 页面 1134 twip 页边距。尚未从 DOC 属性读取字体、字号和页面设置，因此其他语料的版式不保证一致。
 - 文本一致率测试把连续表格控制码折叠为单个换行，并剥除 LibreOffice TXT 导出中根据编号属性生成的 `•` 列表标记。这些标记不在 M2 抽取的主文本中；不计此差异时五份语料内容均为 100%。
 - 8-bit（compressed）piece 按 `FibBase.lid` 推导出的 ANSI 代码页解码（`src/base/charset.cc`）。两条残留限制：其一，解码依赖 iconv（glibc 内置 / libiconv），编译期未找到时退化为 CP1252，仅 cp1252 能正确解码；其二，LID 表中未列出的语言一律按 1252 处理（例如 cp1253 之外的希腊文变体、OEM 代码页）。DBCS 文本按规范总是存为 UTF-16 piece，所以压缩 piece 只需要代码页的单字节映射；若遇到违规的 DBCS 双字节序列，能解出时按两字节消费，否则该字节记为 U+FFFD。
-- 语料与 fixture 正文仍全为 ASCII/CP1252，代码页路径只有单测（`CharsetTest.*`、`PieceTableTest.DecodesCompressedPiecesInDocumentCodepage`）覆盖，尚无真实俄文/日文 `.doc` 样本验证。
+- 语料已加入 `cjk-text`（中/日）与 `cyrillic-text`（俄文）两份真实 `.doc`，但它们的正文按规范存为 UTF-16 piece，验证的是 Unicode 文本链路而不是代码页路径；8-bit 代码页路径仍只有单测（`CharsetTest.*`、`PieceTableTest.DecodesCompressedPiecesInDocumentCodepage`）覆盖。
 - `0x0C`（分页符）及其他未列于已处理集合的 <0x20 控制符被静默丢弃（分页边界信息不保留）。
 - 非 complex 文档若 piece 覆盖不足 `ccpText`，静默截断、无覆盖数校验。
 - U+FFFE/U+FFFF 不在 XML 1.0 Char 产生式内，替换为 U+FFFD 而非报错（防止损坏文件产出 not-well-formed 的 document.xml）。

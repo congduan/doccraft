@@ -54,4 +54,5 @@ with tempfile.TemporaryDirectory() as td:
             print("\n".join(difflib.unified_diff(ref_content.splitlines(), got.splitlines(),
                                                    fromfile="baseline", tofile="doccraft")))
 print(f"minimum: {min(scores):.2%}")
-assert len(scores) == 5 and min(scores) >= 0.99
+sources = sorted(corpus.glob("*.doc"))
+assert len(scores) == len(sources) and min(scores) >= 0.99

@@ -1,0 +1,8 @@
+﻿Before complex table
+Merged two
+C1
+Multi one
+Multi two
+B2
+C2
+After complex table
