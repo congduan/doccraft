@@ -252,8 +252,80 @@ inline constexpr uint16_t kSprmTDefTableShdRaw = 0xD670;  // sprmTDefTableShdRaw
 inline constexpr uint16_t kSprmTDefTableShdRaw2nd =
     0xD671;  // sprmTDefTableShdRaw2nd
 inline constexpr uint16_t kSprmTDefTableShdRaw3rd =
-    0xD672;                                            // sprmTDefTableShdRaw3rd
-inline constexpr uint16_t kSprmSDxaColWidth = 0xF203;  // sprmSDxaColWidth
+    0xD672;                                       // sprmTDefTableShdRaw3rd
+inline constexpr uint16_t kSprmCFSpec = 0x0855;   // sprmCFSpec
+inline constexpr uint16_t kSprmCLbcCRJ = 0x2879;  // sprmCLbcCRJ
+inline constexpr uint16_t kSprmCNeedFontFixup = 0x2A86;  // sprmCNeedFontFixup
+inline constexpr uint16_t kSprmCHresi = 0x484E;          // sprmCHresi
+inline constexpr uint16_t kSprmCPbiGrf = 0x4888;         // sprmCPbiGrf
+inline constexpr uint16_t kSprmCPbiIBullet = 0x6887;     // sprmCPbiIBullet
+inline constexpr uint16_t kSprmCFitText = 0xCA76;        // sprmCFitText
+inline constexpr uint16_t kSprmCFELayout = 0xCA78;       // sprmCFELayout
+inline constexpr uint16_t kSprmCFMathPr = 0xC81A;        // sprmCFMathPr
+inline constexpr uint16_t kSprmCIstdPermute = 0xCA31;    // sprmCIstdPermute
+inline constexpr uint16_t kSprmCMajority = 0xCA47;       // sprmCMajority
+inline constexpr uint16_t kSprmCCnf = 0xCA85;            // sprmCCnf
+inline constexpr uint16_t kSprmPFInnerTableCell =
+    0x244B;                                          // sprmPFInnerTableCell
+inline constexpr uint16_t kSprmPFInnerTtp = 0x244C;  // sprmPFInnerTtp
+inline constexpr uint16_t kSprmPFOpenTch = 0x245A;   // sprmPFOpenTch
+inline constexpr uint16_t kSprmPFNoAllowOverlap =
+    0x2462;                                              // sprmPFNoAllowOverlap
+inline constexpr uint16_t kSprmPTtwo = 0x2471;           // sprmPTtwo
+inline constexpr uint16_t kSprmPDcs = 0x442C;            // sprmPDcs
+inline constexpr uint16_t kSprmPWAlignFont = 0x4439;     // sprmPWAlignFont
+inline constexpr uint16_t kSprmPFrameTextFlow = 0x443A;  // sprmPFrameTextFlow
+inline constexpr uint16_t kSprmPDxcRight = 0x4455;       // sprmPDxcRight
+inline constexpr uint16_t kSprmPDxcLeft = 0x4456;        // sprmPDxcLeft
+inline constexpr uint16_t kSprmPDxcLeft1 = 0x4457;       // sprmPDxcLeft1
+inline constexpr uint16_t kSprmPDylBefore = 0x4458;      // sprmPDylBefore
+inline constexpr uint16_t kSprmPDylAfter = 0x4459;       // sprmPDylAfter
+inline constexpr uint16_t kSprmPIpgp = 0x6465;           // sprmPIpgp
+inline constexpr uint16_t kSprmPItap = 0x6649;           // sprmPItap
+inline constexpr uint16_t kSprmPDtap = 0x664A;           // sprmPDtap
+inline constexpr uint16_t kSprmPIstdPermute = 0xC601;    // sprmPIstdPermute
+inline constexpr uint16_t kSprmPCnf = 0xC666;            // sprmPCnf
+inline constexpr uint16_t kSprmPTIstdInfo = 0xC66C;      // sprmPTIstdInfo
+inline constexpr uint16_t kSprmSFProtected = 0x3006;     // sprmSFProtected
+inline constexpr uint16_t kSprmSDmPaperReq = 0x5026;     // sprmSDmPaperReq
+inline constexpr uint16_t kSprmSPgbProp = 0x522F;        // sprmSPgbProp
+inline constexpr uint16_t kSprmTCellVertAlignStyle =
+    0x347C;  // sprmTCellVertAlignStyle
+inline constexpr uint16_t kSprmTCellNoWrapStyle =
+    0x347D;                                            // sprmTCellNoWrapStyle
+inline constexpr uint16_t kSprmTCHorzBands = 0x3488;   // sprmTCHorzBands
+inline constexpr uint16_t kSprmTCVertBands = 0x3489;   // sprmTCVertBands
+inline constexpr uint16_t kSprmTPc = 0x360D;           // sprmTPc
+inline constexpr uint16_t kSprmTTlp = 0x740A;          // sprmTTlp
+inline constexpr uint16_t kSprmTIpgp = 0x7469;         // sprmTIpgp
+inline constexpr uint16_t kSprmTBrcTopCv = 0xD61A;     // sprmTBrcTopCv
+inline constexpr uint16_t kSprmTBrcLeftCv = 0xD61B;    // sprmTBrcLeftCv
+inline constexpr uint16_t kSprmTBrcBottomCv = 0xD61C;  // sprmTBrcBottomCv
+inline constexpr uint16_t kSprmTBrcRightCv = 0xD61D;   // sprmTBrcRightCv
+inline constexpr uint16_t kSprmTCellPaddingStyle =
+    0xD63E;                                            // sprmTCellPaddingStyle
+inline constexpr uint16_t kSprmTCellBrcType = 0xD662;  // sprmTCellBrcType
+inline constexpr uint16_t kSprmTCnf = 0xD66A;          // sprmTCnf
+inline constexpr uint16_t kSprmTCellBrcTopStyle =
+    0xD47F;  // sprmTCellBrcTopStyle
+inline constexpr uint16_t kSprmTCellBrcBottomStyle =
+    0xD680;  // sprmTCellBrcBottomStyle
+inline constexpr uint16_t kSprmTCellBrcLeftStyle =
+    0xD681;  // sprmTCellBrcLeftStyle
+inline constexpr uint16_t kSprmTCellBrcRightStyle =
+    0xD682;  // sprmTCellBrcRightStyle
+inline constexpr uint16_t kSprmTCellBrcInsideHStyle =
+    0xD683;  // sprmTCellBrcInsideHStyle
+inline constexpr uint16_t kSprmTCellBrcInsideVStyle =
+    0xD684;  // sprmTCellBrcInsideVStyle
+inline constexpr uint16_t kSprmTCellBrcTL2BRStyle =
+    0xD685;  // sprmTCellBrcTL2BRStyle
+inline constexpr uint16_t kSprmTCellBrcTR2BLStyle =
+    0xD686;  // sprmTCellBrcTR2BLStyle
+inline constexpr uint16_t kSprmTCellShdStyle = 0xD687;   // sprmTCellShdStyle
+inline constexpr uint16_t kSprmTWidthBefore = 0xF617;    // sprmTWidthBefore
+inline constexpr uint16_t kSprmTWidthAfter = 0xF618;     // sprmTWidthAfter
+inline constexpr uint16_t kSprmSDxaColWidth = 0xF203;    // sprmSDxaColWidth
 inline constexpr uint16_t kSprmSDxaColSpacing = 0xF204;  // sprmSDxaColSpacing
 inline constexpr uint16_t kSprmTTableWidth = 0xF614;     // sprmTTableWidth
 inline constexpr uint16_t kSprmTFitText = 0xF636;        // sprmTFitText

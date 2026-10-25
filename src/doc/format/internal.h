@@ -19,10 +19,19 @@
 #include <string>
 #include <vector>
 
+#include "base/binary.h"
+#include "base/utf8.h"
 #include "doc/format.h"
 
 namespace doccraft::doc::detail {
-using Bytes = std::span<const uint8_t>;
+
+// Byte readers and UTF-8 encoding from the shared base layer; [MS-DOC] is
+// little-endian and its text plane is UTF-16LE.
+using base::AppendUtf8;
+using base::Bytes;
+using base::S16;
+using base::U16;
+using base::U32;
 
 // [MS-DOC] §2.9.1: frame geometry is expressed in twips and capped at 22 inch,
 // the largest value Word writes for a page object.
@@ -36,6 +45,83 @@ inline constexpr uint32_t kUndefinedU32 = 0xFFFFFFFF;
 // sprmPWHeightAbs: bit 15 marks an exact height, bits 0-14 hold the height.
 inline constexpr uint16_t kFrameHeightExact = 0x8000;
 inline constexpr uint16_t kFrameHeightMask = 0x7FFF;
+
+// [MS-DOC] §2.2.5.1 sprm layout: spra in bits 13-15, sgc in bits 10-12.
+inline constexpr int kSprmSgcShift = 10;
+inline constexpr uint16_t kSprmSgcMask = 7;
+inline constexpr unsigned kSgcParagraph = 1;
+inline constexpr unsigned kSgcCharacter = 2;
+inline constexpr unsigned kSgcTable = 5;
+
+// sprmPDcs (DCS): fdct in bits 0-2, cl (drop cap lines) in bits 3-7.
+inline constexpr uint16_t kDcsTypeMask = 7;
+inline constexpr int kDcsLinesShift = 3;
+inline constexpr uint16_t kDcsLinesMask = 31;
+
+// sprmPWAlignFont values (0 top .. 4 auto).
+inline constexpr uint16_t kMaxTextAlignment = 4;
+
+// sprmPFrameTextFlow (FrameTextFlowOperand): fVertical(1), fBackwards(2).
+inline constexpr uint16_t kFrameFlowVertical = 0x0001;
+inline constexpr uint16_t kFrameFlowBackwards = 0x0002;
+
+// sprmSPgbProp (SPgbPropOperand): pgbApplyTo(3), pgbPageDepth(2),
+// pgbOffsetFrom(3), then a reserved byte that MUST be 0.
+inline constexpr size_t kPgbPropSize = 2;
+inline constexpr uint8_t kPgbApplyToMask = 7;
+inline constexpr int kPgbOffsetFromShift = 5;
+inline constexpr uint8_t kPgbOffsetFromMask = 7;
+inline constexpr uint8_t kPgbApplyToMax = 2;
+inline constexpr uint8_t kPgbOffsetFromMax = 1;
+
+// sprmCFELayout (UFEL): fTNY, fWarichu, iWarichuBracket, fTNYCompress.
+inline constexpr uint16_t kUfelTny = 0x0001;
+inline constexpr uint16_t kUfelWarichu = 0x0002;
+inline constexpr int kUfelBracketShift = 8;
+inline constexpr uint16_t kUfelBracketMask = 7;
+inline constexpr uint16_t kUfelTnyCompress = 0x1000;
+
+// sprmCFitText (CFitTextOperand): cb = 8, dxaFitText(4), FitTextID(4).
+inline constexpr uint8_t kFitTextCb = 8;
+inline constexpr size_t kFitTextSize = 9;
+inline constexpr size_t kFitTextWidthOffset = 1;
+inline constexpr size_t kFitTextIdOffset = 5;
+
+// sprmCFELayout (FarEastLayoutOperand): cb = 6, ufel(2), lFELayoutID(4).
+inline constexpr uint8_t kFarEastLayoutCb = 6;
+inline constexpr size_t kFarEastLayoutSize = 7;
+inline constexpr size_t kFarEastLayoutIdOffset = 3;
+
+// sprmTPc (PositionCodeOperand): pcVert in bits 4-5, pcHorz in bits 6-7.
+inline constexpr int kPositionVertShift = 4;
+inline constexpr int kPositionHorzShift = 6;
+inline constexpr uint8_t kPositionAnchorMask = 3;
+inline constexpr unsigned kPositionNone = 3;
+
+// sprmTTlp (TLP): grfatl is the second 16-bit field; Fatl bits 5-10 hold the
+// first/last row/column and band flags, which match w:tblLook bit positions.
+inline constexpr size_t kTlpCb = 4;
+inline constexpr size_t kTlpFatlOffset = 2;
+inline constexpr uint16_t kFatlLookMask = 0x01E0;
+inline constexpr uint16_t kFatlBandRow = 0x0200;
+inline constexpr uint16_t kFatlBandCol = 0x0400;
+inline constexpr int kLookNoHBand = 0x0200;
+inline constexpr int kLookNoVBand = 0x0400;
+
+// sprmTCellPaddingStyle / CSSAOperand: cb = 6, cb sides mask, ftsDxa = 3.
+inline constexpr uint8_t kCssaCb = 6;
+inline constexpr size_t kCssaSize = 7;
+inline constexpr uint8_t kCssaSidesOffset = 3;
+inline constexpr uint8_t kCssaWidthTypeOffset = 4;
+inline constexpr size_t kCssaWidthOffset = 5;
+inline constexpr uint8_t kFtsDxa = 3;
+inline constexpr uint8_t kCssaAllSides = 15;
+
+// sprmTCHorzBands / sprmTCVertBands accept 1-3 rows or columns per band.
+inline constexpr uint8_t kMaxBandSize = 3;
+
+// BrcCvOperand: cb(1) then one 4-byte COLORREF per cell.
+inline constexpr size_t kBrcCvColorSize = 4;
 
 // [MS-DOC] §2.5.1 text is UTF-16LE; a surrogate pair encodes one code point.
 inline constexpr uint32_t kUtf16HighSurrogateMin = 0xD800;
@@ -60,36 +146,6 @@ inline constexpr uint8_t kCp1252Last = 0x9F;
 // offset inside the WordDocument stream.
 inline constexpr uint32_t kFcCompressed = 0x40000000;
 inline constexpr uint32_t kFcMask = 0x3FFFFFFF;
-inline uint16_t U16(Bytes b, size_t p) {
-  return static_cast<uint16_t>(b[p]) | static_cast<uint16_t>(b[p + 1]) << 8;
-}
-
-inline uint32_t U32(Bytes b, size_t p) {
-  return static_cast<uint32_t>(U16(b, p)) | static_cast<uint32_t>(U16(b, p + 2))
-                                                << 16;
-}
-
-inline int16_t S16(Bytes b, size_t p) {
-  return static_cast<int16_t>(U16(b, p));
-}
-
-inline void Utf8(std::string& s, uint32_t c) {
-  if (c < 0x80) {
-    s += static_cast<char>(c);
-  } else if (c < 0x800) {
-    s += static_cast<char>(0xc0 | (c >> 6));
-    s += static_cast<char>(0x80 | (c & 63));
-  } else if (c < 0x10000) {
-    s += static_cast<char>(0xe0 | (c >> 12));
-    s += static_cast<char>(0x80 | ((c >> 6) & 63));
-    s += static_cast<char>(0x80 | (c & 63));
-  } else {
-    s += static_cast<char>(0xf0 | (c >> 18));
-    s += static_cast<char>(0x80 | ((c >> 12) & 63));
-    s += static_cast<char>(0x80 | ((c >> 6) & 63));
-    s += static_cast<char>(0x80 | (c & 63));
-  }
-}
 
 struct Char {
   std::string text;

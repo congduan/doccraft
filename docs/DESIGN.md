@@ -23,6 +23,13 @@
 核心原则：**四层单向数据流，IR 为唯一枢纽**。解析层不懂 docx，写出层不懂 doc；
 两端的复杂度被 IR 隔离，测试可在每一层独立进行（层间 golden data）。
 
+公共底座 `src/base/` 不是数据流层，被 `cfb` 与 `doc` 共享：`binary.h` 提供
+`Bytes = std::span<const uint8_t>`（只读、带长度，切片不丢边界）与
+`U16`/`U32`/`U64`/`S16` 四个小端读取原语；`utf8.h` 提供 `AppendUtf8`。CFB 与
+MS-DOC 都是小端格式、文本面都是 UTF-16LE，字节序解码与 UTF-8 编码因此各只实现
+一次，`base` 不包含任何上层头文件。读取原语本身不做边界检查，调用方先用
+`subspan` 或范围校验切出视图（有状态校验游标见 KNOWN-SIMPLIFICATIONS M3）。
+
 ### 1.1 layer1: CFB/OLE 容器层 (`src/cfb/`)
 
 Compound File Binary Format（[MS-CFB]），自研实现：
@@ -146,30 +153,30 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 ### 6.1 文本与编码
 - ✅☐ 基本文本抽取（piece table、CP1252/UTF-16 双模式）
 - ☐ fast-saved 文档（fComplex）完整重建
-- ☐ 特殊字符：tab/CR/VT/非断行空格/连字符/SYM 字符
+- ◐ 特殊字符：tab/CR/VT/非断行空格/连字符/SYM 字符（图片/脚注/批注/绘图等特殊字符随 M4/M5）
 - ☐ 域代码文本与结果（fldChar 层次）
-- ☐ 多语言/复杂文种（RTL 标记、bidi）
+- ✅ 多语言/复杂文种（RTL 标记、bidi、复杂文种颜色与字号）
 
 ### 6.2 字符格式（CHP）
-- ☐ 字体族/字号/加粗/斜体/下划线（多种线型）/删除线/双删
-- ☐ 上标/下标/字距/字符缩放/隐藏文字
-- ☐ 颜色/高亮/边框底纹/阴影/浮雕
-- ☐ 超链接（HYPERLINK 域）
+- ✅ 字体族/字号/加粗/斜体/下划线（多种线型）/删除线/双删
+- ✅ 上标/下标/字距/字符缩放/隐藏文字/着重号/字符单位适配（`w:fitText`、`w:eastAsianLayout`）
+- ✅ 颜色/高亮/边框底纹/阴影/浮雕
+- ✅ 超链接（HYPERLINK 域）
 
 ### 6.3 段落格式（PAP）
-- ☐ 对齐（左/中/右/两端/分散）/缩进（左右/首行/悬挂）/行距/段距
-- ☐ 段落边框与底纹/项目符号与多级列表（LSTF/LVL/override）
-- ☐ 制表位（自定义/toc 风格）/keepNext/keepLines/pageBreakBefore
-- ☐ 大纲级别/段落阴影
+- ✅ 对齐（左/中/右/两端/分散）/缩进（左右/首行/悬挂，twips 与字符单位）/行距/段距（twips 与行单位）
+- ✅ 段落边框与底纹/项目符号与多级列表（LSTF/LVL/override）
+- ✅ 制表位（自定义/toc 风格）/keepNext/keepLines/pageBreakBefore/东亚排版开关
+- ✅ 大纲级别/段落阴影/首字下沉（`w:framePr` dropCap）/纵向文字流
 
 ### 6.4 节与页面（SEP）
-- ☐ 纸张大小/方向/页边距/装订线
-- ☐ 页眉页脚（首页/奇偶不同）/页码域
-- ☐ 分节符类型（连续/ nextPage /evenPage/oddPage）/行号/脚注位置
+- ✅ 纸张大小/方向/页边距/装订线/纸张来源（`w:paperSrc`）
+- ◐ 页眉页脚（首页/奇偶不同）/页码域（仅首节内容）
+- ✅ 分节符类型（连续/ nextPage /evenPage/oddPage）/行号/脚注位置/页面边框与保护
 
 ### 6.5 表格
-- ☐ 基本网格（TAP/rgtc）/单元格合并（横向 fVertMerge、纵向）/拆分
-- ☐ 单元格边框/底纹/边距/对齐/文字方向/嵌套表格/浮动表格（tpc 定位）
+- ✅ 基本网格（TAP/rgtc）/单元格合并（横向 fVertMerge、纵向）/拆分
+- ◐ 单元格边框/底纹/边距/对齐/文字方向/浮动表格（sprmTPc 锚点、sprmTTlp 表样式选项）；嵌套表格仍按单层输出
 
 ### 6.6 对象与图形
 - ☐ 内联图片（PICF + Escher BLIP：png/jpg/wmf/emf 提取与格式保留）
@@ -180,9 +187,9 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ☐ 脚注/尾注/批注/书签/交叉引用域/目录域
 
 ### 6.7 样式系统
-- ☐ STSH 全量解析（基于样式继承链展开）
-- ☐ 样式映射到 docx styles.xml（段落/字符/表格/编号样式）
-- ☐ 直接格式 vs 样式格式的优先级正确叠加
+- ✅ STSH 全量解析（基于样式继承链展开）
+- ✅ 样式映射到 docx styles.xml（段落/字符/表格/编号样式，含表样式条件格式 `w:tblStylePr`）
+- ◐ 直接格式 vs 样式格式的优先级正确叠加（条件格式按出现顺序合并，未按 2.4.6 排序）
 
 ### 6.8 加密
 - ☐ RC4 加密文档解密（口令参数）

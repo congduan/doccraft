@@ -20,11 +20,14 @@ src/doc/    layer2  [MS-DOC] parser (FIB, piece table, FKP, sprm, styles, lists,
 src/model/  layer3  format-neutral IR (Document/Paragraph/Run/Table/Style/Section), twips
 src/docx/   layer4  ECMA-376 transitional writer (miniz for zip, pugixml for XML)
 src/cli/            CLI wiring (convert / inspect)
+src/base/           shared leaf: byte reads (`Bytes`, `U16`, `U32`, `U64`, `S16`) + `AppendUtf8`
 ```
 
 Dependency direction must hold: `cli -> {cfb, doc, docx}`, `docx -> model`,
-`doc -> model`. `src/doc/` must not include `docx/` or `cfb/` headers; `src/docx/`
-must not include `doc/` headers.
+`doc -> model`, `{cfb, doc} -> base`. `src/doc/` must not include `docx/` or `cfb/`
+headers; `src/docx/` must not include `doc/` headers; `src/base/` includes nothing
+from `cfb/`, `doc/`, `model/` or `docx/`. Byte-order decoding lives only in
+`src/base/binary.h` — do not add another `U16`/`U32` copy in a layer.
 
 ## 2. Build and test
 

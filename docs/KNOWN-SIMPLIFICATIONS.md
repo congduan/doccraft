@@ -16,17 +16,26 @@
 - `0x0C`（分页符）及其他未列于已处理集合的 <0x20 控制符被静默丢弃（分页边界信息不保留）。
 - 非 complex 文档若 piece 覆盖不足 `ccpText`，静默截断、无覆盖数校验。
 - U+FFFE/U+FFFF 不在 XML 1.0 Char 产生式内，替换为 U+FFFD 而非报错（防止损坏文件产出 not-well-formed 的 document.xml）。
+- 孤立 UTF-16 代理项（未配对的 high/low surrogate）同样替换为 U+FFFD 而不报错。文本抽取路径原先是报错，现在与格式化路径共用唯一的 CLX 读取器 `doc::detail::ReadChars`，因此单字符损坏不再使整篇转换失败。
 
 ## M3 当前范围
 
 - CHP/PAP/SEP 的常用 sprm、STSH 样式链、LSTF/LVL 列表、首节页眉页脚和基础表格网格已读写。表格单元格合并、复杂边框底纹、浮雕/阴影等效果仍简化；复杂格式需要独立样本验证。
 - 多节文档已写出节间属性切换、行号与脚注位置；页眉页脚仍仅写出首节内容。
-- 样式表保留段落、字符、表格和编号样式的条目及继承链接；表格样式的 TAPX 仅保存原始 sprm，尚未全部映射为 OOXML 的条件格式。
+- 样式表保留段落、字符、表格和编号样式的条目及继承链接；表格样式的条件格式（`sprmTCnf`/`sprmPCnf`/`sprmCCnf`）按 `cnfc` 聚合成 `w:tblStylePr`，但同一条件的 TAPX/PAPX/CHPX 三段只按出现顺序合并，尚未按 2.4.6 的属性优先级重排。
 - `sprmPHugePapx` 和 `sprmPTableProps` 会按 Data 流偏移读取嵌套 PrcData；超出流边界则忽略该引用。其复杂表格语义未全部映射。
-- 浮动段落框只映射 `w:framePr` 的位置/尺寸/间距/锁定；`w:drawing` 级锚点、绕排多边形与 `sprmPDcs` 首字下沉仍缺。
-- 浮动表格用 `w:tblpPr` 表达，但 `sprmTPc` 未实现，`w:horzAnchor`/`w:vertAnchor` 固定为 `margin`；表格文本环绕距离已映射。
+- 浮动段落框映射 `w:framePr` 的位置/尺寸/间距/锁定、首字下沉（`sprmPDcs`）与纵向文字流（`sprmPFrameTextFlow`，仅宽高非默认时才输出）；`w:drawing` 级锚点与绕排多边形仍缺。
+- 浮动表格用 `w:tblpPr` 表达，锚点由 `sprmTPc` 的 `pcVert`/`pcHorz` 映射为 `margin`/`page`/`text`（缺省为 `margin`）；表格文本环绕距离已映射。`sprmTWidthBefore`/`sprmTWidthAfter` 的行级前后缩进仍无对应属性。
 - 非等宽分栏（`sprmSFEvenlySpaced` + `sprmSDxaColWidth`/`sprmSDxaColSpacing`）只输出已有宽度的列；仅指定间距的列被丢弃。
 - SHD80 系列（`sprmCShd80`/`sprmPShd80`/`sprmTDefTableShd80`）走 16 色调色板，索引 0（自动色）不产生 `w:shd`；现代 SHD 操作数仍以 COLORREF 优先。
 - `sprmPIncLvl` 只在 `sprmPIlfo != 0` 时累加 `ilvl`，按规范应增量 `istd` 的段落样式分支未实现。
 - `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。
+- 表样式（`sprmTIstd`、条件格式 `sprmTCnf`/`sprmPCnf`/`sprmCCnf`）没有真实 `.doc` 语料：LibreOffice 26.8 导出 `.doc` 时会把表样式摊平成单元格直接格式，`tests/fixtures` 与 corpus 中因此不存在带 TAPX 的表样式。这条链路由 `tests/m3_styles_test.cc` 直接构造 STSH 位流断言（`M3Styles.TableStyleDefaultsAndConditionals`），一旦拿到 Word 生成的样本应替换为 golden 样本。
+- 修订标记（`sprmCFRMarkDel`/`sprmCFRMarkIns`）输出为 `w:del`/`w:ins`，但作者固定写 `doccraft`、时间戳省略：作者名需要 `SttbfRMark`（M4），`w:id` 仅保证文件内自增唯一。
+- `sprmTTlp` 只把 `grfatl` 的 bit5–10 映射为 `w:tblLook`：首行/末行/首列/末列直接对应，band 位按「置位=启用带状」取反为 `noHBand`/`noVBand`；`itl`（自动格式索引）丢弃。
+- `sprmCKcd` 以外的新增字符属性只写单向推导：`sprmCFELayout` 的 `iWarichuBracket` 仅在 `fWarichu` 置位时输出，`sprmCFitText` 的 0 宽度视为未设置。
+- 字符单位缩进（`sprmPDxc*`/`sprmPDyl*`）只写 `w:ind/@*Chars` 与 `w:spacing/@*Lines`，不重复写 twips 绝对值；阅读器若忽略 *Chars 会退回样式默认缩进。
+- `sprmSPgbProp` 的枚举按 0=页面边缘/1=文字、0=全部页/1=首页/2=非首页解释；`reserved` 字节非 0 时整条 sprm 视为损坏。
+- `sprmSFProtected` 只在 `sprmSFProtected` 出现时输出 `w:formProt`（值为「未被保护」的反相），文档级 `DOP.fProtEnabled` 尚未解析，未出现该 sprm 的节不写保护节点。
 - M3 仅保留越界不崩溃底线。针对 sprm 攻击面的专项分析、定向 fuzz 和防御补强移至 M6。
+- `src/base/binary.h` 的 `U16`/`U32`/`U64`/`S16` 统一了字节序解码，但不做边界检查：越界安全仍由调用方的前置 `subspan`/范围判断保证。带游标、越界即 `std::expected` 失败的读取器需要重写全部调用点，随 M6 的 fuzz 加固一起做。

@@ -25,6 +25,7 @@
 #include "doc/format/sprm_codes.h"
 
 namespace doccraft::doc {
+using detail::AppendUtf8;
 using detail::ApplyPara;
 using detail::ApplyRun;
 using detail::ApplySection;
@@ -48,7 +49,6 @@ using detail::ReadStyles;
 using detail::S16;
 using detail::U16;
 using detail::U32;
-using detail::Utf8;
 using detail::Valid;
 using detail::Walk;
 using detail::WalkParagraph;

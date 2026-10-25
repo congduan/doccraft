@@ -40,7 +40,7 @@ std::vector<std::string> ReadFonts(Bytes table, Fib::Range r) {
       uint16_t c = U16(b, x);
       if (!c)
         break;
-      Utf8(name, c);
+      AppendUtf8(name, c);
     }
     out.push_back(std::move(name));
     p = end;
@@ -248,7 +248,7 @@ std::vector<model::Style> ReadStyleSheet(
     if (chars > (d.size() - x) / 2 || x + 2 * chars + 2 > d.size())
       continue;
     for (size_t j = 0; j < chars; j++)
-      Utf8(s.name, U16(d, x + 2 * j));
+      AppendUtf8(s.name, U16(d, x + 2 * j));
     x += 2 * chars + 2;
     if (x & 1)
       x++;
@@ -259,19 +259,33 @@ std::vector<model::Style> ReadStyleSheet(
       if (n > d.size() - x)
         break;
       Bytes payload = d.subspan(x, n);
-      if (s.type == 3 && j == 0)
+      if (s.type == 3 && j == 0) {
         s.table_sprms.assign(payload.begin(), payload.end());
+        // Table styles keep their tblPr defaults and their per-condition blocks
+        // in the TAPX; both are needed for w:tblPr / w:tblStylePr output.
+        model::Table table;
+        model::RowProperties row;
+        Walk(payload, [&](uint16_t op, Bytes v) {
+          if (!ApplyConditional(s, op, v, fonts))
+            ApplyTable(table, row, op, v);
+        });
+        s.row_band = table.row_band;
+        s.col_band = table.col_band;
+        s.cell_margins = table.cell_margins;
+      }
       if (((s.type == 1 || s.type == 4) && j == 0) || (s.type == 3 && j == 1)) {
         if (n >= 2) {
           Walk(payload.subspan(2), [&](uint16_t op, Bytes v) {
-            ApplyPara(s.paragraph, op, v);
+            if (!ApplyConditional(s, op, v, fonts))
+              ApplyPara(s.paragraph, op, v);
           });
         }
       }
       if ((s.type == 1 && j == 1) || (s.type == 2 && j == 0) ||
           (s.type == 3 && j == 2)) {
         Walk(payload, [&](uint16_t op, Bytes v) {
-          ApplyRun(s.run, op, v, fonts);
+          if (!ApplyConditional(s, op, v, fonts))
+            ApplyRun(s.run, op, v, fonts);
         });
       }
       x += n;

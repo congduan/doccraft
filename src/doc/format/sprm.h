@@ -93,6 +93,11 @@ bool WalkParagraph(Bytes b, Bytes data, F fn, int depth = 0) {
   return walked && valid;
 }
 
+// Handles the conditional-formatting sprms of a style sheet (T/C/P/Cnf).
+// Returns false when `op` is none of them, so the caller keeps dispatching.
+bool ApplyConditional(model::Style& style, uint16_t op, Bytes v,
+                      const std::vector<std::string>& fonts);
+
 bool ApplyTable(model::Table& table, model::RowProperties& row, uint16_t op,
                 Bytes v);
 
@@ -102,6 +107,11 @@ void ApplyRun(model::Run& r, uint16_t op, Bytes v,
 void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v);
 
 bool ApplySection(model::Section& s, uint16_t op, Bytes v);
+
+// A CNFOperand (sprmTCnf/sprmPCnf/sprmCCnf) carries its own nested grpprl.
+// Returns false when `op` is not one of those three, so callers can fall back.
+bool ApplyConditional(model::Style& style, uint16_t op, Bytes v,
+                      const std::vector<std::string>& fonts);
 }  // namespace doccraft::doc::detail
 
 #endif  // SRC_DOC_FORMAT_SPRM_H_

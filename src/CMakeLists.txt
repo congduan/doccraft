@@ -1,3 +1,4 @@
+add_subdirectory(base)
 add_subdirectory(cfb)
 add_subdirectory(doc)
 add_subdirectory(model)

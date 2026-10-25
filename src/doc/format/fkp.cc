@@ -37,25 +37,28 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
                                                   const Fib& fib,
                                                   uint32_t limit) {
   if (fib.complex)
-    return std::unexpected(Error{"fast-saved document unsupported"});
+    return std::unexpected(
+        Error{"fast-saved document unsupported (M2 known gap)"});
   if (!Valid(table, {fib.fc_clx, fib.lcb_clx}))
     return std::unexpected(Error{"CLX outside table stream"});
   Bytes b = table.subspan(fib.fc_clx, fib.lcb_clx);
   size_t p = 0;
   while (p < b.size() && b[p] == 1) {
     if (p + 3 > b.size())
-      return std::unexpected(Error{"truncated CLX"});
+      return std::unexpected(Error{"truncated CLX Prc"});
     size_t n = U16(b, p + 1);
     if (n > b.size() - p - 3)
-      return std::unexpected(Error{"truncated CLX Prc"});
+      return std::unexpected(Error{"truncated CLX grpprl"});
     p += 3 + n;
   }
   if (p + 5 > b.size() || b[p] != 2)
-    return std::unexpected(Error{"missing Pcdt"});
+    return std::unexpected(Error{"missing CLX Pcdt"});
   size_t nbytes = U32(b, p + 1);
   p += 5;
-  if (nbytes < 16 || nbytes > b.size() - p || (nbytes - 4) % 12)
-    return std::unexpected(Error{"invalid Pcdt"});
+  // The Pcdt is the last element of the CLX, so it must end the slice exactly.
+  if (nbytes < 16 || nbytes > b.size() - p || (nbytes - 4) % 12 ||
+      p + nbytes != b.size())
+    return std::unexpected(Error{"invalid PlcPcd size"});
   size_t count = (nbytes - 4) / 12, desc = p + 4 * (count + 1);
   std::vector<Char> out;
   size_t emitted = 0;
@@ -96,7 +99,7 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
         c = kReplacementCharacter;
       Char ch{{}, character_cp, fc, c == 13};
 
-      Utf8(ch.text, c == 13 ? 10 : c);
+      AppendUtf8(ch.text, c == 13 ? 10 : c);
       out.push_back(std::move(ch));
     }
   }

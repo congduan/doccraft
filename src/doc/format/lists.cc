@@ -59,7 +59,7 @@ void ReadLists(model::Document& doc, Bytes table, const Fib& fib) {
         if (c <= 8 && level.format != 0x17)
           level.text += "%" + std::to_string(c + 1);
         else
-          Utf8(level.text, c);
+          AppendUtf8(level.text, c);
       }
 
       Walk(lv.subspan(28, pp), [&](uint16_t op, Bytes v) {

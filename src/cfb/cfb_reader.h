@@ -94,7 +94,10 @@ class CfbReader {
 
  private:
   CfbReader() = default;
-  std::expected<const uint8_t*, Error> SectorBytes(uint32_t sector) const;
+  // View of one sector; the span keeps the sector length so callers cannot
+  // read past it.
+  std::expected<std::span<const uint8_t>, Error> SectorBytes(
+      uint32_t sector) const;
   std::expected<std::vector<uint8_t>, Error> ReadChain(uint32_t start,
                                                        uint64_t size,
                                                        bool mini) const;

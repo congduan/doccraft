@@ -94,10 +94,18 @@ constexpr char kSettingsPart[] =
 void WriteFramePr(pugi::xml_node pr, const model::Paragraph& p) {
   if (p.frame_wrap < 0 && p.frame_anchor < 0 && p.frame_x < 0 &&
       p.frame_y < 0 && p.frame_width < 0 && p.frame_height < 0 &&
-      p.frame_h_space < 0 && p.frame_v_space < 0 && !p.frame_lock_set) {
+      p.frame_h_space < 0 && p.frame_v_space < 0 && !p.frame_lock_set &&
+      p.drop_cap < 0 && p.text_flow < 0) {
     return;
   }
   auto frame = pr.append_child("w:framePr");
+  if (p.drop_cap > 0) {
+    Attr(frame, "w:dropCap", p.drop_cap == 2 ? "margin" : "drop");
+    IntAttr(frame, "w:lines", p.drop_cap_lines);
+  }
+  if (p.text_flow > 0) {
+    Attr(frame, "w:textFlow", p.text_flow == 2 ? "btLr" : "tbRl");
+  }
   if (p.frame_wrap >= 0) {
     const char* wraps[] = {"auto", "notBeside", "around",
                            "none", "tight",     "through"};
@@ -144,7 +152,8 @@ void WriteFramePr(pugi::xml_node pr, const model::Paragraph& p) {
 }
 
 void WriteParagraphIndent(pugi::xml_node pr, const model::Paragraph& p) {
-  if (!(p.left_set || p.right_set || p.first_set || p.nest_set)) {
+  if (!(p.left_set || p.right_set || p.first_set || p.nest_set ||
+        p.left_chars_set || p.right_chars_set || p.first_line_chars_set)) {
     return;
   }
   auto ind = pr.append_child("w:ind");
@@ -159,14 +168,29 @@ void WriteParagraphIndent(pugi::xml_node pr, const model::Paragraph& p) {
   } else if (p.first_set) {
     IntAttr(ind, "w:firstLine", p.first);
   }
+  if (p.left_chars_set) {
+    IntAttr(ind, "w:leftChars", p.left_chars);
+  }
+  if (p.right_chars_set) {
+    IntAttr(ind, "w:rightChars", p.right_chars);
+  }
+  if (p.first_line_chars_set) {
+    IntAttr(ind, "w:firstLineChars", p.first_line_chars);
+  }
 }
 
 void WriteParagraphSpacing(pugi::xml_node pr, const model::Paragraph& p) {
   if (p.before < 0 && p.after < 0 && !p.line && !p.before_auto_set &&
-      !p.after_auto_set) {
+      !p.after_auto_set && !p.before_lines_set && !p.after_lines_set) {
     return;
   }
   auto sp = pr.append_child("w:spacing");
+  if (p.before_lines_set) {
+    IntAttr(sp, "w:beforeLines", p.before_lines);
+  }
+  if (p.after_lines_set) {
+    IntAttr(sp, "w:afterLines", p.after_lines);
+  }
   if (p.before >= 0) {
     IntAttr(sp, "w:before", p.before);
   }
@@ -216,6 +240,11 @@ void WriteParagraphFlags(pugi::xml_node pr, const model::Paragraph& p) {
   SpecBool(pr, "w:autoSpaceDN", p.auto_space_dn, p.auto_space_dn_set);
   if (p.outline >= 0 && p.outline <= 9) {
     Value(pr, "w:outlineLvl", p.outline);
+  }
+  if (p.text_alignment >= 0) {
+    const char* align[] = {"top", "center", "baseline", "bottom", "auto"};
+    Attr(pr.append_child("w:textAlignment"), "w:val",
+         p.text_alignment < 5 ? align[p.text_alignment] : "auto");
   }
 }
 
@@ -282,12 +311,13 @@ void ParaPr(pugi::xml_node parent, const model::Paragraph& p,
   }
 }
 
-void Text(pugi::xml_node run, std::string_view text) {
+// `deleted` selects w:delText, which is required inside a w:del wrapper.
+void Text(pugi::xml_node run, std::string_view text, bool deleted = false) {
   std::string chunk;
   auto flush = [&]() {
     if (chunk.empty())
       return;
-    auto t = run.append_child("w:t");
+    auto t = run.append_child(deleted ? "w:delText" : "w:t");
     Attr(t, "xml:space", "preserve");
     t.text().set(chunk.c_str());
     chunk.clear();
@@ -439,6 +469,14 @@ void WritePageBorders(pugi::xml_node sec, const model::Section& section) {
     return;
   }
   auto borders = sec.append_child("w:pgBorders");
+  if (section.page_border_offset_from >= 0) {
+    Attr(borders, "w:offsetFrom",
+         section.page_border_offset_from == 1 ? "text" : "page");
+  }
+  if (section.page_border_apply_to >= 0) {
+    const char* displays[] = {"allPages", "firstPage", "notFirstPage"};
+    Attr(borders, "w:display", displays[section.page_border_apply_to]);
+  }
   const char* sides[] = {"w:top", "w:left", "w:bottom", "w:right"};
   for (size_t i = 0; i < 4; i++) {
     BorderPr(borders, sides[i], section.page_borders[i]);
@@ -546,6 +584,10 @@ void SectionPr(pugi::xml_node sec, const model::Section& section) {
     Attr(sec.append_child("w:textDirection"), "w:val",
          section.text_flow < 6 ? directions[section.text_flow] : "lrTb");
   }
+  if (section.form_unprotected_set) {
+    // sprmSFProtected states whether the section opts out of form protection.
+    SpecBool(sec, "w:formProt", !section.form_unprotected, true);
+  }
   WriteLineNumbering(sec, section);
   WriteFootnoteProperties(sec, section);
   WriteEndnoteProperties(sec, section);
@@ -565,7 +607,7 @@ struct Part {
 
 void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
                     const model::Section* break_section,
-                    std::map<std::string, int>& hyperlinks) {
+                    std::map<std::string, int>& hyperlinks, int& revision_id) {
   auto pn = parent.append_child("w:p");
   ParaPr(pn, p);
   if (break_section) {
@@ -583,7 +625,15 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       owner = pn.append_child("w:fldSimple");
       Attr(owner, "w:instr", "PAGE");
     }
-    auto rn = owner.append_child("w:r");
+    // sprmCFRMarkDel / sprmCFRMarkIns: tracked text lives inside w:del / w:ins.
+    pugi::xml_node wrapper = owner;
+    bool deleted = r.revision_delete;
+    if (deleted || r.revision_insert) {
+      wrapper = owner.append_child(deleted ? "w:del" : "w:ins");
+      IntAttr(wrapper, "w:id", ++revision_id);
+      Attr(wrapper, "w:author", "doccraft");
+    }
+    auto rn = wrapper.append_child("w:r");
     RunPr(rn, r);
     if (r.symbol_character >= 0 && !r.symbol_font.empty()) {
       auto sym = rn.append_child("w:sym");
@@ -593,7 +643,7 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
                     r.symbol_character & kLow16Mask);
       Attr(sym, "w:char", code);
     } else {
-      Text(rn, r.text);
+      Text(rn, r.text, deleted);
     }
   }
 }
@@ -626,8 +676,11 @@ void WriteTablePosition(pugi::xml_node pr, const model::Table& t) {
   if (t.tblp_y != -1) {
     IntAttr(pos, "w:tblpY", t.tblp_y);
   }
-  Attr(pos, "w:horzAnchor", "margin");
-  Attr(pos, "w:vertAnchor", "margin");
+  const char* anchors[] = {"margin", "page", "text"};
+  Attr(pos, "w:horzAnchor",
+       t.anchor_h >= 0 && t.anchor_h < 3 ? anchors[t.anchor_h] : "margin");
+  Attr(pos, "w:vertAnchor",
+       t.anchor_v >= 0 && t.anchor_v < 3 ? anchors[t.anchor_v] : "margin");
 }
 
 void WriteTableBorders(pugi::xml_node pr, const model::Table& t) {
@@ -705,11 +758,23 @@ void WriteTableProperties(pugi::xml_node tn, const model::Table& t) {
   }
   ShadePr(pr, t.shade, t.shade_fore, t.shade_pattern);
   WriteTableBorders(pr, t);
+  if (t.row_band > 0) {
+    Value(pr, "w:tblStyleRowBandSize", t.row_band);
+  }
+  if (t.col_band > 0) {
+    Value(pr, "w:tblStyleColBandSize", t.col_band);
+  }
   auto margins = pr.append_child("w:tblCellMar");
-  for (const char* side : {"w:top", "w:left", "w:bottom", "w:right"}) {
-    auto m = margins.append_child(side);
-    IntAttr(m, "w:w", 0);
+  const char* margin_sides[] = {"w:top", "w:left", "w:bottom", "w:right"};
+  for (size_t k = 0; k < 4; k++) {
+    auto m = margins.append_child(margin_sides[k]);
+    IntAttr(m, "w:w", t.cell_margins[k] >= 0 ? t.cell_margins[k] : 0);
     Attr(m, "w:type", "dxa");
+  }
+  if (t.look >= 0) {
+    char mask[8];
+    std::snprintf(mask, sizeof(mask), "%04X", t.look);
+    Attr(pr.append_child("w:tblLook"), "w:val", mask);
   }
 }
 
@@ -828,7 +893,7 @@ void WriteCellProperties(pugi::xml_node tcp, const model::CellProperties* cp,
 }
 
 void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
-                   std::map<std::string, int>& hyperlinks) {
+                   std::map<std::string, int>& hyperlinks, int& revision_id) {
   const auto& row = t.rows[index];
   const model::RowProperties* rp =
       index < t.row_properties.size() ? &t.row_properties[index] : nullptr;
@@ -847,12 +912,12 @@ void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
     size_t span = CellGridSpan(t, rp, j, grid_index);
     WriteCellProperties(tcp, cp, cell_width, span);
     grid_index += span;
-    WriteParagraph(tc, row[j], nullptr, hyperlinks);
+    WriteParagraph(tc, row[j], nullptr, hyperlinks, revision_id);
   }
 }
 
 void WriteTable(pugi::xml_node body, const model::Table& t,
-                std::map<std::string, int>& hyperlinks) {
+                std::map<std::string, int>& hyperlinks, int& revision_id) {
   auto tn = body.append_child("w:tbl");
   WriteTableProperties(tn, t);
   auto grid = tn.append_child("w:tblGrid");
@@ -860,7 +925,7 @@ void WriteTable(pugi::xml_node body, const model::Table& t,
     IntAttr(grid.append_child("w:gridCol"), "w:w", column);
   }
   for (size_t i = 0; i < t.rows.size(); i++) {
-    WriteTableRow(tn, t, i, hyperlinks);
+    WriteTableRow(tn, t, i, hyperlinks, revision_id);
   }
 }
 
@@ -876,20 +941,136 @@ const model::Section* SectionBreakFor(const model::Document& document,
 }
 
 void WriteBody(pugi::xml_node body, const model::Document& document,
-               std::map<std::string, int>& hyperlinks) {
+               std::map<std::string, int>& hyperlinks, int& revision_id) {
   if (document.blocks.empty()) {
     for (size_t i = 0; i < document.paragraphs.size(); i++) {
       WriteParagraph(body, document.paragraphs[i], SectionBreakFor(document, i),
-                     hyperlinks);
+                     hyperlinks, revision_id);
     }
     return;
   }
   for (const auto& block : document.blocks) {
     if (block.table && block.index < document.tables.size()) {
-      WriteTable(body, document.tables[block.index], hyperlinks);
+      WriteTable(body, document.tables[block.index], hyperlinks, revision_id);
     } else if (!block.table && block.index < document.paragraphs.size()) {
       WriteParagraph(body, document.paragraphs[block.index],
-                     SectionBreakFor(document, block.index), hyperlinks);
+                     SectionBreakFor(document, block.index), hyperlinks,
+                     revision_id);
+    }
+  }
+}
+
+// CNF condition (cnfc) -> w:tblStylePr/@w:type.
+const char* ConditionalType(int cnfc) {
+  switch (cnfc) {
+    case 0x0001:
+      return "firstRow";
+    case 0x0002:
+      return "lastRow";
+    case 0x0004:
+      return "firstCol";
+    case 0x0008:
+      return "lastCol";
+    case 0x0010:
+      return "band1Vert";
+    case 0x0020:
+      return "band2Vert";
+    case 0x0040:
+      return "band1Horz";
+    case 0x0080:
+      return "band2Horz";
+    case 0x0100:
+      return "neCell";
+    case 0x0200:
+      return "nwCell";
+    case 0x0400:
+      return "seCell";
+    case 0x0800:
+      return "swCell";
+    default:
+      return nullptr;
+  }
+}
+
+void WriteConditionalCellPr(pugi::xml_node tcpr,
+                            const model::ConditionalProperties& c) {
+  bool any_border = false;
+  for (const auto& b : c.borders) {
+    any_border |= b.set;
+  }
+  if (any_border) {
+    auto bd = tcpr.append_child("w:tcBorders");
+    const char* sides[] = {"w:top",     "w:left",    "w:bottom", "w:right",
+                           "w:insideH", "w:insideV", "w:tl2br",  "w:tr2bl"};
+    for (size_t i = 0; i < 8; i++) {
+      BorderPr(bd, sides[i], c.borders[i]);
+    }
+  }
+  ShadePr(tcpr, c.shade, c.shade_fore, c.shade_pattern);
+  if (c.vertical_align >= 0) {
+    const char* aligns[] = {"top", "center", "bottom"};
+    Attr(tcpr.append_child("w:vAlign"), "w:val",
+         aligns[c.vertical_align < 3 ? c.vertical_align : 0]);
+  }
+  if (c.no_wrap_set) {
+    SpecBool(tcpr, "w:noWrap", c.no_wrap, true);
+  }
+  bool any_margin = false;
+  for (int margin : c.margins) {
+    any_margin |= margin >= 0;
+  }
+  if (any_margin) {
+    auto mar = tcpr.append_child("w:tcMar");
+    const char* sides[] = {"w:top", "w:left", "w:bottom", "w:right"};
+    for (size_t k = 0; k < 4; k++) {
+      if (c.margins[k] >= 0) {
+        auto m = mar.append_child(sides[k]);
+        IntAttr(m, "w:w", c.margins[k]);
+        Attr(m, "w:type", "dxa");
+      }
+    }
+  }
+}
+
+void WriteStyleConditional(pugi::xml_node sn,
+                           const model::ConditionalProperties& c) {
+  const char* type = ConditionalType(c.type);
+  if (type == nullptr) {
+    return;
+  }
+  auto block = sn.append_child("w:tblStylePr");
+  Attr(block, "w:type", type);
+  // CT_TblStylePr keeps the ECMA-376 child order: pPr, rPr, tblPr, trPr, tcPr.
+  ParaPr(block, c.paragraph, true);
+  RunPr(block, c.run);
+  WriteConditionalCellPr(block.append_child("w:tcPr"), c);
+}
+
+// Table styles carry their band sizes and default cell margins in w:tblPr.
+void WriteStyleTablePr(pugi::xml_node sn, const model::Style& style) {
+  bool any_margin = false;
+  for (int margin : style.cell_margins) {
+    any_margin |= margin >= 0;
+  }
+  if (style.row_band <= 0 && style.col_band <= 0 && !any_margin) {
+    return;
+  }
+  auto pr = sn.append_child("w:tblPr");
+  if (style.row_band > 0) {
+    Value(pr, "w:tblStyleRowBandSize", style.row_band);
+  }
+  if (style.col_band > 0) {
+    Value(pr, "w:tblStyleColBandSize", style.col_band);
+  }
+  if (any_margin) {
+    auto margins = pr.append_child("w:tblCellMar");
+    const char* sides[] = {"w:top", "w:left", "w:bottom", "w:right"};
+    for (size_t k = 0; k < 4; k++) {
+      if (style.cell_margins[k] >= 0) {
+        auto m = margins.append_child(sides[k]);
+        IntAttr(m, "w:w", style.cell_margins[k]);
+        Attr(m, "w:type", "dxa");
+      }
     }
   }
 }
@@ -919,6 +1100,13 @@ void WriteStyle(pugi::xml_node styles, const model::Document& document,
     ParaPr(sn, style.paragraph, true);
   }
   RunPr(sn, style.run);
+  // CT_Style places w:tblPr after w:pPr/w:rPr.
+  if (style.type == 3) {
+    WriteStyleTablePr(sn, style);
+  }
+  for (const auto& conditional : style.conditionals) {
+    WriteStyleConditional(sn, conditional);
+  }
 }
 
 pugi::xml_document WriteStyles(const model::Document& document) {
@@ -1016,7 +1204,7 @@ pugi::xml_document WriteNumbering(const model::Document& document) {
 // parts. References are numbered rId3-rId8; hyperlinks start at rId10.
 void WriteSectionReferences(pugi::xml_node sec, const model::Document& document,
                             std::map<std::string, int>& hyperlinks,
-                            std::vector<Part>* parts) {
+                            std::vector<Part>* parts, int& revision_id) {
   for (size_t i = 0; i < 6; i++) {
     if (document.section.headers[i].empty()) {
       continue;
@@ -1036,7 +1224,7 @@ void WriteSectionReferences(pugi::xml_node sec, const model::Document& document,
     Attr(root, "xmlns:w", kWordmlNamespace);
     Attr(root, "xmlns:r", kRelationshipsNamespace);
     for (const auto& p : document.section.headers[i]) {
-      WriteParagraph(root, p, nullptr, hyperlinks);
+      WriteParagraph(root, p, nullptr, hyperlinks, revision_id);
     }
     parts->push_back({name, Save(part)});
   }
@@ -1158,17 +1346,18 @@ uint32_t Crc32(std::string_view bytes) {
 std::expected<std::vector<uint8_t>, Error> Write(
     const model::Document& document) {
   std::map<std::string, int> hyperlinks;
+  int revision_id = 0;
   pugi::xml_document doc;
   auto root = doc.append_child("w:document");
   Attr(root, "xmlns:w", kWordmlNamespace);
   Attr(root, "xmlns:r", kRelationshipsNamespace);
   auto body = root.append_child("w:body");
-  WriteBody(body, document, hyperlinks);
+  WriteBody(body, document, hyperlinks, revision_id);
 
   auto sec = body.append_child("w:sectPr");
   SectionPr(sec, document.section);
   std::vector<Part> header_parts;
-  WriteSectionReferences(sec, document, hyperlinks, &header_parts);
+  WriteSectionReferences(sec, document, hyperlinks, &header_parts, revision_id);
 
   pugi::xml_document styles = WriteStyles(document);
   pugi::xml_document numbering = WriteNumbering(document);

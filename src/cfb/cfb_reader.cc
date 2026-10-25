@@ -21,7 +21,19 @@
 #include <utility>
 #include <vector>
 
+#include "base/binary.h"
+#include "base/utf8.h"
+
 namespace doccraft::cfb {
+
+// Byte readers and UTF-8 encoding from the shared base layer; [MS-CFB] is
+// little-endian.
+using base::AppendUtf8;
+using base::Bytes;
+using base::U16;
+using base::U32;
+using base::U64;
+
 namespace {
 constexpr uint32_t kFree = 0xFFFFFFFF;
 constexpr uint32_t kEnd = 0xFFFFFFFE;
@@ -35,41 +47,9 @@ constexpr uint32_t kMiniStreamCutoff = 4096;
 constexpr uint16_t kLittleEndianMark = 0xFFFE;
 constexpr uint16_t kSectorShiftV3 = 9;   // 2^9  = 512-byte sectors
 constexpr uint16_t kSectorShiftV4 = 12;  // 2^12 = 4096-byte sectors
-uint16_t U16(const uint8_t* p) {
-  return static_cast<uint16_t>(p[0] | (static_cast<uint16_t>(p[1]) << 8));
-}
-
-uint32_t U32(const uint8_t* p) {
-  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-         (static_cast<uint32_t>(p[2]) << 16) |
-         (static_cast<uint32_t>(p[3]) << 24);
-}
-
-uint64_t U64(const uint8_t* p) {
-  return static_cast<uint64_t>(U32(p)) |
-         (static_cast<uint64_t>(U32(p + 4)) << 32);
-}
 
 Error Fail(ErrorCode code, std::string message) {
   return {code, std::move(message)};
-}
-
-void AppendUtf8(std::string& out, uint32_t cp) {
-  if (cp <= 0x7F) {
-    out.push_back(static_cast<char>(cp));
-  } else if (cp <= 0x7FF) {
-    out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  } else if (cp <= 0xFFFF) {
-    out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  } else {
-    out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  }
 }
 
 // Parsed fields of the CFB header ([MS-CFB] §2.2).
@@ -103,19 +83,19 @@ std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes) {
     return std::unexpected(Fail(ErrorCode::kTruncated, "header truncated"));
   }
   Header header;
-  header.major_version = U16(bytes.data() + 26);
+  header.major_version = U16(bytes, 26);
   if (header.major_version != 3 && header.major_version != 4) {
     return std::unexpected(
         Fail(ErrorCode::kUnsupportedRevision, "unsupported CFB version"));
   }
-  const uint16_t shift = U16(bytes.data() + 30);
+  const uint16_t shift = U16(bytes, 30);
   if (shift != (header.major_version == 3 ? kSectorShiftV3 : kSectorShiftV4) ||
-      U16(bytes.data() + 32) != 6) {
+      U16(bytes, 32) != 6) {
     return std::unexpected(
         Fail(ErrorCode::kUnsupportedSectorSize, "invalid sector shift"));
   }
-  if (U16(bytes.data() + 28) != kLittleEndianMark ||
-      U32(bytes.data() + 56) != kMiniStreamCutoff) {
+  if (U16(bytes, 28) != kLittleEndianMark ||
+      U32(bytes, 56) != kMiniStreamCutoff) {
     return std::unexpected(
         Fail(ErrorCode::kCorruptFat, "invalid byte order or mini cutoff"));
   }
@@ -124,14 +104,14 @@ std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes) {
       bytes.size() % header.sector_size != 0) {
     return std::unexpected(Fail(ErrorCode::kTruncated, "partial sector"));
   }
-  header.first_dir_sector = U32(bytes.data() + 48);
-  header.mini_fat_start = U32(bytes.data() + 60);
-  header.num_mini_fat = U32(bytes.data() + 64);
+  header.first_dir_sector = U32(bytes, 48);
+  header.mini_fat_start = U32(bytes, 60);
+  header.num_mini_fat = U32(bytes, 64);
   header.total_sectors =
       static_cast<uint32_t>(bytes.size() / header.sector_size - 1);
-  header.fat_count = U32(bytes.data() + 44);
-  header.difat_count = U32(bytes.data() + 72);
-  header.difat_start = U32(bytes.data() + 68);
+  header.fat_count = U32(bytes, 44);
+  header.difat_count = U32(bytes, 72);
+  header.difat_start = U32(bytes, 68);
   if (header.fat_count == 0 || header.fat_count > header.total_sectors ||
       header.difat_count > header.total_sectors ||
       header.num_mini_fat > header.total_sectors) {
@@ -152,7 +132,7 @@ std::expected<Difat, Error> ParseDifat(std::span<const uint8_t> bytes,
                                        const Header& header) {
   Difat difat;
   for (size_t i = 0; i < 109 && difat.entries.size() < header.fat_count; ++i) {
-    uint32_t id = U32(bytes.data() + 76 + i * 4);
+    uint32_t id = U32(bytes, 76 + i * 4);
     if (id != kFree) {
       difat.entries.push_back(id);
     }
@@ -165,16 +145,16 @@ std::expected<Difat, Error> ParseDifat(std::span<const uint8_t> bytes,
           Fail(ErrorCode::kCorruptFat, "invalid DIFAT chain"));
     }
     difat.seen[at] = 1;
-    const uint8_t* p = SectorView(bytes, header.sector_size, at).data();
+    const Bytes p = SectorView(bytes, header.sector_size, at);
     for (uint32_t j = 0; j < header.sector_size / 4 - 1 &&
                          difat.entries.size() < header.fat_count;
          ++j) {
-      uint32_t id = U32(p + j * 4);
+      uint32_t id = U32(p, j * 4);
       if (id != kFree) {
         difat.entries.push_back(id);
       }
     }
-    at = U32(p + header.sector_size - 4);
+    at = U32(p, header.sector_size - 4);
   }
   if (at != kEnd || difat.entries.size() != header.fat_count) {
     return std::unexpected(
@@ -205,9 +185,9 @@ std::expected<FatTables, Error> LoadFatTables(std::span<const uint8_t> bytes,
           Fail(ErrorCode::kCorruptFat, "invalid FAT sector"));
     }
     fat_seen[id] = 1;
-    const uint8_t* p = SectorView(bytes, header.sector_size, id).data();
+    const Bytes p = SectorView(bytes, header.sector_size, id);
     for (uint32_t j = 0; j < header.sector_size / 4; ++j) {
-      tables.fat.push_back(U32(p + j * 4));
+      tables.fat.push_back(U32(p, j * 4));
     }
   }
   if (tables.fat.size() < header.total_sectors) {
@@ -229,24 +209,23 @@ std::expected<FatTables, Error> LoadFatTables(std::span<const uint8_t> bytes,
 }
 
 // Decodes one 128-byte directory entry, including its UTF-16LE name.
-std::expected<DirEntry, Error> ParseDirEntry(const uint8_t* p,
-                                             uint16_t version) {
+std::expected<DirEntry, Error> ParseDirEntry(Bytes p, uint16_t version) {
   DirEntry entry{};
-  const uint16_t len = U16(p + 64);
+  const uint16_t len = U16(p, 64);
   const uint8_t type = p[66];
   if (type == 1 || type == 2 || type == 5) {
-    if (len < 2 || len > 64 || len % 2 != 0 || U16(p + len - 2) != 0) {
+    if (len < 2 || len > 64 || len % 2 != 0 || U16(p, len - 2) != 0) {
       return std::unexpected(
           Fail(ErrorCode::kCorruptDirectory, "invalid directory name"));
     }
     for (size_t j = 0; j + 2 < len; j += 2) {
-      uint32_t cp = U16(p + j);
+      uint32_t cp = U16(p, j);
       if (cp >= 0xD800 && cp <= 0xDBFF) {
         if (j + 4 >= len) {
           return std::unexpected(
               Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
         }
-        uint32_t low = U16(p + j + 2);
+        uint32_t low = U16(p, j + 2);
         if (low < 0xDC00 || low > 0xDFFF) {
           return std::unexpected(
               Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
@@ -261,11 +240,11 @@ std::expected<DirEntry, Error> ParseDirEntry(const uint8_t* p,
     }
   }
   entry.type = static_cast<EntryType>(type);
-  entry.left = U32(p + 68);
-  entry.right = U32(p + 72);
-  entry.child = U32(p + 76);
-  entry.start_sector = U32(p + 116);
-  entry.size = version == 3 ? U32(p + 120) : U64(p + 120);
+  entry.left = U32(p, 68);
+  entry.right = U32(p, 72);
+  entry.child = U32(p, 76);
+  entry.start_sector = U32(p, 116);
+  entry.size = version == 3 ? U32(p, 120) : U64(p, 120);
   return entry;
 }
 
@@ -282,8 +261,8 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
           Fail(ErrorCode::kCorruptDirectory, "invalid directory chain"));
     }
     seen[at] = 1;
-    const uint8_t* p = SectorView(bytes, header.sector_size, at).data();
-    directory.insert(directory.end(), p, p + header.sector_size);
+    const Bytes p = SectorView(bytes, header.sector_size, at);
+    directory.insert(directory.end(), p.begin(), p.end());
     at = fat[at];
   }
   if (directory.empty()) {
@@ -293,7 +272,8 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
   std::vector<DirEntry> entries;
   for (size_t i = 0; i + kDirEntrySize <= directory.size();
        i += kDirEntrySize) {
-    auto entry = ParseDirEntry(directory.data() + i, header.major_version);
+    auto entry = ParseDirEntry(Bytes(directory).subspan(i, kDirEntrySize),
+                               header.major_version);
     if (!entry) {
       return std::unexpected(entry.error());
     }
@@ -303,13 +283,13 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
 }
 }  // namespace
 
-std::expected<const uint8_t*, Error> CfbReader::SectorBytes(
-    uint32_t sector) const {
+std::expected<Bytes, Error> CfbReader::SectorBytes(uint32_t sector) const {
   const uint64_t count = data_.size() / sector_size_ - 1;
   if (sector >= count) {
     return std::unexpected(Fail(ErrorCode::kTruncated, "sector outside file"));
   }
-  return data_.data() + (static_cast<size_t>(sector) + 1) * sector_size_;
+  return data_.subspan((static_cast<size_t>(sector) + 1) * sector_size_,
+                       sector_size_);
 }
 
 std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
@@ -337,23 +317,23 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
           Fail(ErrorCode::kCorruptFat, "invalid or cyclic FAT chain"));
     }
     seen[at] = 1;
-    const uint8_t* p = nullptr;
+    Bytes chunk;
     if (mini) {
       const uint64_t offset = static_cast<uint64_t>(at) * unit;
       if (offset + unit > mini_stream_.size()) {
         return std::unexpected(
             Fail(ErrorCode::kCorruptFat, "mini sector outside root stream"));
       }
-      p = mini_stream_.data() + offset;
+      chunk = Bytes(mini_stream_).subspan(static_cast<size_t>(offset), unit);
     } else {
       auto sector = SectorBytes(at);
       if (!sector)
         return std::unexpected(sector.error());
-      p = *sector;
+      chunk = *sector;
     }
     const size_t take =
         static_cast<size_t>(std::min<uint64_t>(unit, size - result.size()));
-    result.insert(result.end(), p, p + take);
+    result.insert(result.end(), chunk.begin(), chunk.begin() + take);
     uint32_t next = table[at];
     if (i + 1 == count) {
       if (next != kEnd) {
@@ -416,7 +396,7 @@ std::expected<CfbReader, Error> CfbReader::Open(
       return std::unexpected(raw.error());
     }
     for (size_t i = 0; i < raw->size(); i += 4) {
-      out.mini_fat_.push_back(U32(raw->data() + i));
+      out.mini_fat_.push_back(U32(*raw, i));
     }
   }
   if (out.entries_[0].size) {

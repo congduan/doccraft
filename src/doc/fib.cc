@@ -15,17 +15,15 @@
 #include "doc/fib.h"
 
 #include <cstddef>
-namespace doccraft::doc {
-namespace {
-uint16_t U16(std::span<const uint8_t> b, size_t p) {
-  return static_cast<uint16_t>(b[p]) | static_cast<uint16_t>(b[p + 1]) << 8;
-}
 
-uint32_t U32(std::span<const uint8_t> b, size_t p) {
-  return static_cast<uint32_t>(U16(b, p)) | static_cast<uint32_t>(U16(b, p + 2))
-                                                << 16;
-}
-}  // namespace
+#include "base/binary.h"
+
+namespace doccraft::doc {
+
+// Byte readers from the shared base layer; [MS-DOC] is little-endian.
+using base::U16;
+using base::U32;
+
 std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   if (word.size() < 34)
     return std::unexpected(Error{"truncated FIB base"});

@@ -160,15 +160,22 @@ void WriteRunEmphasis(pugi::xml_node n, const model::Run& r) {
 }
 
 void WriteRunColor(pugi::xml_node n, const model::Run& r) {
-  if (r.color >= 0) {
+  bool complex = r.rtl || r.complex_script;
+  bool color_set = r.color >= 0 || (complex && r.color_cs >= 0);
+  if (color_set) {
     constexpr const char* colors[] = {"auto",   "000000", "0000FF", "00FFFF",
                                       "008000", "FF00FF", "FF0000", "FFFF00",
                                       "FFFFFF", "000080", "008080", "008000",
                                       "800080", "800000", "808000", "808080"};
-    Attr(n.append_child("w:color"), "w:val",
-         r.color_rgb    ? Color(r.color)
-         : r.color < 16 ? colors[r.color]
-                        : "auto");
+    std::string value = "auto";
+    if (complex && r.color_cs >= 0) {
+      value = Color(r.color_cs);  // sprmCIcoBi already resolved to COLORREF
+    } else if (r.color_rgb) {
+      value = Color(r.color);
+    } else if (r.color >= 0 && r.color < 16) {
+      value = colors[r.color];
+    }
+    Attr(n.append_child("w:color"), "w:val", value);
   }
   if (r.highlight >= 0) {
     constexpr const char* colors[] = {
@@ -178,6 +185,38 @@ void WriteRunColor(pugi::xml_node n, const model::Run& r) {
         "darkMagenta", "darkRed",  "darkYellow", "darkGray"};
     Attr(n.append_child("w:highlight"), "w:val",
          r.highlight < 16 ? colors[r.highlight] : "none");
+  }
+}
+
+// sprmCFitText: squeeze or stretch the run into a fixed width.
+void WriteRunFitText(pugi::xml_node n, const model::Run& r) {
+  if (r.fit_text == 0) {
+    return;
+  }
+  auto fit = n.append_child("w:fitText");
+  IntAttr(fit, "w:val", r.fit_text);
+  IntAttr(fit, "w:id", r.fit_text_id);
+}
+
+// sprmCFELayout: East Asian layout unit (tate-chu-yoko, warichu, ...).
+void WriteRunEastAsianLayout(pugi::xml_node n, const model::Run& r) {
+  if (!r.ea_layout_set) {
+    return;
+  }
+  auto layout = n.append_child("w:eastAsianLayout");
+  IntAttr(layout, "w:id", r.ea_id);
+  if (r.ea_vert) {
+    Attr(layout, "w:vert", "1");
+  }
+  if (r.ea_combine) {
+    Attr(layout, "w:combine", "1");
+    static constexpr const char* kBrackets[] = {"none", "round", "square",
+                                                "angle", "curly"};
+    Attr(layout, "w:combineBrackets",
+         r.ea_brackets < 5 ? kBrackets[r.ea_brackets] : "none");
+  }
+  if (r.ea_vert_compress) {
+    Attr(layout, "w:vertCompress", "1");
   }
 }
 
@@ -220,6 +259,8 @@ void RunPr(pugi::xml_node parent, const model::Run& r) {
       Attr(n.append_child("w:effect"), "w:val", effects[r.text_effect]);
     }
   }
+  WriteRunFitText(n, r);
+  WriteRunEastAsianLayout(n, r);
   WriteRunColor(n, r);
   ShadePr(n, r.shade, r.shade_fore, r.shade_pattern);
   BorderPr(n, "w:bdr", r.border);

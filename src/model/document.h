@@ -75,6 +75,12 @@ struct Run {
   bool binary_data = false, ole_object = false, embedded_object = false;
   bool revision_insert = false, revision_delete = false,
        property_revision = false;
+  // sprmCFitText: width in twips a run is squeezed or stretched into.
+  int fit_text = 0, fit_text_id = 0;
+  // sprmCFELayout: East Asian layout unit (w:eastAsianLayout).
+  bool ea_layout_set = false, ea_vert = false, ea_combine = false,
+       ea_vert_compress = false;
+  int ea_brackets = 0, ea_id = 0;
   int style = -1;
 };
 
@@ -117,11 +123,37 @@ struct Paragraph {
   bool frame_height_exact = false;
   int frame_h_space = -1, frame_v_space = -1;
   bool frame_lock = false, frame_lock_set = false;
+  // sprmPDcs: 1 = drop cap in text, 2 = drop cap in margin.
+  int drop_cap = -1, drop_cap_lines = 0;
+  // sprmPWAlignFont: 0 top, 1 center, 2 baseline, 3 bottom, 4 auto.
+  int text_alignment = -1;
+  // sprmPFrameTextFlow: 1 = vertical, 2 = bottom-to-top.
+  int text_flow = -1;
+  // Character-unit indents (hundredths) and line-unit spacing.
+  int right_chars = 0, left_chars = 0, first_line_chars = 0;
+  bool right_chars_set = false, left_chars_set = false,
+       first_line_chars_set = false;
+  int before_lines = 0, after_lines = 0;
+  bool before_lines_set = false, after_lines_set = false;
   std::vector<TabStop> tabs;
   std::array<Border, 4> borders;
   std::array<Border, 3> extra_borders;
   int shade = -1;
   int shade_fore = -1, shade_pattern = 0;
+};
+
+// Conditional formatting of a table style (sprmTCnf/sprmPCnf/sprmCCnf), emitted
+// as a w:tblStylePr block keyed by the CNFOperand.cnfc condition.
+struct ConditionalProperties {
+  int type = 0;  // cnfc bit value: 1 first row ... 0x0800 bottom left cell
+  Paragraph paragraph;
+  Run run;
+  std::array<Border, 8>
+      borders;  // top/left/bottom/right/insideH/insideV/diagonals
+  int shade = -1, shade_fore = -1, shade_pattern = 0;
+  std::array<int, 4> margins{{-1, -1, -1, -1}};
+  int vertical_align = -1;
+  bool no_wrap = false, no_wrap_set = false;
 };
 
 struct Style {
@@ -132,6 +164,10 @@ struct Style {
   Run resolved_run;
   Paragraph resolved_paragraph;
   std::vector<uint8_t> table_sprms;
+  // Table-style properties (tblPr of w:style) and per-condition blocks.
+  int row_band = 0, col_band = 0;
+  std::array<int, 4> cell_margins{{-1, -1, -1, -1}};
+  std::vector<ConditionalProperties> conditionals;
 };
 
 struct Section {
@@ -154,6 +190,10 @@ struct Section {
   int endnote_restart = -1, endnote_start = -1, endnote_format = -1;
   bool endnote_at_section_end = false;
   int paper_first = -1, paper_other = -1;
+  // sprmSFProtected: true when the section opts out of form protection.
+  bool form_unprotected = false, form_unprotected_set = false;
+  // sprmSPgbProp: page border scope and measurement origin.
+  int page_border_apply_to = -1, page_border_offset_from = -1;
   std::vector<ColumnSpec> column_specs;
   int chapter_separator = -1, chapter_heading = -1, grid_char_space = -1;
   std::array<Border, 4> page_borders;
@@ -196,6 +236,13 @@ struct Table {
   int style = -1;
   int tblp_x = -1, tblp_y = -1;
   std::array<int, 4> from_text{{-1, -1, -1, -1}};
+  // sprmTPc: 0 margin, 1 page, 2 text (3 = not absolutely positioned).
+  int anchor_v = -1, anchor_h = -1;
+  // sprmTTlp: bit mask for w:tblLook (-1 = not specified).
+  int look = -1;
+  // sprmTCHorzBands / sprmTCVertBands.
+  int row_band = 0, col_band = 0;
+  std::array<int, 4> cell_margins{{-1, -1, -1, -1}};
   int width = 5000, width_type = 2;
   bool auto_fit = false;
   int indent = -1, align = -1;
