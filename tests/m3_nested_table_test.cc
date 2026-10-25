@@ -38,7 +38,8 @@ namespace {
 using namespace doccraft;
 
 constexpr uint32_t kTextFc = 2048;
-constexpr uint32_t kPapxPage = 1;  // 512-byte FKP page for the PAPX entries
+// Page 3 keeps the FKP clear of the FIB (pages 0-1 hold it).
+constexpr uint32_t kPapxPage = 3;
 
 void Put16(std::vector<uint8_t>& b, size_t p, uint16_t v) {
   b[p] = static_cast<uint8_t>(v);

@@ -115,6 +115,10 @@ std::string Save(const pugi::xml_document& d);
 void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
                     const model::Section* break_section, WriteContext& ctx);
 
+// Emits footnotes.xml / endnotes.xml when the document has notes, and
+// registers the parts and relationships.
+void WriteNoteParts(const model::Document& document, WriteContext& ctx);
+
 // Returns false when `section` has no header/footer story to reference.
 bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
                             WriteContext& ctx);
@@ -671,6 +675,63 @@ bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
   return any;
 }
 
+void WriteNoteParts(const model::Document& document, WriteContext& ctx) {
+  bool has_footnotes = false, has_endnotes = false;
+  for (const auto& note : document.notes) {
+    (note.endnote ? has_endnotes : has_footnotes) = true;
+  }
+  if (!has_footnotes && !has_endnotes) {
+    return;
+  }
+  auto write_class = [&](bool endnote) {
+    const char* part = endnote ? "endnotes.xml" : "footnotes.xml";
+    const char* root_name = endnote ? "w:endnotes" : "w:footnotes";
+    const char* note_name = endnote ? "w:endnote" : "w:footnote";
+    pugi::xml_document doc;
+    auto root = doc.append_child(root_name);
+    Attr(root, "xmlns:w", kWordmlNamespace);
+    Attr(root, "xmlns:r", kRelationshipsNamespace);
+    // Word requires the two separator notes; they carry negative ids.
+    struct Separator {
+      const char* name;
+      int id;
+    };
+    const Separator separators[] = {{"w:separator", -1},
+                                    {"w:continuationSeparator", 0}};
+    for (const auto& separator : separators) {
+      auto note = root.append_child(note_name);
+      Attr(note, "w:type", std::string(separator.name + 2));
+      IntAttr(note, "w:id", separator.id);
+      auto run = note.append_child("w:p").append_child("w:r");
+      run.append_child(separator.name);
+    }
+    int id = 0;
+    for (const auto& note : document.notes) {
+      if (note.endnote != endnote) {
+        continue;
+      }
+      id++;
+      auto node = root.append_child(note_name);
+      IntAttr(node, "w:id", id);
+      if (note.paragraphs.empty()) {
+        node.append_child("w:p");
+      }
+      for (const auto& paragraph : note.paragraphs) {
+        WriteParagraph(node, paragraph, nullptr, ctx);
+      }
+    }
+    const int rid = ctx.next_rid++;
+    ctx.relations.emplace_back(rid, part);
+    ctx.parts.push_back({part, Save(doc)});
+  };
+  if (has_footnotes) {
+    write_class(false);
+  }
+  if (has_endnotes) {
+    write_class(true);
+  }
+}
+
 void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
                     const model::Section* break_section, WriteContext& ctx) {
   auto pn = parent.append_child("w:p");
@@ -700,7 +761,12 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
     }
     auto rn = wrapper.append_child("w:r");
     RunPr(rn, r);
-    if (r.field_char >= 0) {
+    if (r.note_ref >= 0) {
+      // A note reference is an empty run carrying the reference element.
+      IntAttr(rn.append_child(r.note_endnote ? "w:endnoteReference"
+                                             : "w:footnoteReference"),
+              "w:id", r.note_ref);
+    } else if (r.field_char >= 0) {
       const char* kinds[] = {"begin", "separate", "end"};
       Attr(rn.append_child("w:fldChar"), "w:fldCharType",
            r.field_char < 3 ? kinds[r.field_char] : "begin");
@@ -1301,6 +1367,19 @@ std::string BuildContentTypes(const WriteContext& ctx) {
            (header ? std::string("header") : std::string("footer")) +
            "+xml\"/>";
   }
+  for (const auto& part : ctx.parts) {
+    if (part.name == "footnotes.xml") {
+      out +=
+          "<Override PartName=\"/word/footnotes.xml\" "
+          "ContentType=\"application/"
+          "vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml\"/"
+          ">";
+    } else if (part.name == "endnotes.xml") {
+      out +=
+          "<Override PartName=\"/word/endnotes.xml\" ContentType=\"application/"
+          "vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml\"/>";
+    }
+  }
   if (ctx.odd_even) {
     out += kSettingsContentType;
   }
@@ -1325,10 +1404,17 @@ pugi::xml_document BuildRelationships(const WriteContext& ctx) {
   Attr(number_rel, "Target", "numbering.xml");
   const int settings_id = ctx.odd_even ? ctx.next_rid : 0;
   for (const auto& [rid, target] : ctx.relations) {
-    const bool header = target.starts_with("header");
+    const char* type = "footer";
+    if (target.starts_with("header")) {
+      type = "header";
+    } else if (target == "footnotes.xml") {
+      type = "footnotes";
+    } else if (target == "endnotes.xml") {
+      type = "endnotes";
+    }
     auto rel = relations.append_child("Relationship");
     Attr(rel, "Id", "rId" + std::to_string(rid));
-    Attr(rel, "Type", std::string(kRelBase) + (header ? "header" : "footer"));
+    Attr(rel, "Type", std::string(kRelBase) + type);
     Attr(rel, "Target", target);
   }
   if (settings_id != 0) {
@@ -1395,6 +1481,7 @@ std::expected<std::vector<uint8_t>, Error> Write(
   auto body = root.append_child("w:body");
   WriteBody(body, document, ctx);
 
+  WriteNoteParts(document, ctx);
   auto sec = body.append_child("w:sectPr");
   SectionPr(sec, document.section, &ctx);
 

@@ -33,14 +33,14 @@ namespace {
 constexpr size_t kStoryCount = 6;
 constexpr size_t kStoryPreamble = 6;
 
-// One story's CP range (relative to the start of the header story region) is
-// turned into paragraphs; the last paragraph mark is a guard.
-std::vector<model::Paragraph> ReadStory(const std::vector<Char>& chars,
-                                        const std::vector<FormatRange>& chpx,
-                                        const std::vector<FormatRange>& papx,
-                                        const std::vector<std::string>& fonts,
-                                        uint64_t base, uint32_t first,
-                                        uint32_t last) {
+}  // namespace
+
+// One story's CP range (relative to the start of its story region) is turned
+// into paragraphs; the last paragraph mark is a guard.
+std::vector<model::Paragraph> ReadStoryParagraphs(
+    const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
+    const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
+    uint64_t base, uint32_t first, uint32_t last) {
   std::vector<model::Paragraph> out;
   if (last <= first) {
     return out;
@@ -92,8 +92,6 @@ std::vector<model::Paragraph> ReadStory(const std::vector<Char>& chars,
   return out;
 }
 
-}  // namespace
-
 std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     model::Document& doc, Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
@@ -131,7 +129,7 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
         return std::unexpected(Error{"header CP range outside story"});
       }
       out[section][story] =
-          ReadStory(*chars, chpx, papx, doc.fonts, base, first, last);
+          ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, base, first, last);
     }
   }
   return out;

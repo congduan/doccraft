@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -49,6 +50,8 @@ using detail::ReadChars;
 using detail::ReadFkps;
 using detail::ReadFonts;
 using detail::ReadLists;
+using detail::ReadNoteReferences;
+using detail::ReadNotes;
 using detail::ReadStyles;
 using detail::S16;
 using detail::U16;
@@ -223,6 +226,29 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       std::move(*sections_result);
   if (!sections.empty())
     doc.section = sections.back().second;
+  auto note_refs = ReadNoteReferences(table, fib);
+  if (!note_refs) {
+    return std::unexpected(note_refs.error());
+  }
+  // CP -> note index, so a 0x02 in the main story can be resolved to the note
+  // whose body was read into Document::notes.
+  struct NoteSite {
+    int id = 0;
+    bool endnote = false;
+  };
+  std::map<uint32_t, NoteSite> note_index;
+  const size_t footnote_refs =
+      note_refs->footnote_cps.empty() ? 0 : note_refs->footnote_cps.size() - 1;
+  const size_t endnote_refs =
+      note_refs->endnote_cps.empty() ? 0 : note_refs->endnote_cps.size() - 1;
+  for (size_t i = 0; i < footnote_refs; i++) {
+    note_index.emplace(note_refs->footnote_cps[i],
+                       NoteSite{static_cast<int>(i) + 1, false});
+  }
+  for (size_t i = 0; i < endnote_refs; i++) {
+    note_index.emplace(note_refs->endnote_cps[i],
+                       NoteSite{static_cast<int>(i) + 1, true});
+  }
   model::Paragraph para;
   // One open table per nesting level. sprmPItap/sprmPDtap give a paragraph's
   // absolute depth, so the stack height follows the document, not the marks.
@@ -429,6 +455,16 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       continue;
     }
+    if (ch.text == "\x02") {
+      auto found = note_index.find(ch.cp);
+      if (found != note_index.end()) {
+        model::Run note;
+        note.note_ref = found->second.id;
+        note.note_endnote = found->second.endnote;
+        para.runs.push_back(std::move(note));
+      }
+      continue;
+    }
     auto baseline = [&]() {
       model::Run value = pap ? InheritedRun(doc, pap->style) : model::Run{};
       value.hyperlink = hyperlink;
@@ -462,6 +498,10 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     close_table();
   if (!para.runs.empty() || doc.blocks.empty())
     add_paragraph(std::move(para));
+  auto notes = ReadNotes(doc, word, table, fib, *chpx, *papx);
+  if (!notes) {
+    return std::unexpected(notes.error());
+  }
   // Header/footer stories are per section: PlcfHdd holds six per section, in
   // document order, so section k reads entries 6k..6k+5.
   const size_t section_count =

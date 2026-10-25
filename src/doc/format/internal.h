@@ -187,6 +187,29 @@ void ReadLists(model::Document& doc, Bytes table, const Fib& fib);
 
 model::Run InheritedRun(const model::Document& doc, int style);
 
+// Turns the CP range [first, last) of one story into paragraphs. `base` is the
+// absolute CP where the story starts; the final paragraph mark is a guard.
+std::vector<model::Paragraph> ReadStoryParagraphs(
+    const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
+    const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
+    uint64_t base, uint32_t first, uint32_t last);
+
+// Reference sites of footnotes/endnotes inside the main story, in document
+// order. Note i of Document::notes is footnote i, then endnote i.
+struct NoteReferenceSet {
+  std::vector<uint32_t> footnote_cps;
+  std::vector<uint32_t> endnote_cps;
+};
+
+std::expected<NoteReferenceSet, Error> ReadNoteReferences(Bytes table,
+                                                          const Fib& fib);
+
+// Fills Document::notes with the footnote and endnote bodies.
+std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
+                                     Bytes table, const Fib& fib,
+                                     const std::vector<FormatRange>& chpx,
+                                     const std::vector<FormatRange>& papx);
+
 // The six header/footer stories ([MS-DOC] §2.8.2) of one section:
 // even/odd/default header, then even/odd/default footer.
 using SectionHeaders = std::array<std::vector<model::Paragraph>, 6>;

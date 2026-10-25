@@ -90,6 +90,10 @@ struct Run {
   bool binary_data = false, ole_object = false, embedded_object = false;
   bool revision_insert = false, revision_delete = false,
        property_revision = false;
+  // Footnote/endnote reference: id within its own note class, as written to
+  // w:footnoteReference / w:endnoteReference. -1 = not a reference.
+  int note_ref = -1;
+  bool note_endnote = false;
   // sprmCFitText: width in twips a run is squeezed or stretched into.
   int fit_text = 0, fit_text_id = 0;
   // sprmCFELayout: East Asian layout unit (w:eastAsianLayout).
@@ -247,6 +251,12 @@ struct Block {
   size_t index = 0;
 };
 
+// A footnote or endnote: the note body plus its identity.
+struct Note {
+  bool endnote = false;
+  std::vector<Paragraph> paragraphs;
+};
+
 // One table cell: an ordered block sequence, like the document body. Blocks
 // index Document::paragraphs / Document::tables, so nested tables are just
 // tables that happen to be reachable from a cell.
@@ -291,6 +301,7 @@ struct Document {
   std::vector<std::pair<size_t, Section>> section_breaks;
   std::vector<std::string> fonts;
   std::vector<List> lists;
+  std::vector<Note> notes;
   std::vector<int> list_overrides;
   std::vector<Table> tables;
   std::vector<Block> blocks;

@@ -35,6 +35,8 @@
 - 域结果里的图片、对象、脚注引用等仍是 M5 载荷；嵌套在超链接结果中的域会把外层链接降级为普通文本。
 - 嵌套表格按 `sprmPItap`（绝对深度）建立递归结构：`Cell::blocks` 与正文一样是 Block 序列，深度下降时把内层表格挂到外层单元格上。两条限制：其一，深度信息只来自 `sprmPItap`/`sprmPDtap`，若生产者不写这两个 sprm（缺失时按「在表格内 = 一层」推断），嵌套仍会被摊平；其二，LibreOffice 导出 `.doc` 时会把嵌套表格摊平成段落，所以本级只有合成位流样本（`tests/m3_nested_table_test.cc`），没有真实 Word 样本。
 - `sprmPFInnerTableCell` 仍未使用：结构与深度已由 `sprmPItap` 决定，该标记不参与判定。
+- 脚注/尾注已按 `PlcffndRef`/`PlcffndTxt`（FIB pair 2/3）与 `PlcfendRef`/`PlcfendTxt`（pair 46/47，注意不是 44/45——那两个是 fcPms/fcFormFldSttbs）解析，正文里的 `0x02` 变成引用 run，`Document::notes` 保存正文并按 `w:footnoteReference`/`w:endnoteReference` + `footnotes.xml`/`endnotes.xml`（含 separator/continuationSeparator）输出。限制：脚注内容只按 CHPX/PAPX 还原文本与段落格式，脚注内的图片、表格、域不处理；脚注编号始终自动编号（不还原自定义标记）；`PlcfendTxt` 末尾可能多一个守卫 CP，实际条数以引用 PLC 为准。
+- FIB 里 note PLC 的偏移若指向 table 流之外，现在会让转换直接失败（与其他 PLC 读取一致的策略）。合成测试曾把 FIB 的 rgFcLcb 覆盖成文本字节，就是因为这个策略被暴露出来；真实损坏文档需要 M6 的降级策略来决定是跳过还是报错。
 - 表样式（`sprmTIstd`、条件格式 `sprmTCnf`/`sprmPCnf`/`sprmCCnf`）没有真实 `.doc` 语料：LibreOffice 26.8 导出 `.doc` 时会把表样式摊平成单元格直接格式，`tests/fixtures` 与 corpus 中因此不存在带 TAPX 的表样式。这条链路由 `tests/m3_styles_test.cc` 直接构造 STSH 位流断言（`M3Styles.TableStyleDefaultsAndConditionals`），一旦拿到 Word 生成的样本应替换为 golden 样本。
 - 修订标记（`sprmCFRMarkDel`/`sprmCFRMarkIns`）输出为 `w:del`/`w:ins`，但作者固定写 `doccraft`、时间戳省略：作者名需要 `SttbfRMark`（M4），`w:id` 仅保证文件内自增唯一。
 - `sprmTTlp` 只把 `grfatl` 的 bit5–10 映射为 `w:tblLook`：首行/末行/首列/末列直接对应，band 位按「置位=启用带状」取反为 `noHBand`/`noVBand`；`itl`（自动格式索引）丢弃。

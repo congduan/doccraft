@@ -43,7 +43,7 @@ void Put32(std::vector<uint8_t>& b, size_t p, uint32_t v) {
 // Minimal FIB with the csw/cslw/pairs scaffolding ParseFib requires; the CLX
 // lives at offset 0 of the table stream.
 std::vector<uint8_t> FibWord(uint32_t text_length) {
-  std::vector<uint8_t> word(1536);
+  std::vector<uint8_t> word(4096);
   Put16(word, 0, 0xA5EC);
   Put16(word, 2, 0x00C1);
   Put32(word, 24, 512);                  // fcMin
@@ -59,7 +59,9 @@ std::vector<uint8_t> FibWord(uint32_t text_length) {
 
 // One paragraph whose text is `text`, stored as a single compressed piece.
 std::expected<model::Document, doc::Error> Synthetic(const std::string& text) {
-  const uint32_t text_fc = 512;
+  // Keep the text clear of the FIB rgFcLcb array (it reaches ~0x380 for 93
+  // pairs).
+  const uint32_t text_fc = 1024;
   const uint32_t cp_count = static_cast<uint32_t>(text.size());
   std::vector<uint8_t> word = FibWord(cp_count);
   std::vector<uint8_t> table(21);
