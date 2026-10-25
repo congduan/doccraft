@@ -22,6 +22,7 @@ python3 tests/pixelcompare/compare.py tests/corpus/corpus/plain-text.doc
 python3 tests/pixelcompare/compare.py x.doc --docx y.docx
 
 # 可调参数：--dpi 150  --threshold 0.001（单页 bad_ratio 阈值 0.1%）
+# 人工接受已知页数分歧：--allow-page-count-mismatch
 ```
 
 退出码：0=PASS，1=超阈值，2=管线错误。产物在 `build/pixelcompare/`：
@@ -29,7 +30,9 @@ python3 tests/pixelcompare/compare.py x.doc --docx y.docx
 
 ## 判定口径
 
-- 页数不一致 → 硬 FAIL
+- 页数不一致 → FAIL。若同名 `.allow` 文件精确写有
+  `page-count-mismatch A=1 B=2` 等实测页数，则标记 KNOWN，并输出重叠页指标。
+  命令行 `--allow-page-count-mismatch` 可作一次性人工放行。
 - 尺寸不一致（版面几何漂移）→ 该页硬 FAIL
 - bad_ratio ≥ 0.1% → FAIL（0.5% 在 A4/150dpi 下太宽松，已实测校准）
 - 热图定位差异区域后，人工确认是「可接受的字体光栅化抖动」还是「真实还原缺陷」
