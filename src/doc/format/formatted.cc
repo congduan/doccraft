@@ -198,7 +198,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     uint32_t previous = 0;
     for (size_t i = 0; i < count; ++i) {
       const uint32_t cp = U32(plc, 4 * i);
-      const uint8_t kind = plc[fld_offset + 2 * i];
+      // Fld.fldch packs the 5-bit character code with three marker flags.
+      const uint8_t kind = plc[fld_offset + 2 * i] & 0x1F;
       if ((i && cp <= previous) || cp >= fib.ccp_text ||
           (kind != 0x13 && kind != 0x14 && kind != 0x15))
         return std::unexpected(Error{"invalid main field PLC entry"});
@@ -210,8 +211,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         starts.pop_back();
       }
     }
-    if (U32(plc, 4 * count) > fib.ccp_text)
-      return std::unexpected(Error{"main field PLC guard outside text"});
+    if (U32(plc, 4 * count) < previous)
+      return std::unexpected(Error{"invalid main field PLC guard"});
   }
   // CP -> comment id (index + 1), matching w:commentReference/@w:id.
   std::map<uint32_t, int> comment_index;

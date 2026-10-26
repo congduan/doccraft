@@ -59,7 +59,9 @@ std::vector<uint8_t> FibWord(uint32_t text_length) {
 
 // One paragraph whose text is `text`, stored as a single compressed piece.
 std::expected<model::Document, doc::Error> Synthetic(const std::string& text,
-                                                     uint8_t field_flags = 0) {
+                                                     uint8_t field_flags = 0,
+                                                     uint8_t marker_flags = 0,
+                                                     uint32_t guard_extra = 0) {
   // Keep the text clear of the FIB rgFcLcb array (it reaches ~0x380 for 93
   // pairs).
   const uint32_t text_fc = 1024;
@@ -88,10 +90,10 @@ std::expected<model::Document, doc::Error> Synthetic(const std::string& text,
       Put32(table, 21, static_cast<uint32_t>(begin));
       Put32(table, 25, static_cast<uint32_t>(separator));
       Put32(table, 29, static_cast<uint32_t>(end));
-      Put32(table, 33, cp_count);
-      table[37] = 0x13;
-      table[39] = 0x14;
-      table[41] = 0x15;
+      Put32(table, 33, cp_count + guard_extra);
+      table[37] = 0x13 | marker_flags;
+      table[39] = 0x14 | marker_flags;
+      table[41] = 0x15 | marker_flags;
       table[42] = field_flags;
     }
   }
@@ -190,6 +192,13 @@ TEST(M3Fields, PreservesPageFieldStatusOnSimpleField) {
   EXPECT_NE(xml.find("<w:fldSimple w:instr=\"PAGE\" w:fldLock=\"1\" "
                      "w:dirty=\"1\">"),
             std::string::npos);
+}
+
+TEST(M3Fields, FieldPlcAllowsMarkerBitsAndLongGuard) {
+  auto doc = Synthetic("\x13 TOC \x14 Contents\x15", 0x14, 0x80, 2);
+  ASSERT_TRUE(doc) << doc.error().message;
+  const std::string xml = Xml(*doc);
+  EXPECT_NE(xml.find("w:fldLock=\"1\""), std::string::npos);
 }
 
 TEST(M3Fields, HyperlinkKeepsDedicatedMapping) {

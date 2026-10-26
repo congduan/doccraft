@@ -21,6 +21,7 @@
 
 ## M4 当前范围
 
+- Apache POI 测试语料中的真实 `Bug33519.doc`（FIB `fComplex=1`、`cQuickSaves=8`）已经转换成功；LibreOffice 从源 `.doc` 与转换后 `.docx` 导出的 UTF-8 文本逐字一致（4520 字符）。该文件像素对拍源为 3 页、输出为 4 页，格式 golden 未通过，因此 fast-saved 不标 ✅。语料来源：<https://svn.apache.org/repos/asf/poi/tags/REL_3_17_FINAL/test-data/document/Bug33519.doc>；原样本未复制进仓库。
 - FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族，错误信息已明确指出两类；RC4 和 RC4 CryptoAPI 的子类型需读取 Table 流的 EncryptionHeader，当前 `ParseFib` 只接收 WordDocument 流，故尚不细分。未提供密码参数，也不能判断口令错误；§6.8 保持 ◐。
 - 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉、脚注等其他故事的字段 PLC 尚未接入，故 §6.1 域项保持 ◐。
 
