@@ -84,6 +84,16 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
       if (compressed) {
         // Compressed pieces use the document's ANSI code page (FibBase.lid).
         Char ch{character_cp, fc};
+        if (fib.codepage == base::kDefaultCodepage &&
+            word[start + j] < kCp1252First) {
+          const char value = static_cast<char>(word[start + j]);
+          ch.newline = value == '\r' || value == '\n';
+          ch.utf8[0] = ch.newline ? '\n' : value;
+          ch.length = 1;
+          out.push_back(ch);
+          ++j;
+          continue;
+        }
         std::string decoded;
         size_t used =
             DecodeAnsiChar(fib.codepage, word.subspan(start + j), decoded);
@@ -116,6 +126,13 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
         c = kReplacementCharacter;
       Char ch{character_cp, fc};
       ch.newline = c == 13;
+      if (c < kCp1252First) {
+        ch.utf8[0] = ch.newline ? '\n' : static_cast<char>(c);
+        ch.length = 1;
+        out.push_back(ch);
+        j += step;
+        continue;
+      }
       std::string encoded;
       AppendUtf8(encoded, c == 13 ? 10 : c);
       ch.SetText(encoded);
