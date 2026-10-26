@@ -34,6 +34,7 @@ enum class FieldMode {
 
 struct FieldFrame {
   std::string instruction;
+  bool locked = false, dirty = false;
   bool in_instruction = true;
   FieldMode mode = FieldMode::kPending;
   std::string hyperlink;

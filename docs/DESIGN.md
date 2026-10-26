@@ -157,7 +157,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ✅ 基本文本抽取（piece table、文档 ANSI 代码页/UTF-16 双模式）
 - ◐ fast-saved 文档（fComplex）：按最终 CLX piece 表重建正文，应用 Prm1 的字符/段落 Prc 修饰；Prm0、真实增量保存 golden 与其他故事中的 Prc 格式仍待验证
 - ◐ 特殊字符：tab/CR/VT/非断行空格/连字符/SYM 字符（图片/脚注/批注/绘图等特殊字符随 M4/M5）
-- ◐ 域代码文本与结果（fldChar 层次）：通用复杂域输出 `w:fldChar` begin/separate/end + `w:instrText`，`HYPERLINK` 仍映射为 `w:hyperlink`、页码类域映射为 `w:fldSimple`；`fldLock`/`dirty` 标志与域结果中的图片/对象未保留
+- ◐ 域代码文本与结果（fldChar 层次）：通用复杂域输出 `w:fldChar` begin/separate/end + `w:instrText`，`HYPERLINK` 仍映射为 `w:hyperlink`、页码类域映射为 `w:fldSimple`；`PlcfFldMom` 的 `fldLock`/`dirty` 标志已保留，域结果中的图片/对象仍未保留
 - ✅ 多语言/复杂文种（RTL 标记、bidi、复杂文种颜色与字号）
 
 ### 6.2 字符格式（CHP）

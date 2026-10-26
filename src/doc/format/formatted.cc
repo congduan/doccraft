@@ -54,6 +54,8 @@ using detail::ReadNotes;
 using detail::ReadStyles;
 using detail::S16;
 using detail::U16;
+using detail::U32;
+using detail::Valid;
 using detail::Walk;
 using detail::WalkParagraph;
 
@@ -115,6 +117,33 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   auto bookmarks = ReadBookmarks(table, fib);
   if (!bookmarks) {
     return std::unexpected(bookmarks.error());
+  }
+  std::map<uint32_t, uint8_t> field_status;
+  if (fib.fields_main.size) {
+    if (!Valid(table, fib.fields_main) || fib.fields_main.size < 4 ||
+        (fib.fields_main.size - 4) % 6)
+      return std::unexpected(Error{"invalid main field PLC"});
+    Bytes plc = table.subspan(fib.fields_main.offset, fib.fields_main.size);
+    const size_t count = (plc.size() - 4) / 6;
+    const size_t fld_offset = 4 * (count + 1);
+    std::vector<uint32_t> starts;
+    uint32_t previous = 0;
+    for (size_t i = 0; i < count; ++i) {
+      const uint32_t cp = U32(plc, 4 * i);
+      const uint8_t kind = plc[fld_offset + 2 * i];
+      if ((i && cp <= previous) || cp >= fib.ccp_text ||
+          (kind != 0x13 && kind != 0x14 && kind != 0x15))
+        return std::unexpected(Error{"invalid main field PLC entry"});
+      previous = cp;
+      if (kind == 0x13) {
+        starts.push_back(cp);
+      } else if (kind == 0x15 && !starts.empty()) {
+        field_status.emplace(starts.back(), plc[fld_offset + 2 * i + 1]);
+        starts.pop_back();
+      }
+    }
+    if (U32(plc, 4 * count) > fib.ccp_text)
+      return std::unexpected(Error{"main field PLC guard outside text"});
   }
   // CP -> comment id (index + 1), matching w:commentReference/@w:id.
   std::map<uint32_t, int> comment_index;
@@ -246,6 +275,10 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     auto emit_field_char = [&](int kind) {
       model::Run marker;
       marker.field_char = kind;
+      if (!fields.empty()) {
+        marker.field_locked = fields.back().locked;
+        marker.field_dirty = fields.back().dirty;
+      }
       para.runs.push_back(std::move(marker));
     };
     auto emit_instruction = [&](const std::string& text) {
@@ -257,6 +290,10 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     };
     if (control == '\x13') {
       fields.push_back({});
+      if (auto found = field_status.find(ch.cp); found != field_status.end()) {
+        fields.back().locked = (found->second & 0x10) != 0;
+        fields.back().dirty = (found->second & 0x04) != 0;
+      }
       continue;
     }
     if (!fields.empty() && fields.back().in_instruction && control == '\x14') {
@@ -265,7 +302,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       ApplyFieldInstruction(frame.instruction, &frame.hyperlink, &frame.page);
       // Only a top-level HYPERLINK/PAGE field keeps its dedicated mapping;
       // nested fields and everything else become generic complex fields.
-      if (fields.size() == 1 && !frame.hyperlink.empty())
+      if (fields.size() == 1 && !frame.hyperlink.empty() && !frame.locked &&
+          !frame.dirty)
         frame.mode = FieldMode::kHyperlink;
       else if (fields.size() == 1 && frame.page)
         frame.mode = FieldMode::kPage;
@@ -442,6 +480,10 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       model::Run value = pap ? InheritedRun(doc, pap->style) : model::Run{};
       value.hyperlink = hyperlink;
       value.page_field = page_field;
+      if (page_field && !fields.empty()) {
+        value.field_locked = fields.back().locked;
+        value.field_dirty = fields.back().dirty;
+      }
       return value;
     };
     model::Run r = baseline();

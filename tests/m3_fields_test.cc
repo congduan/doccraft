@@ -58,7 +58,8 @@ std::vector<uint8_t> FibWord(uint32_t text_length) {
 }
 
 // One paragraph whose text is `text`, stored as a single compressed piece.
-std::expected<model::Document, doc::Error> Synthetic(const std::string& text) {
+std::expected<model::Document, doc::Error> Synthetic(const std::string& text,
+                                                     uint8_t field_flags = 0) {
   // Keep the text clear of the FIB rgFcLcb array (it reaches ~0x380 for 93
   // pairs).
   const uint32_t text_fc = 1024;
@@ -75,6 +76,25 @@ std::expected<model::Document, doc::Error> Synthetic(const std::string& text) {
   Put16(table, 13, 0);                            // PCD flags
   Put32(table, 15, 0x40000000u | (text_fc * 2));  // compressed piece
   Put16(table, 19, 0);                            // PCD prm
+
+  if (field_flags) {
+    const size_t begin = text.find('\x13');
+    const size_t separator = text.find('\x14');
+    const size_t end = text.find('\x15');
+    if (begin < separator && separator < end && end < text.size()) {
+      Put32(word, 154 + 16 * 8, 21);  // fcPlcfFldMom
+      Put32(word, 158 + 16 * 8, 22);
+      table.resize(43);
+      Put32(table, 21, static_cast<uint32_t>(begin));
+      Put32(table, 25, static_cast<uint32_t>(separator));
+      Put32(table, 29, static_cast<uint32_t>(end));
+      Put32(table, 33, cp_count);
+      table[37] = 0x13;
+      table[39] = 0x14;
+      table[41] = 0x15;
+      table[42] = field_flags;
+    }
+  }
 
   auto fib = doc::ParseFib(word);
   if (!fib)
@@ -144,6 +164,32 @@ TEST(M3Fields, GenericFieldEmitsFldCharsAndInstruction) {
   std::vector<std::string> runs = TextRuns(xml);
   ASSERT_EQ(runs.size(), 1u);
   EXPECT_EQ(runs[0], "Contents");
+}
+
+TEST(M3Fields, PreservesFieldLockAndDirtyFlags) {
+  auto doc = Synthetic("\x13 TOC \x14 Contents\x15", 0x14);
+  ASSERT_TRUE(doc) << doc.error().message;
+  bool found = false;
+  for (const auto& run : doc->paragraphs[0].runs) {
+    if (run.field_char == model::kFieldCharBegin) {
+      EXPECT_TRUE(run.field_locked);
+      EXPECT_TRUE(run.field_dirty);
+      found = true;
+    }
+  }
+  EXPECT_TRUE(found);
+  const std::string xml = Xml(*doc);
+  EXPECT_NE(xml.find("w:fldLock=\"1\""), std::string::npos);
+  EXPECT_NE(xml.find("w:dirty=\"1\""), std::string::npos);
+}
+
+TEST(M3Fields, PreservesPageFieldStatusOnSimpleField) {
+  auto doc = Synthetic("\x13 PAGE \x14 1\x15", 0x14);
+  ASSERT_TRUE(doc) << doc.error().message;
+  const std::string xml = Xml(*doc);
+  EXPECT_NE(xml.find("<w:fldSimple w:instr=\"PAGE\" w:fldLock=\"1\" "
+                     "w:dirty=\"1\">"),
+            std::string::npos);
 }
 
 TEST(M3Fields, HyperlinkKeepsDedicatedMapping) {

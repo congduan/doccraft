@@ -22,6 +22,7 @@
 ## M4 当前范围
 
 - FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族，错误信息已明确指出两类；RC4 和 RC4 CryptoAPI 的子类型需读取 Table 流的 EncryptionHeader，当前 `ParseFib` 只接收 WordDocument 流，故尚不细分。未提供密码参数，也不能判断口令错误；§6.8 保持 ◐。
+- 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉、脚注等其他故事的字段 PLC 尚未接入，故 §6.1 域项保持 ◐。
 
 ## M3 当前范围
 
@@ -40,7 +41,7 @@
 - SHD80 系列（`sprmCShd80`/`sprmPShd80`/`sprmTDefTableShd80`）走 16 色调色板，索引 0（自动色）不产生 `w:shd`；现代 SHD 操作数仍以 COLORREF 优先。
 - `sprmPIncLvl` 只在 `sprmPIlfo != 0` 时累加 `ilvl`，按规范应增量 `istd` 的段落样式分支未实现。
 - `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。
-- 域处理按「顶层特例 + 其余通用」分层：只有顶层 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。未保留 `fldLock`/`fldDirty`/`w:dirty`：域状态的脏标志与锁定语义在转换后丢失，Word 重新分页时会重算。
+- 域处理按「顶层特例 + 其余通用」分层：只有顶层未锁定、未标脏的 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。正文 `PlcfFldMom` 结束记录的 `fLocked`/`fResultsDirty` 已映射为 `w:fldLock`/`w:dirty`；其他故事的字段 PLC 尚未读取。
 - 域结果里的图片、对象、脚注引用等仍是 M5 载荷；嵌套在超链接结果中的域会把外层链接降级为普通文本。
 - 嵌套表格按 `sprmPItap`（绝对深度）建立递归结构：`Cell::blocks` 与正文一样是 Block 序列，深度下降时把内层表格挂到外层单元格上。两条限制：其一，深度信息只来自 `sprmPItap`/`sprmPDtap`，若生产者不写这两个 sprm（缺失时按「在表格内 = 一层」推断），嵌套仍会被摊平；其二，LibreOffice 导出 `.doc` 时会把嵌套表格摊平成段落，所以本级只有合成位流样本（`tests/m3_nested_table_test.cc`），没有真实 Word 样本。
 - `sprmPFInnerTableCell` 仍未使用：结构与深度已由 `sprmPItap` 决定，该标记不参与判定。

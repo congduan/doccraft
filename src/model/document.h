@@ -102,6 +102,7 @@ struct Run {
   std::string symbol_font;
   // Complex field markers: 0 = begin, 1 = separator, 2 = end (w:fldChar).
   int field_char = -1;
+  bool field_locked = false, field_dirty = false;
   // Manual break carried by this run: 1 = page (w:br/@w:type="page"),
   // 2 = column. 0 means the run holds no break.
   int break_type = 0;

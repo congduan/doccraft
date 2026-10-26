@@ -174,6 +174,10 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
     } else if (r.page_field) {
       owner = pn.append_child("w:fldSimple");
       Attr(owner, "w:instr", "PAGE");
+      if (r.field_locked)
+        Attr(owner, "w:fldLock", "1");
+      if (r.field_dirty)
+        Attr(owner, "w:dirty", "1");
     }
     // sprmCFRMarkDel / sprmCFRMarkIns: tracked text lives inside w:del / w:ins.
     pugi::xml_node wrapper = owner;
@@ -211,8 +215,13 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
               "w:id", r.note_ref);
     } else if (r.field_char >= 0) {
       const char* kinds[] = {"begin", "separate", "end"};
-      Attr(rn.append_child("w:fldChar"), "w:fldCharType",
+      auto fld = rn.append_child("w:fldChar");
+      Attr(fld, "w:fldCharType",
            r.field_char < 3 ? kinds[r.field_char] : "begin");
+      if (r.field_locked)
+        Attr(fld, "w:fldLock", "1");
+      if (r.field_dirty)
+        Attr(fld, "w:dirty", "1");
     } else if (r.break_type > 0) {
       auto br = rn.append_child("w:br");
       Attr(br, "w:type", r.break_type == 2 ? "column" : "page");

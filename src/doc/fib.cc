@@ -79,6 +79,7 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.papx_bte = pair(13);
   f.fonts = pair(15);
   f.headers = pair(11);
+  f.fields_main = pair(16);
   f.and_ref = pair(4);
   f.and_txt = pair(5);
   f.atn_owners = pair(36);
