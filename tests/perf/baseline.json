@@ -1,22 +1,22 @@
 {
   "1": {
     "size_bytes": 1052160,
-    "wall_seconds": 0.487157,
-    "peak_rss_kb": 79728
+    "wall_seconds": 0.188727,
+    "peak_rss_kb": 79828
   },
   "5": {
     "size_bytes": 5244928,
-    "wall_seconds": 2.841093,
-    "peak_rss_kb": 386656
+    "wall_seconds": 1.122338,
+    "peak_rss_kb": 386632
   },
   "20": {
     "size_bytes": 20975104,
-    "wall_seconds": 13.928849,
-    "peak_rss_kb": 1387492
+    "wall_seconds": 4.606261,
+    "peak_rss_kb": 1387488
   },
   "50": {
     "size_bytes": 52679680,
-    "wall_seconds": 14.839633,
-    "peak_rss_kb": 1449364
+    "wall_seconds": 4.793279,
+    "peak_rss_kb": 1449420
   }
 }
