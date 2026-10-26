@@ -142,18 +142,19 @@ struct FieldFrame {
 // Symbol and field-marker runs never merge: they carry their own font or emit a
 // dedicated element. The comparison itself is Run's defaulted operator== so it
 // stays exhaustive as the model grows.
-bool SameRunFormatting(const model::Run& prior, const model::Run& r) {
+bool SameRunFormatting(model::Run& prior, model::Run& r) {
   if (r.symbol_character >= 0 || r.field_char >= 0 || !r.instr_text.empty()) {
     return false;
   }
   if (prior.field_char >= 0 || !prior.instr_text.empty()) {
     return false;
   }
-  model::Run left = prior;
-  model::Run right = r;
-  left.text.clear();
-  right.text.clear();
-  return left == right;
+  std::string text = std::move(prior.text);
+  std::string next_text = std::move(r.text);
+  const bool same = prior == r;
+  prior.text = std::move(text);
+  r.text = std::move(next_text);
+  return same;
 }
 
 // Applies the paragraph sprms of one PAPX to `para`, honouring its style.
@@ -524,9 +525,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     }
     if (!para.runs.empty()) {
       auto& back = para.runs.back();
-      model::Run prior = back;
-      prior.text.clear();
-      if (SameRunFormatting(prior, r)) {
+      if (SameRunFormatting(back, r)) {
         back.text += ch.text;
         continue;
       }

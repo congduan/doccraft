@@ -250,7 +250,7 @@ namespace doccraft::doc {
 // True when two adjacent characters may share one run: every character
 // property matches. Symbol and field-marker runs never merge. Shared by the
 // body parser and the header/footer stories.
-bool SameRunFormatting(const model::Run& prior, const model::Run& r);
+bool SameRunFormatting(model::Run& prior, model::Run& r);
 
 }  // namespace doccraft::doc
 
