@@ -88,6 +88,10 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   // 46/47 (verified against a Word 2002 (nFib 0x101) sample).
   f.end_ref = pair(46);
   f.end_txt = pair(47);
+  // [MS-DOC] FibRgFcLcb97: PlcfSpaMom and OfficeArtContent.
+  constexpr size_t kSpaMainPair = 40, kDrawingGroupPair = 50;
+  f.spa_main = pair(kSpaMainPair);
+  f.drawing_group = pair(kDrawingGroupPair);
   f.lists = pair(73);
   f.list_overrides = pair(74);
   const size_t new_pos = pair_start + static_cast<size_t>(pairs) * 8;

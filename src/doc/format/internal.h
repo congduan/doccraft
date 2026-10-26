@@ -14,11 +14,13 @@
 
 #ifndef SRC_DOC_FORMAT_INTERNAL_H_
 #define SRC_DOC_FORMAT_INTERNAL_H_
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/binary.h"
@@ -79,6 +81,23 @@ inline constexpr size_t kMaxImageSize = 64 * 1024 * 1024;
 // Aggregate cap across all images: metafile deflate can amplify ~1000x per
 // BLIP, so per-image limits alone do not bound total memory.
 inline constexpr size_t kMaxTotalImageSize = 256 * 1024 * 1024;
+
+// [MS-DOC] Spa / [MS-ODRAW] drawing records and property identifiers.
+inline constexpr size_t kSpaSize = 26, kSpaFlagsOffset = 20;
+inline constexpr int kSpaHorizontalShift = 1, kSpaVerticalShift = 3;
+inline constexpr int kSpaWrapShift = 5, kSpaSideShift = 9;
+inline constexpr uint16_t kSpaOriginMask = 3, kSpaWrapMask = 15;
+inline constexpr uint16_t kSpaBehind = 0x4000, kSpaLocked = 0x8000;
+inline constexpr size_t kMaxDrawingRecords = 65536;
+inline constexpr uint16_t kDggContainer = 0xF000, kBStoreContainer = 0xF001;
+inline constexpr uint16_t kDgContainer = 0xF002, kSpContainer = 0xF004;
+inline constexpr uint16_t kFsp = 0xF00A, kFopt = 0xF00B;
+inline constexpr uint16_t kTertiaryFopt = 0xF122;
+inline constexpr size_t kFopteSize = 6, kFbseDelayOffset = 28;
+inline constexpr uint16_t kPropertyIdMask = 0x3FFF;
+inline constexpr uint16_t kPropertyComplex = 0x8000, kPib = 0x0104;
+inline constexpr int kWrapTopBottom = 1, kWrapNone = 3;
+inline constexpr int kWrapTight = 4, kWrapThrough = 5;
 
 // Operands that mean "absent"/"automatic" carry a saturated value instead of a
 // separate flag.
@@ -194,10 +213,21 @@ inline constexpr uint32_t kFcCompressed = 0x40000000;
 inline constexpr uint32_t kFcMask = 0x3FFFFFFF;
 
 struct Char {
-  std::string text;
-  uint32_t cp, fc;
-  bool newline;
+  uint32_t cp = 0, fc = 0;
+  // iconv can return up to eight bytes for one legacy-codepage character.
+  std::array<char, 8> utf8{};
+  uint8_t length = 0;
+  bool newline = false;
+
+  std::string_view text() const {
+    return {utf8.data(), length};
+  }
+  void SetText(std::string_view value) {
+    length = static_cast<uint8_t>(value.size());
+    std::copy(value.begin(), value.end(), utf8.begin());
+  }
 };
+static_assert(sizeof(Char) == 20);
 
 struct FormatRange {
   uint32_t first, last;

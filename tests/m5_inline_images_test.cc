@@ -79,9 +79,8 @@ std::expected<model::Document, doc::Error> ParseFixture(
   if (!table)
     return std::unexpected(doc::Error{table.error().message});
   auto data = cfb->ReadStream("Data");
-  if (!data)
-    return std::unexpected(doc::Error{data.error().message});
-  return doc::ParseFormatted(*word, *table, *fib, *data);
+  return doc::ParseFormatted(*word, *table, *fib,
+                             data ? *data : std::vector<uint8_t>{});
 }
 
 TEST(M5InlineImages, SyntheticPicfBlipToIrAndXml) {
@@ -130,6 +129,52 @@ TEST(M5InlineImages, SyntheticPicfBlipToIrAndXml) {
             std::string::npos);
   EXPECT_EQ(Part(*zip, "word/media/image1.png"),
             std::string(png.begin(), png.end()));
+}
+
+TEST(M5FloatingImages, LibreOfficeGoldenAnchor) {
+  auto parsed = ParseFixture("floating-image");
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->images.size(), 1u);
+  auto converted = docx::Write(*parsed);
+  ASSERT_TRUE(converted) << converted.error().message;
+  EXPECT_NE(Part(*converted, "word/document.xml").find("<wp:anchor"),
+            std::string::npos);
+  // LibreOffice's own .docx round-trip of this fixture writes
+  // distT/distB/distL/ distR="0" (the .doc FOPT carries no nonzero wrap
+  // distances); asserting OOXML's 114300 default would invent properties absent
+  // from the source.
+  EXPECT_NE(Part(*converted, "word/document.xml").find("distL=\"0\""),
+            std::string::npos);
+  EXPECT_NE(Part(*converted, "word/document.xml").find("<wp:wrapSquare"),
+            std::string::npos);
+}
+
+TEST(M5FloatingImages, LibreOfficeWrapVariants) {
+  for (const auto& [name, wrap, element] :
+       {std::tuple{"floating-top-bottom", model::ImageWrap::kTopAndBottom,
+                   "<wp:wrapTopAndBottom"},
+        std::tuple{"floating-none", model::ImageWrap::kNone, "<wp:wrapNone"},
+        std::tuple{"floating-tight", model::ImageWrap::kTight,
+                   "<wp:wrapTight"}}) {
+    SCOPED_TRACE(name);
+    auto parsed = ParseFixture(name);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    ASSERT_EQ(parsed->images.size(), 1u);
+    const auto& image = parsed->images.front();
+    ASSERT_TRUE(image.anchor);
+    EXPECT_EQ(image.anchor->wrap, wrap);
+    EXPECT_EQ(image.anchor->x, 567);
+    EXPECT_EQ(image.anchor->y, 283);
+    EXPECT_EQ(image.width, 1440);
+    EXPECT_EQ(image.height, 900);
+    auto zip = docx::Write(*parsed);
+    ASSERT_TRUE(zip) << zip.error().message;
+    EXPECT_NE(Part(*zip, "word/document.xml").find(element), std::string::npos);
+    EXPECT_EQ(Part(*zip, "word/media/image1.png"),
+              Part(ReadFile(std::string(DOCCRAFT_SOURCE_DIR) +
+                            "/tests/fixtures/" + name + ".docx"),
+                   "word/media/image1.png"));
+  }
 }
 
 TEST(M5InlineImages, LibreOfficeGoldenKeepsMediaBytes) {
@@ -329,4 +374,179 @@ TEST(M5InlineImages, RejectsTruncatedPicfAndEscher) {
   Put32(data, 72, 100);
   EXPECT_FALSE(doc::ReadInlinePicture(data, 0));
 }
+std::vector<uint8_t> Art(uint16_t type, uint16_t header,
+                         const std::vector<uint8_t>& body) {
+  std::vector<uint8_t> out(8);
+  Put16(out, 0, header);
+  Put16(out, 2, type);
+  Put32(out, 4, body.size());
+  out.insert(out.end(), body.begin(), body.end());
+  return out;
+}
+void Append(std::vector<uint8_t>& out, const std::vector<uint8_t>& bytes) {
+  out.insert(out.end(), bytes.begin(), bytes.end());
+}
+struct FloatingStream {
+  std::vector<uint8_t> word, table;
+  doc::Fib fib;
+};
+FloatingStream Floating(uint16_t flags, bool delayed = true, size_t count = 1) {
+  FloatingStream s;
+  std::vector<uint8_t> raster(17);
+  Append(raster, {0x89, 'P', 'N', 'G'});
+  const auto blip = Art(0xF01E, 0x6E00, raster);
+  std::vector<uint8_t> fbse(36);
+  Put32(fbse, 28, 0);
+  if (delayed)
+    s.word = blip;
+  else
+    Append(fbse, blip);
+  auto group = Art(0xF000, 15, Art(0xF001, 31, Art(0xF007, 0x62, fbse)));
+  s.table = group;
+  s.table.push_back(0);  // OfficeArtWordDrawing main story label.
+  std::vector<uint8_t> fsp(8), props(6);
+  Put32(fsp, 0, 1026);
+  Put16(props, 0, 0x4104);
+  Put32(props, 2, 1);
+  auto children = Art(0xF00A, 0x4B2, fsp);
+  Append(children, Art(0xF00B, 0x13, props));
+  Append(s.table, Art(0xF002, 15, Art(0xF004, 15, children)));
+  s.fib.drawing_group = {0, static_cast<uint32_t>(s.table.size())};
+  std::vector<uint8_t> plc(4 + count * 30);
+  for (size_t i = 0; i <= count; ++i)
+    Put32(plc, i * 4, i);
+  for (size_t i = 0; i < count; ++i) {
+    const size_t entry = 4 * (count + 1) + i * 26;
+    Put32(plc, entry, 1026);
+    Put32(plc, entry + 4, static_cast<uint32_t>(-120));
+    Put32(plc, entry + 8, 240);
+    Put32(plc, entry + 12, 1320);
+    Put32(plc, entry + 16, 960);
+    Put16(plc, entry + 20, flags);
+  }
+  s.fib.spa_main = {static_cast<uint32_t>(s.table.size()),
+                    static_cast<uint32_t>(plc.size())};
+  s.fib.ccp_text = count + 1;
+  Append(s.table, plc);
+  return s;
+}
+
+TEST(M5FloatingImages, SyntheticWrapOriginsSidesToIrAndXml) {
+  const model::ImageWrap wraps[] = {
+      model::ImageWrap::kSquare, model::ImageWrap::kTopAndBottom,
+      model::ImageWrap::kSquare, model::ImageWrap::kNone,
+      model::ImageWrap::kTight,  model::ImageWrap::kThrough};
+  const char* names[] = {"wp:wrapSquare", "wp:wrapTopAndBottom",
+                         "wp:wrapSquare", "wp:wrapNone",
+                         "wp:wrapTight",  "wp:wrapThrough"};
+  const char* sides[] = {"bothSides", "left", "right", "largest"};
+  const char* horizontal[] = {"margin", "page", "column"};
+  const char* vertical[] = {"margin", "page", "paragraph"};
+  for (unsigned wrap = 0; wrap < 6; ++wrap) {
+    for (unsigned side = 0; side < 4; ++side) {
+      for (unsigned origin = 0; origin < 3; ++origin) {
+        SCOPED_TRACE(std::to_string(wrap) + "/" + std::to_string(side) + "/" +
+                     std::to_string(origin));
+        auto s = Floating(
+            0xC000 | (wrap << 5) | (side << 9) | (origin << 1) | (origin << 3),
+            side % 2);
+        auto result = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+        ASSERT_TRUE(result) << result.error().message;
+        ASSERT_EQ(result->size(), 1u);
+        auto& image = result->front().image;
+        ASSERT_TRUE(image.anchor);
+        EXPECT_EQ(image.width, 1440);
+        EXPECT_EQ(image.height, 720);
+        EXPECT_EQ(image.anchor->x, -120);
+        EXPECT_EQ(image.anchor->y, 240);
+        EXPECT_EQ(image.anchor->horizontal, origin);
+        EXPECT_EQ(image.anchor->vertical, origin);
+        EXPECT_EQ(image.anchor->wrap, wraps[wrap]);
+        EXPECT_EQ(image.anchor->wrap_side, wrap == 1 || wrap == 3 ? 0 : side);
+        EXPECT_EQ(image.anchor->behind_text, wrap == 3);
+        EXPECT_TRUE(image.anchor->locked);
+        model::Document document;
+        document.images.push_back(std::move(image));
+        document.paragraphs.push_back({});
+        model::Run run;
+        run.image_index = 0;
+        document.paragraphs.back().runs.push_back(run);
+        auto zip = docx::Write(document);
+        ASSERT_TRUE(zip) << zip.error().message;
+        const auto xml = Part(*zip, "word/document.xml");
+        EXPECT_NE(xml.find(std::string("<") + names[wrap]), std::string::npos);
+        EXPECT_NE(xml.find(std::string("<wp:positionH relativeFrom=\"") +
+                           horizontal[origin] + "\""),
+                  std::string::npos);
+        EXPECT_NE(xml.find(std::string("<wp:positionV relativeFrom=\"") +
+                           vertical[origin] + "\""),
+                  std::string::npos);
+        EXPECT_NE(xml.find("<wp:posOffset>-76200</wp:posOffset>"),
+                  std::string::npos);
+        EXPECT_NE(xml.find("<wp:posOffset>152400</wp:posOffset>"),
+                  std::string::npos);
+        if (wrap != 1 && wrap != 3) {
+          EXPECT_NE(xml.find(std::string("wrapText=\"") + sides[side] + "\""),
+                    std::string::npos);
+        }
+        if (wrap >= 4) {
+          EXPECT_NE(xml.find("<wp:wrapPolygon"), std::string::npos);
+          EXPECT_NE(xml.find("<wp:lineTo x=\"21600\" y=\"21600\""),
+                    std::string::npos);
+        }
+      }
+    }
+  }
+}
+
+TEST(M5FloatingImages, RejectsMalformedRangesRecordsAndReferences) {
+  auto check = [](const FloatingStream& s) {
+    EXPECT_FALSE(doc::ReadFloatingPictures(s.word, s.table, s.fib));
+  };
+  auto s = Floating(0x54);
+  s.fib.spa_main.size--;
+  check(s);
+  s = Floating(0x54);
+  s.fib.drawing_group.offset = s.table.size();
+  check(s);
+  s = Floating(0x54);
+  Put32(s.table, 4, 0xFFFFFFFF);
+  check(s);
+  s = Floating(0x54);
+  s.word.resize(7);
+  check(s);
+  s = Floating(0x54);
+  Put32(s.table, s.fib.spa_main.offset, s.fib.ccp_text);
+  check(s);
+  s = Floating(0x54);
+  Put32(s.table, s.fib.spa_main.offset + 8 + 12, 0x80000000);
+  check(s);
+  check(Floating(6 << 5));
+  check(Floating(3 << 1));
+  check(Floating(4 << 9));
+}
+
+TEST(M5FloatingImages, DelayedMetafileAggregateBudgetBeforeInflate) {
+  auto s = Floating(0x54, true, 4);
+  auto picf =
+      MetafilePicf(0xF01B, 0x216, true,
+                   std::vector<uint8_t>(doc::detail::kMaxImageSize, 'X'));
+  // Reuse exactly the inline extractor's compressed BLIP bytes.
+  s.word.assign(picf.begin() + 68 + 8 + 36, picf.end());
+  {
+    auto result = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->size(), 4u);
+    EXPECT_EQ(result->back().image.bytes.size(), doc::detail::kMaxImageSize);
+  }
+  auto overflow = Floating(0x54, true, 5);
+  overflow.word = s.word;
+  auto rejected =
+      doc::ReadFloatingPictures(overflow.word, overflow.table, overflow.fib);
+  ASSERT_FALSE(rejected);
+  EXPECT_EQ(rejected.error().message, "total image size exceeds limit");
+  Put32(s.word, 8 + 16, doc::detail::kMaxImageSize + 1);
+  EXPECT_FALSE(doc::ReadFloatingPictures(s.word, s.table, s.fib));
+}
+
 }  // namespace

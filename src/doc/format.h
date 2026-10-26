@@ -14,9 +14,12 @@
 
 #ifndef SRC_DOC_FORMAT_H_
 #define SRC_DOC_FORMAT_H_
+#include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <span>
+#include <vector>
 
 #include "doc/fib.h"
 #include "model/document.h"
@@ -26,7 +29,16 @@ std::expected<model::Document, Error> ParseFormatted(
     const Fib& fib, std::span<const uint8_t> data = {});
 
 std::expected<model::Image, Error> ReadInlinePicture(
-    std::span<const uint8_t> data, uint32_t offset);
+    std::span<const uint8_t> data, uint32_t offset,
+    size_t budget = std::numeric_limits<size_t>::max());
+
+struct FloatingPicture {
+  uint32_t cp = 0;
+  model::Image image;
+};
+std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
+    std::span<const uint8_t> word, std::span<const uint8_t> table,
+    const Fib& fib);
 }  // namespace doccraft::doc
 
 #endif  // SRC_DOC_FORMAT_H_

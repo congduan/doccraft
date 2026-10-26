@@ -223,6 +223,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     return std::unexpected(papx.error());
   model::Document doc;
   size_t total_image_size = 0;
+  auto floating = ReadFloatingPictures(word, table, fib);
+  if (!floating)
+    return std::unexpected(floating.error());
+  for (const auto& picture : *floating)
+    total_image_size += picture.image.bytes.size();
+  size_t next_picture = 0;
   doc.fonts = ReadFonts(table, fib.fonts);
   doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
   ReadLists(doc, table, fib);
@@ -375,11 +381,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       marker.instr_text = text;
       para.runs.push_back(std::move(marker));
     };
-    if (ch.text == "\x13") {
+    if (ch.text() == "\x13") {
       fields.push_back({});
       continue;
     }
-    if (!fields.empty() && fields.back().in_instruction && ch.text == "\x14") {
+    if (!fields.empty() && fields.back().in_instruction &&
+        ch.text() == "\x14") {
       FieldFrame& frame = fields.back();
       frame.in_instruction = false;
       ApplyFieldInstruction(frame.instruction, &frame.hyperlink, &frame.page);
@@ -399,7 +406,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       sync_field_state();
       continue;
     }
-    if (!fields.empty() && ch.text == "\x15") {
+    if (!fields.empty() && ch.text() == "\x15") {
       // A field that closes before its separator is malformed: keep its
       // instruction as an unmatched begin/end pair instead of dropping it.
       if (fields.back().mode == FieldMode::kPending) {
@@ -414,9 +421,19 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       continue;
     }
     if (!fields.empty() && fields.back().in_instruction) {
-      fields.back().instruction += ch.text;
+      fields.back().instruction += ch.text();
       continue;
     }
+    if (next_picture < floating->size() &&
+        (*floating)[next_picture].cp == ch.cp) {
+      model::Run picture_run;
+      picture_run.image_index = static_cast<int>(doc.images.size());
+      doc.images.push_back(std::move((*floating)[next_picture++].image));
+      para.runs.push_back(std::move(picture_run));
+      last_run_count = 0;
+    }
+    if (ch.text() == "\x08")
+      continue;
     const auto* pap = Find(*papx, ch.fc);
     bool table_flag = false, row_end = false;
     int depth = 0;
@@ -439,7 +456,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       const int wanted = depth > 0 ? depth : (table_flag ? 1 : 0);
       set_table_depth(wanted);
     }
-    if (ch.text == "\x07") {
+    if (ch.text() == "\x07") {
       if (frames.empty())
         set_table_depth(1);
       if (row_end) {
@@ -477,7 +494,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       para = {};
       continue;
     }
-    if (ch.text.size() == 1 && ch.text[0] == '\x0c') {
+    if (ch.text().size() == 1 && ch.text()[0] == '\x0c') {
       if (next_section + 1 < sections.size() &&
           ch.cp + 1 == sections[next_section].first) {
         ApplyParagraphSprms(para, pap, data);
@@ -494,7 +511,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       continue;
     }
-    if (ch.text == "\x05") {
+    if (ch.text() == "\x05") {
       // Comment reference mark: the comment itself is written to comments.xml.
       auto found = comment_index.find(ch.cp);
       if (found != comment_index.end()) {
@@ -504,7 +521,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       continue;
     }
-    if (ch.text == "\x02") {
+    if (ch.text() == "\x02") {
       auto found = note_index.find(ch.cp);
       if (found != note_index.end()) {
         model::Run note;
@@ -515,12 +532,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       continue;
     }
     const auto* chp = Find(*chpx, ch.fc);
-    if (!ch.text.empty() && ch.text != "\x01" && last_run_count != 0 &&
+    if (!ch.text().empty() && ch.text() != "\x01" && last_run_count != 0 &&
         para.runs.size() == last_run_count &&
         para.runs.back().image_index < 0 && pap == last_pap &&
         chp == last_chp && hyperlink == last_hyperlink &&
         page_field == last_page_field) {
-      para.runs.back().text += ch.text;
+      para.runs.back().text += ch.text();
       continue;
     }
     auto remember_run = [&]() {
@@ -547,9 +564,10 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         }
       });
     }
-    if (ch.text == "\x01" && r.object_offset >= 0 && !r.ole_object &&
+    if (ch.text() == "\x01" && r.object_offset >= 0 && !r.ole_object &&
         !r.embedded_object && !r.binary_data) {
-      auto picture = ReadInlinePicture(data, r.object_offset);
+      auto picture = ReadInlinePicture(
+          data, r.object_offset, detail::kMaxTotalImageSize - total_image_size);
       if (!picture)
         return std::unexpected(picture.error());
       if (picture->bytes.size() > detail::kMaxTotalImageSize - total_image_size)
@@ -564,12 +582,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (!para.runs.empty()) {
       auto& back = para.runs.back();
       if (SameRunFormatting(back, r)) {
-        back.text += ch.text;
+        back.text += ch.text();
         remember_run();
         continue;
       }
     }
-    r.text = ch.text;
+    r.text = ch.text();
     para.runs.push_back(std::move(r));
     remember_run();
   }

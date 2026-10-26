@@ -82,3 +82,8 @@ gtest_discover_tests(m5_inline_images_test)
 add_executable(perf_repack perf/repack_doc.cc cfb_test_util.cc)
 target_link_libraries(perf_repack PRIVATE doccraft_cfb)
 target_compile_features(perf_repack PRIVATE cxx_std_23)
+
+# Repeat a validated structured body and its FKP pages for the 100 MiB tier.
+add_executable(perf_repack_body perf/repack_body.cc cfb_test_util.cc)
+target_link_libraries(perf_repack_body PRIVATE doccraft_cfb doccraft_doc)
+target_compile_features(perf_repack_body PRIVATE cxx_std_23)

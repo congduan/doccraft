@@ -17,6 +17,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,10 +25,22 @@ namespace doccraft::model {
 
 enum class ImageFormat { kPng, kJpeg, kWmf, kEmf };
 
+enum class ImageWrap { kNone, kSquare, kTight, kThrough, kTopAndBottom };
+// Same margin/page/text origin semantics as floating tables. Text means the
+// column horizontally and the anchor paragraph vertically.
+struct ImageAnchor {
+  int horizontal = 0, vertical = 0;
+  int x = 0, y = 0;
+  ImageWrap wrap = ImageWrap::kSquare;
+  int wrap_side = 0;  // Both, left, right, largest.
+  bool behind_text = false, locked = false;
+};
+
 struct Image {
   ImageFormat format = ImageFormat::kPng;
   std::vector<uint8_t> bytes;
   int width = 0, height = 0;  // Display size in twips.
+  std::optional<ImageAnchor> anchor;
 };
 
 // Run::field_char markers, matching w:fldChar/@w:fldCharType.

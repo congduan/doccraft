@@ -54,6 +54,19 @@ def make_fodt(path: Path, repeats: int, words_per_paragraph: int) -> None:
 
 def generate(size_mb: int, out: Path) -> Path:
     out.mkdir(parents=True, exist_ok=True)
+    if size_mb == 100:
+        source = out / "structured-20mb.doc"
+        if not source.exists():
+            generate(20, out)
+        engine = ROOT / "build" / "tests" / "perf_repack_body"
+        subprocess.run(["cmake", "--build", str(ROOT / "build"),
+                        "--target", "perf_repack_body", "-j2"], check=True)
+        target = out / "structured-100mb.doc"
+        subprocess.run([str(engine), str(source), str(target)], check=True)
+        print(f"{target.name}: {target.stat().st_size / 2**20:.2f} MiB "
+              "(five referenced copies of the 20 MiB structured body)",
+              flush=True)
+        return target
     if size_mb == 50:
         source = out / "structured-20mb.doc"
         if not source.exists():

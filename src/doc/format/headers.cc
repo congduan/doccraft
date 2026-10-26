@@ -61,17 +61,17 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
       }
       out.push_back(std::move(para));
       para = {};
-    } else if (ch.text.size() != 1 ||
-               static_cast<unsigned char>(ch.text[0]) >= 32) {
+    } else if (ch.text().size() != 1 ||
+               static_cast<unsigned char>(ch.text()[0]) >= 32) {
       model::Run r;
       if (const auto* x = Find(chpx, ch.fc)) {
         Walk(x->sprms, [&](uint16_t op, Bytes v) {
           ApplyRun(r, op, v, fonts);
         });
       }
-      r.text = ch.text;
+      r.text = ch.text();
       if (!para.runs.empty() && SameRunFormatting(para.runs.back(), r)) {
-        para.runs.back().text += ch.text;
+        para.runs.back().text += ch.text();
       } else {
         para.runs.push_back(std::move(r));
       }

@@ -183,7 +183,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ### 6.6 对象与图形
 - ✅ 内联图片（PICF + Escher BLIP：png/jpg/wmf/emf 提取与格式保留；正文图片，其他故事与非嵌入 BLIP 限制见 KNOWN-SIMPLIFICATIONS）
-- ☐ 浮动图片与文字环绕（Escher anchor + 环绕类型映射）
+- ◐ 浮动图片与文字环绕（Escher anchor + 环绕类型映射）：FSPA anchor 定位（bx/by → margin/page/text，复用浮动表格语义）与主流环绕（topAndBottom/around=Square/none/rough=Tight→Through 合成覆盖）已通，LibreOffice golden 对拍达其内部基线下限；轮廓级 Tight/Through 区分需真实 Word 样本（LibreOffice 导出两者同为 wr=4），已知限制登记 KNOWN-SIMPLIFICATIONS
 - ☐ 文本框（Ftxbx/textbox 文本链）
 - ☐ 基本形状/艺术字占位（可降级为占位图，文档化降级策略）
 - ☐ OLE 嵌入对象（对象流透传 + 预览图）

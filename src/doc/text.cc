@@ -31,7 +31,7 @@ std::expected<std::string, Error> ExtractText(std::span<const uint8_t> word,
     return std::unexpected(chars.error());
   std::string out;
   for (const auto& ch : *chars)
-    out += ch.text;
+    out += ch.text();
   return out;
 }
 

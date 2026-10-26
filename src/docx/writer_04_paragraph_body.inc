@@ -43,11 +43,37 @@ void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
   constexpr int64_t kEmuPerTwip = 635;
   const int64_t width = static_cast<int64_t>(image.width) * kEmuPerTwip;
   const int64_t height = static_cast<int64_t>(image.height) * kEmuPerTwip;
-  auto inline_node = run.append_child("w:drawing").append_child("wp:inline");
+  auto inline_node =
+      run.append_child("w:drawing")
+          .append_child(image.anchor ? "wp:anchor" : "wp:inline");
   Attr(inline_node, "distT", "0");
   Attr(inline_node, "distB", "0");
   Attr(inline_node, "distL", "0");
   Attr(inline_node, "distR", "0");
+  if (image.anchor) {
+    const auto& anchor = *image.anchor;
+    Attr(inline_node, "simplePos", "0");
+    IntAttr(inline_node, "relativeHeight", index + 1);
+    Attr(inline_node, "behindDoc", anchor.behind_text ? "1" : "0");
+    Attr(inline_node, "locked", anchor.locked ? "1" : "0");
+    Attr(inline_node, "layoutInCell", "1");
+    Attr(inline_node, "allowOverlap", "1");
+    auto simple = inline_node.append_child("wp:simplePos");
+    Attr(simple, "x", "0");
+    Attr(simple, "y", "0");
+    const char* horizontal[] = {"margin", "page", "column"};
+    const char* vertical[] = {"margin", "page", "paragraph"};
+    auto h = inline_node.append_child("wp:positionH");
+    Attr(h, "relativeFrom", horizontal[std::clamp(anchor.horizontal, 0, 2)]);
+    h.append_child("wp:posOffset")
+        .text()
+        .set(std::to_string(int64_t{anchor.x} * kEmuPerTwip).c_str());
+    auto v = inline_node.append_child("wp:positionV");
+    Attr(v, "relativeFrom", vertical[std::clamp(anchor.vertical, 0, 2)]);
+    v.append_child("wp:posOffset")
+        .text()
+        .set(std::to_string(int64_t{anchor.y} * kEmuPerTwip).c_str());
+  }
   auto extent = inline_node.append_child("wp:extent");
   Attr(extent, "cx", std::to_string(width));
   Attr(extent, "cy", std::to_string(height));
@@ -56,6 +82,50 @@ void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
   Attr(effect, "t", "0");
   Attr(effect, "r", "0");
   Attr(effect, "b", "0");
+  if (image.anchor) {
+    const auto& anchor = *image.anchor;
+    const char* name = "wp:wrapSquare";
+    switch (anchor.wrap) {
+      case model::ImageWrap::kNone:
+        name = "wp:wrapNone";
+        break;
+      case model::ImageWrap::kSquare:
+        break;
+      case model::ImageWrap::kTight:
+        name = "wp:wrapTight";
+        break;
+      case model::ImageWrap::kThrough:
+        name = "wp:wrapThrough";
+        break;
+      case model::ImageWrap::kTopAndBottom:
+        name = "wp:wrapTopAndBottom";
+        break;
+    }
+    auto wrap = inline_node.append_child(name);
+    if (anchor.wrap != model::ImageWrap::kNone &&
+        anchor.wrap != model::ImageWrap::kTopAndBottom) {
+      const char* sides[] = {"bothSides", "left", "right", "largest"};
+      Attr(wrap, "wrapText", sides[std::clamp(anchor.wrap_side, 0, 3)]);
+    }
+    if (anchor.wrap == model::ImageWrap::kTight ||
+        anchor.wrap == model::ImageWrap::kThrough) {
+      // Rectangular contour fallback; custom OfficeArt wrap polygons deferred.
+      constexpr int kWrapCoordinateExtent = 21600;
+      auto polygon = wrap.append_child("wp:wrapPolygon");
+      Attr(polygon, "edited", "0");
+      auto start = polygon.append_child("wp:start");
+      IntAttr(start, "x", 0);
+      IntAttr(start, "y", 0);
+      for (const auto& [x, y] :
+           {std::pair{0, kWrapCoordinateExtent},
+            std::pair{kWrapCoordinateExtent, kWrapCoordinateExtent},
+            std::pair{kWrapCoordinateExtent, 0}, std::pair{0, 0}}) {
+        auto point = polygon.append_child("wp:lineTo");
+        IntAttr(point, "x", x);
+        IntAttr(point, "y", y);
+      }
+    }
+  }
   auto doc_pr = inline_node.append_child("wp:docPr");
   IntAttr(doc_pr, "id", index + 1);
   Attr(doc_pr, "name", "Picture " + std::to_string(index + 1));

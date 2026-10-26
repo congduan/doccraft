@@ -56,6 +56,10 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
     return std::unexpected(Error{"invalid PlcPcd size"});
   size_t count = (nbytes - 4) / 12, desc = p + 4 * (count + 1);
   std::vector<Char> out;
+  // Each emitted character consumes at least one WordDocument byte. Reserve
+  // the CP upper bound up front so a large body never briefly holds both
+  // sides of a geometric vector reallocation.
+  out.reserve(std::min<size_t>(limit, word.size()));
   size_t emitted = 0;
   for (size_t i = 0; i < count; i++) {
     uint32_t cp = U32(b, p + 4 * i), end = U32(b, p + 4 * (i + 1));
@@ -79,16 +83,18 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
       uint32_t fc = start + j * (compressed ? 1 : 2);
       if (compressed) {
         // Compressed pieces use the document's ANSI code page (FibBase.lid).
-        Char ch{{}, character_cp, fc, false};
+        Char ch{character_cp, fc};
+        std::string decoded;
         size_t used =
-            DecodeAnsiChar(fib.codepage, word.subspan(start + j), ch.text);
+            DecodeAnsiChar(fib.codepage, word.subspan(start + j), decoded);
         if (used == 0 || used > length - j) {
-          ch.text.assign("\xEF\xBF\xBD");  // U+FFFD
+          decoded.assign("\xEF\xBF\xBD");  // U+FFFD
           used = 1;
         }
-        ch.newline = ch.text == "\r" || ch.text == "\n";
+        ch.newline = decoded == "\r" || decoded == "\n";
         if (ch.newline)
-          ch.text = "\n";
+          decoded = "\n";
+        ch.SetText(decoded);
         out.push_back(std::move(ch));
         j += static_cast<uint32_t>(used);
         continue;
@@ -108,9 +114,11 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
           c == static_cast<uint32_t>(kNonCharacterMin) + 1 ||
           (c >= kUtf16HighSurrogateMin && c <= kUtf16LowSurrogateMax))
         c = kReplacementCharacter;
-      Char ch{{}, character_cp, fc, c == 13};
-
-      AppendUtf8(ch.text, c == 13 ? 10 : c);
+      Char ch{character_cp, fc};
+      ch.newline = c == 13;
+      std::string encoded;
+      AppendUtf8(encoded, c == 13 ? 10 : c);
+      ch.SetText(encoded);
       out.push_back(std::move(ch));
       j += step;
     }
