@@ -76,6 +76,9 @@ inline constexpr size_t kMetafileCompressionOffset = 32;
 inline constexpr uint8_t kMetafileDeflate = 0;
 inline constexpr uint8_t kMetafileUncompressed = 0xFE;
 inline constexpr size_t kMaxImageSize = 64 * 1024 * 1024;
+// Aggregate cap across all images: metafile deflate can amplify ~1000x per
+// BLIP, so per-image limits alone do not bound total memory.
+inline constexpr size_t kMaxTotalImageSize = 256 * 1024 * 1024;
 
 // Operands that mean "absent"/"automatic" carry a saturated value instead of a
 // separate flag.

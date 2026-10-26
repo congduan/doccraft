@@ -14,10 +14,10 @@
 | ✅ | `0x0800` | sprmCFRMarkDel | A ToggleOperand that specifies whether the text is formatted as deleted revision mark text, which is text that was deleted while revision marking was on. | 字符 CHP §2.6.1；M3Batch8.RevisionMarksWrapRuns |
 | ✅ | `0x0801` | sprmCFRMarkIns | A ToggleOperand that specifies whether the text is formatted as inserted revision mark text, which is text that was inserted while revision marking was on. | 字符 CHP §2.6.1；M3Batch8.RevisionMarksWrapRuns |
 | ✅ | `0x0802` | sprmCFFldVanish | A ToggleOperand that specifies whether the field text is hidden. | 字符 CHP §2.6.1；M3Batch7.HiddenTextSources |
-| ✅ | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage. | 字符 CHP §2.6.1；正文内联图片 Data 偏移、PICF/BLIP 到 `w:drawing`；M5InlineImages.LibreOfficeGoldenKeepsMediaBytes；OLE 分支仍属 M5 后续 |
+| ✅ | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage. | 字符 CHP §2.6.1；正文内联图片 Data 偏移、PICF/BLIP 到 `w:drawing`；M5InlineImages.LibreOfficeGoldenKeepsMediaBytes、M5InlineImages.SameChpxTextDoesNotAbsorbPicture、M5InlineImages.AggregateImageLimitAcceptsBoundaryRejectsOverflow；OLE 分支仍属 M5 后续 |
 | N/A | `0x4804` | sprmCIbstRMark | A signed 16-bit integer that specifies a zero-based index into SttbfRMark.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | N/A | `0x6805` | sprmCDttmRMark | A DTTM that specifies the date and time at which the text was inserted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
-| N/A | `0x0806` | sprmCFData | A Bool8 that specifies whether the picture character in the text represents binary data. | 字符 CHP §2.6.1；图片二进制标记；载荷同 sprmCPicLocation，随 M5 图片链输出 |
+| N/A | `0x0806` | sprmCFData | A Bool8 that specifies whether the picture character in the text represents binary data. | 字符 CHP §2.6.1；图片二进制标记；二进制数据不作为内联图片读取，M5InlineImages.BinaryDataMarkerDoesNotReadPicture；载荷留待后续 |
 | N/A | `0x4807` | sprmCIdslRMark | An unsigned 16-bit integer that specifies the reason value of the inserted or modified revision mark text.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | ✅ | `0x6A09` | sprmCSymbol | A CSymbolOperand structure that designates the character as a symbol and specifies the font and character code for the symbol. | 字符 CHP §2.6.1 |
 | N/A | `0x080A` | sprmCFOle2 | A Bool8 value that specifies whether the character is a placeholder for an OLE object. | 字符 CHP §2.6.1；OLE 占位符；w:object 需要嵌入部件，随 M5 对象链输出 |

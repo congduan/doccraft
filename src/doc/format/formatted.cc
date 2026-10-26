@@ -222,6 +222,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (!papx)
     return std::unexpected(papx.error());
   model::Document doc;
+  size_t total_image_size = 0;
   doc.fonts = ReadFonts(table, fib.fonts);
   doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
   ReadLists(doc, table, fib);
@@ -514,7 +515,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       continue;
     }
     const auto* chp = Find(*chpx, ch.fc);
-    if (last_run_count != 0 && para.runs.size() == last_run_count &&
+    if (!ch.text.empty() && ch.text != "\x01" && last_run_count != 0 &&
+        para.runs.size() == last_run_count &&
         para.runs.back().image_index < 0 && pap == last_pap &&
         chp == last_chp && hyperlink == last_hyperlink &&
         page_field == last_page_field) {
@@ -546,10 +548,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       });
     }
     if (ch.text == "\x01" && r.object_offset >= 0 && !r.ole_object &&
-        !r.embedded_object) {
+        !r.embedded_object && !r.binary_data) {
       auto picture = ReadInlinePicture(data, r.object_offset);
       if (!picture)
         return std::unexpected(picture.error());
+      if (picture->bytes.size() > detail::kMaxTotalImageSize - total_image_size)
+        return std::unexpected(Error{"total image size exceeds limit"});
+      total_image_size += picture->bytes.size();
       r.image_index = static_cast<int>(doc.images.size());
       doc.images.push_back(std::move(*picture));
       para.runs.push_back(std::move(r));

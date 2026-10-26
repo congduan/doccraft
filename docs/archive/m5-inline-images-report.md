@@ -57,3 +57,30 @@ PNG 首轮像素对拍 `FAIL page 1: rms=6.87 max=255 bad_px=3743 (0.178%)`。�
 ## 已知限制
 
 正文内联且嵌入的 BLIP 已覆盖。浮动、非嵌入或延迟 BLIP、ObjectPool/OLE、裁剪/边框/旋转、其他故事里的图片未纳入本刀。WMF/EMF 有合成位流提取和压缩解码测试，但没有 LibreOffice 导出的真实元文件 golden；这一验证空缺在 `KNOWN-SIMPLIFICATIONS.md` 登记。
+
+## Review 修复
+
+2026-10-26，开工 `git fetch origin` 后 HEAD 与 origin/main 均为 `c055c9d`。
+R-1 接好 `total_image_size` 与常量命名空间，以减法检查剩余额度，避免累计加法溢出；解码图片总量超过 256MiB 时整篇失败。S-1 快路径排除空文本和 `U+0001`，保留预置的 S-2 `!binary_data` 守卫。
+
+任务书的两幅各 >128MB 元文件会先被已有 64MiB 单图上限拒绝，因此测试改用一个合法的压缩 64MiB WMF BLIP 重复引用：四幅恰好 256MiB 成功，第五幅返回 `total image size exceeds limit`。临时放宽聚合上限时该测试确实失败。S-1 测试修复前得到 `images.size() == 0`，修复后同 CHPX 的 `A + 图片 + B` 在普通正文和超链接域结果中均保留独立图片 run、DrawingML 和媒体字节。S-2 测试用空 Data 流验证二进制标记不会调用图片读取。
+
+交互核查：域结果实测通过；域指令在图片分支前单独消费。脚注/尾注经 `ReadStoryParagraphs`，仍过滤控制字符，不走正文快路径，其他故事图片仍属已登记限制。256MiB 限制针对 IR 媒体总量，当前图片先解码再检查，并非进程峰值内存保证。KNOWN-SIMPLIFICATIONS 与 SPRM-COVERAGE 已同步。
+
+最终验证原始输出摘录（构建与格式检查退出码均为 0）：
+
+```text
+$ cmake --build build -j
+[100%] Built target m5_inline_images_test
+$ ctest --test-dir build --output-on-failure
+100% tests passed, 0 tests failed out of 153
+
+Total Test time (real) =   2.74 sec
+$ cmake --build build --target format-check
+[100%] clang-format: verifying Google style formatting
+[100%] Built target format-check
+$ python3 tests/pixelcompare/compare.py tests/fixtures/inline-image.doc
+OK  page 1: rms=0.00 max=0 bad_px=0 (0.000%)
+
+PASS (1 compared pages, threshold 0.1%) — heatmaps: build/pixelcompare/
+```

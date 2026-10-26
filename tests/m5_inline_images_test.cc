@@ -25,6 +25,8 @@
 #include "cfb/cfb_reader.h"
 #include "doc/fib.h"
 #include "doc/format.h"
+#include "doc/format/internal.h"
+#include "doc/format/sprm_codes.h"
 #include "docx/writer.h"
 
 namespace {
@@ -194,6 +196,94 @@ std::vector<uint8_t> MetafilePicf(uint16_t blip_type, uint16_t instance,
   data[meta + 33] = 0xFE;
   std::copy(stored.begin(), stored.end(), data.begin() + meta + kMeta);
   return data;
+}
+
+// One compressed piece and one CHPX covering both text and picture markers.
+std::expected<model::Document, doc::Error> ParsePictures(
+    const std::string& text, const std::vector<uint8_t>& data,
+    bool binary_data = false) {
+  constexpr size_t kTextFc = 1024, kPageSize = 512;
+  std::vector<uint8_t> word(kTextFc + text.size()), table(44);
+  std::copy(text.begin(), text.end(), word.begin() + kTextFc);
+  table[0] = 2;
+  Put32(table, 1, 16);
+  Put32(table, 9, text.size());
+  Put32(table, 15, 0x40000000u + kTextFc * 2);
+  Put32(table, 32, kTextFc);
+  Put32(table, 36, word.size());
+  Put32(table, 40, 1);
+  Put32(word, kPageSize, kTextFc);
+  Put32(word, kPageSize + 4, word.size());
+  word[kPageSize + 8] = 20;
+  word[kPageSize + 511] = 1;
+  word[kPageSize + 40] = 9;
+  Put16(word, kPageSize + 41, doc::detail::kSprmCPicLocation);
+  Put32(word, kPageSize + 43, 0);
+  Put16(word, kPageSize + 47, doc::detail::kSprmCFData);
+  word[kPageSize + 49] = binary_data;
+  doc::Fib fib;
+  fib.ccp_text = text.size();
+  fib.lcb_clx = 21;
+  fib.chpx_bte = {32, 12};
+  return doc::ParseFormatted(word, table, fib, data);
+}
+
+TEST(M5InlineImages, AggregateImageLimitAcceptsBoundaryRejectsOverflow) {
+  // Each decoded metafile is legal; repeated references still allocate images.
+  const auto data =
+      MetafilePicf(0xF01B, 0x216, true,
+                   std::vector<uint8_t>(doc::detail::kMaxImageSize, 'X'));
+  ASSERT_FALSE(data.empty());
+  const size_t count =
+      doc::detail::kMaxTotalImageSize / doc::detail::kMaxImageSize;
+  {
+    auto parsed = ParsePictures(std::string(count, '\x01'), data);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    ASSERT_EQ(parsed->images.size(), count);
+    size_t total = 0;
+    for (const auto& image : parsed->images)
+      total += image.bytes.size();
+    EXPECT_EQ(total, doc::detail::kMaxTotalImageSize);
+  }
+  auto rejected = ParsePictures(std::string(count + 1, '\x01'), data);
+  ASSERT_FALSE(rejected);
+  EXPECT_EQ(rejected.error().message, "total image size exceeds limit");
+}
+
+TEST(M5InlineImages, SameChpxTextDoesNotAbsorbPicture) {
+  const auto data = MetafilePicf(0xF01B, 0x216, false, {'W', 'M', 'F'});
+  // Also exercise the same fast path inside a field result.
+  for (const std::string& text : {std::string("A\x01"
+                                              "B\r"),
+                                  std::string("\x13HYPERLINK \"url\"\x14"
+                                              "A\x01"
+                                              "B\x15\r")}) {
+    auto parsed = ParsePictures(text, data);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    ASSERT_EQ(parsed->images.size(), 1u);
+    const auto& runs = parsed->paragraphs[0].runs;
+    ASSERT_EQ(runs.size(), 3u);
+    EXPECT_EQ(runs[0].text, "A");
+    EXPECT_EQ(runs[1].image_index, 0);
+    EXPECT_TRUE(runs[1].text.empty());
+    EXPECT_EQ(runs[2].text, "B");
+    auto zip = docx::Write(*parsed);
+    ASSERT_TRUE(zip) << zip.error().message;
+    EXPECT_NE(Part(*zip, "word/document.xml").find("<w:drawing>"),
+              std::string::npos);
+    EXPECT_EQ(Part(*zip, "word/media/image1.wmf"), "WMF");
+  }
+}
+
+TEST(M5InlineImages, BinaryDataMarkerDoesNotReadPicture) {
+  auto parsed = ParsePictures(
+      "A\x01"
+      "B\r",
+      {}, true);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->images.empty());
+  ASSERT_FALSE(parsed->paragraphs[0].runs.empty());
+  EXPECT_TRUE(parsed->paragraphs[0].runs[0].binary_data);
 }
 
 TEST(M5InlineImages, WmfAndEmfPreserveDecodedBytes) {

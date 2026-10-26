@@ -51,6 +51,8 @@
 
 ## M5 当前范围
 
+- 正文内联图片解码后保存到 IR 的字节总量上限为 256MiB（`kMaxTotalImageSize`）；重复引用也累计，恰好达到上限允许，超限以 `total image size exceeds limit` 使整篇转换失败，不降级或丢图。检查发生在当前图片解码后，因此该上限不是进程峰值内存上限；元文件仍受单图 64MiB 限制。
+
 - 正文内联 `U+0001` 图片按 `sprmCPicLocation` 从 Data 流读取 PICF，扫描嵌入 Escher BLIP 并输出 DrawingML 与原格式媒体部件。PNG/JPEG 有 LibreOffice golden 媒体字节对比及像素对拍；WMF/EMF 的压缩和非压缩 BLIP 有合成位流断言，但尚无 LibreOffice 导出的真实元文件 golden。非嵌入或延迟 BLIP、ObjectPool/OLE、浮动图片、裁剪/边框/旋转，以及页眉、脚注等其他故事中的图片留待后续；遇到正文内联图片的缺失或不支持载荷会显式返回错误。
 - 字符单位缩进（`sprmPDxc*`/`sprmPDyl*`）只写 `w:ind/@*Chars` 与 `w:spacing/@*Lines`，不重复写 twips 绝对值；阅读器若忽略 *Chars 会退回样式默认缩进。
 - `sprmSPgbProp` 的枚举按 0=页面边缘/1=文字、0=全部页/1=首页/2=非首页解释；`reserved` 字节非 0 时整条 sprm 视为损坏。
