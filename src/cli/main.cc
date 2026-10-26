@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,23 @@
 #include "doc/text.h"
 #include "docx/writer.h"
 #include "model/document.h"
+
+namespace {
+std::vector<uint8_t> ReadInput(std::ifstream& file) {
+  file.seekg(0, std::ios::end);
+  const auto end = file.tellg();
+  if (end >= 0 && end <= std::numeric_limits<std::streamsize>::max()) {
+    file.seekg(0, std::ios::beg);
+    std::vector<uint8_t> bytes(static_cast<size_t>(end));
+    file.read(reinterpret_cast<char*>(bytes.data()), end);
+    return bytes;
+  }
+  file.clear();
+  file.seekg(0, std::ios::beg);
+  file.clear();
+  return {std::istreambuf_iterator<char>(file), {}};
+}
+}  // namespace
 
 int main(int argc, char** argv) {
   if (argc < 2) {
@@ -46,7 +64,7 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
+    std::vector<uint8_t> bytes = ReadInput(file);
     auto reader = doccraft::cfb::CfbReader::Open(bytes);
     if (!reader) {
       std::fprintf(stderr, "inspect: %s\n", reader.error().message.c_str());
@@ -84,7 +102,7 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(file), {});
+    std::vector<uint8_t> bytes = ReadInput(file);
     const auto t_read = Clock::now();
     if (!file.eof() && file.fail()) {
       std::fprintf(stderr, "convert: input read failed\n");
