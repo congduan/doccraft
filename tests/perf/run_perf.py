@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark DOC conversion at four sizes; flag median wall regressions."""
+"""Benchmark DOC conversion at five sizes; flag median wall regressions."""
 import argparse
 import json
 import statistics
@@ -35,7 +35,8 @@ def main() -> int:
                     default=ROOT / "build" / "src" / "cli" / "doccraft")
     ap.add_argument("--baseline", type=Path, default=BASELINE)
     ap.add_argument("--write-baseline", action="store_true")
-    ap.add_argument("--sizes", type=int, nargs="+", default=[1, 5, 20, 50])
+    ap.add_argument("--sizes", type=int, nargs="+",
+                    default=[1, 5, 20, 50, 100])
     args = ap.parse_args()
     prior = json.loads(args.baseline.read_text()) if args.baseline.exists() else {}
     rows = dict(prior)

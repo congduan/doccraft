@@ -110,7 +110,8 @@ def generate(size_mb: int, out: Path) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sizes", type=int, nargs="+", default=[1, 5, 20, 50])
+    ap.add_argument("--sizes", type=int, nargs="+",
+                    default=[1, 5, 20, 50, 100])
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = ap.parse_args()
     for size in args.sizes:
