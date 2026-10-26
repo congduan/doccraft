@@ -132,7 +132,8 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
     return std::unexpected(Error{"annotation CP range too large"});
   }
   auto chars =
-      ReadChars(word, table, fib, static_cast<uint32_t>(base + fib.ccp_atn));
+      ReadChars(word, table, fib, static_cast<uint32_t>(base + fib.ccp_atn),
+                static_cast<uint32_t>(base));
   if (!chars) {
     return std::unexpected(chars.error());
   }

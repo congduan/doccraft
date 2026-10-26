@@ -113,7 +113,8 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
   const uint64_t endnote_base = static_cast<uint64_t>(fib.ccp_text) +
                                 fib.ccp_ftn + fib.ccp_hdd + fib.ccp_atn;
   const uint64_t limit = endnote_base + fib.ccp_edn;
-  auto chars = ReadChars(word, table, fib, static_cast<uint32_t>(limit));
+  auto chars =
+      ReadChars(word, table, fib, static_cast<uint32_t>(limit), fib.ccp_text);
   if (!chars) {
     return std::unexpected(chars.error());
   }

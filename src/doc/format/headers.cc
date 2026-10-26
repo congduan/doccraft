@@ -111,7 +111,7 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
   if (end > UINT32_MAX) {
     return std::unexpected(Error{"header CP range too large"});
   }
-  auto chars = ReadChars(word, table, fib, end);
+  auto chars = ReadChars(word, table, fib, end, base);
   if (!chars) {
     return std::unexpected(chars.error());
   }

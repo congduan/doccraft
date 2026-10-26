@@ -30,7 +30,8 @@ using base::DecodeAnsiChar;
 
 std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
                                                   const Fib& fib,
-                                                  uint32_t limit) {
+                                                  uint32_t limit,
+                                                  uint32_t begin) {
   if (fib.complex)
     return std::unexpected(
         Error{"fast-saved document unsupported (M2 known gap)"});
@@ -59,7 +60,7 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
   // Each emitted character consumes at least one WordDocument byte. Reserve
   // the CP upper bound up front so a large body never briefly holds both
   // sides of a geometric vector reallocation.
-  out.reserve(std::min<size_t>(limit, word.size()));
+  out.reserve(std::min<size_t>(limit - std::min(limit, begin), word.size()));
   size_t emitted = 0;
   for (size_t i = 0; i < count; i++) {
     uint32_t cp = U32(b, p + 4 * i), end = U32(b, p + 4 * (i + 1));
@@ -78,7 +79,9 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
     uint64_t bytes = static_cast<uint64_t>(length) * (compressed ? 1 : 2);
     if (start > word.size() || bytes > word.size() - start)
       return std::unexpected(Error{"piece outside WordDocument"});
-    for (uint32_t j = 0; j < length;) {
+    if (end <= begin)
+      continue;
+    for (uint32_t j = begin > cp ? begin - cp : 0; j < length;) {
       uint32_t character_cp = cp + j;
       uint32_t fc = start + j * (compressed ? 1 : 2);
       if (compressed) {
