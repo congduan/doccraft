@@ -166,6 +166,30 @@ TEST(PieceTableTest, RejectsOversizedFastSavedPrc) {
   EXPECT_EQ(text.error().message, "invalid CLX Prc size");
 }
 
+TEST(PieceTableTest, AppliesFastSavedPrm0Modifier) {
+  auto fib = doccraft::doc::ParseFib(Fib(0x0004));
+  ASSERT_TRUE(fib);
+  fib->lcb_clx = 21;
+  std::vector<uint8_t> table(80), word(1024);
+  table[40] = 2;
+  Put32(table, 41, 16);
+  Put32(table, 45, 0);
+  Put32(table, 49, 5);
+  Put32(table, 55, 0x40000000u | (512u * 2));
+  Put16(table, 59, (1u << 8) | (0x55u << 1));  // Prm0: sprmCFBold=on.
+  word[512] = 'B';
+  word[513] = 'o';
+  word[514] = 'l';
+  word[515] = 'd';
+  word[516] = '\r';
+  auto document = doccraft::doc::ParseFormatted(word, table, *fib);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "Bold");
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+}
+
 TEST(PieceTableTest, ReadsCompressedAndUtf16Pieces) {
   auto fib = doccraft::doc::ParseFib(Fib());
   ASSERT_TRUE(fib);

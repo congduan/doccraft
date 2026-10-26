@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -59,6 +60,70 @@ using detail::Valid;
 using detail::Walk;
 using detail::WalkParagraph;
 
+namespace {
+// [MS-DOC] §2.9.215: the seven-bit isprm of Prm0 names one sprm. Entries
+// absent from the table are reserved or have no supported property mapping.
+uint16_t Prm0Opcode(uint8_t isprm) {
+  static const auto kOpcodes = [] {
+    std::array<uint16_t, 128> result{};
+    result[0x00] = detail::kSprmCLbcCRJ;
+    result[0x04] = detail::kSprmPIncLvl;
+    result[0x05] = detail::kSprmPJc;
+    result[0x07] = detail::kSprmPFKeep;
+    result[0x08] = detail::kSprmPFKeepFollow;
+    result[0x09] = detail::kSprmPFPageBreakBefore;
+    result[0x0C] = detail::kSprmPIlvl;
+    result[0x0D] = detail::kSprmPFMirrorIndents;
+    result[0x0E] = detail::kSprmPFNoLineNumb;
+    result[0x0F] = detail::kSprmPTtwo;
+    result[0x18] = detail::kSprmPFInTable;
+    result[0x19] = detail::kSprmPFTtp;
+    result[0x1D] = detail::kSprmPPc;
+    result[0x25] = detail::kSprmPWr;
+    result[0x2C] = detail::kSprmPFNoAutoHyph;
+    result[0x32] = detail::kSprmPFLocked;
+    result[0x33] = detail::kSprmPFWidowControl;
+    result[0x35] = detail::kSprmPFKinsoku;
+    result[0x36] = detail::kSprmPFWordWrap;
+    result[0x37] = detail::kSprmPFOverflowPunct;
+    result[0x38] = detail::kSprmPFTopLinePunct;
+    result[0x39] = detail::kSprmPFAutoSpaceDE;
+    result[0x3A] = detail::kSprmPFAutoSpaceDN;
+    result[0x41] = detail::kSprmCFRMarkDel;
+    result[0x42] = detail::kSprmCFRMarkIns;
+    result[0x43] = detail::kSprmCFFldVanish;
+    result[0x47] = detail::kSprmCFData;
+    result[0x4B] = detail::kSprmCFOle2;
+    result[0x4D] = detail::kSprmCHighlight;
+    result[0x4E] = detail::kSprmCFEmboss;
+    result[0x4F] = detail::kSprmCSfxText;
+    result[0x50] = detail::kSprmCFWebHidden;
+    result[0x51] = detail::kSprmCFSpecVanish;
+    result[0x53] = detail::kSprmCPlain;
+    result[0x55] = detail::kSprmCFBold;
+    result[0x56] = detail::kSprmCFItalic;
+    result[0x57] = detail::kSprmCFStrike;
+    result[0x58] = detail::kSprmCFOutline;
+    result[0x59] = detail::kSprmCFShadow;
+    result[0x5A] = detail::kSprmCFSmallCaps;
+    result[0x5B] = detail::kSprmCFCaps;
+    result[0x5C] = detail::kSprmCFVanish;
+    result[0x5E] = detail::kSprmCKul;
+    result[0x62] = detail::kSprmCIco;
+    result[0x68] = detail::kSprmCIss;
+    result[0x73] = detail::kSprmCFDStrike;
+    result[0x74] = detail::kSprmCFImprint;
+    result[0x75] = detail::kSprmCFSpec;
+    result[0x76] = detail::kSprmCFObj;
+    result[0x78] = detail::kSprmPOutLvl;
+    result[0x7B] = detail::kSprmCFSdtVanish;
+    result[0x7C] = detail::kSprmCNeedFontFixup;
+    return result;
+  }();
+  return kOpcodes[isprm];
+}
+}  // namespace
+
 std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
                                                      const Fib& fib,
                                                      Bytes data) {
@@ -82,18 +147,21 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   size_t next_picture = 0;
   doc.fonts = ReadFonts(table, fib.fonts);
   doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
-  auto apply_piece_run = [&](model::Run& run, uint16_t prm) {
-    if (!(prm & 1))
+  auto walk_piece_prm = [&](uint16_t prm, auto fn) {
+    if (!prm)
       return;
-    Walk(prcs[prm >> 1], [&](uint16_t op, Bytes v) {
-      if ((op >> 10 & 7) == 2)
-        ApplyRun(run, op, v, doc.fonts);
-    });
+    if (prm & 1) {
+      Walk(prcs[prm >> 1], fn);
+    } else {
+      uint16_t op = Prm0Opcode((prm >> 1) & 0x7F);
+      if (op) {
+        uint8_t value = static_cast<uint8_t>(prm >> 8);
+        fn(op, Bytes(&value, 1));
+      }
+    }
   };
   auto apply_piece_para = [&](model::Paragraph& paragraph, uint16_t prm) {
-    if (!(prm & 1))
-      return;
-    Walk(prcs[prm >> 1], [&](uint16_t op, Bytes v) {
+    walk_piece_prm(prm, [&](uint16_t op, Bytes v) {
       if ((op >> 10 & 7) == 1)
         ApplyPara(paragraph, op, v);
     });
@@ -497,7 +565,14 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         }
       });
     }
-    apply_piece_run(r, ch.prm);
+    walk_piece_prm(ch.prm, [&](uint16_t op, Bytes v) {
+      if ((op >> 10 & 7) != 2)
+        return;
+      if (op == kSprmCPlain)
+        r = baseline();
+      else
+        ApplyRun(r, op, v, doc.fonts);
+    });
     if (control == '\x01' && r.object_offset >= 0 && !r.ole_object &&
         !r.embedded_object && !r.binary_data) {
       auto picture = ReadInlinePicture(

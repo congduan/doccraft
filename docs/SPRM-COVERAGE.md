@@ -4,7 +4,7 @@
 > ✅ = 解析、IR 与 OOXML 输出齐备且有合成样本断言；◐ = 部分实现；☐ = 待实现；N/A = 不进入 OOXML 输出，附理由，分为四类：规范允许忽略、编辑期/增量保存的内部状态、无 docx 对应属性的排版提示、由 M4/M5 里程碑承载的载荷。
 > 规范 §2.6 是完整 sprm 列表；§2.9 是数据类型定义。旧账的「240 = 已列 152 + 未列 88」未经核实，现按规范重建。
 
-> M4 fast-saved CLX：`PieceTableTest.ReadsFastSavedPiecesAndPrc` 验证 `Prc` 中已有 `sprmCFBold` 经 `Prm1` 应用到 IR 与 OOXML；这改变修饰来源，不改变 §2.6 各 opcode 的既有覆盖状态。`Prm0` 及真实增量保存 golden 仍在 §6.1 记 ◐。
+> M4 fast-saved CLX：`PieceTableTest.ReadsFastSavedPiecesAndPrc` 验证 `Prc` 中已有 `sprmCFBold` 经 `Prm1` 应用到 IR 与 OOXML；`PieceTableTest.AppliesFastSavedPrm0Modifier` 验证 `Prm0` 的同一格式路径。这改变修饰来源，不改变 §2.6 各 opcode 的既有覆盖状态。真实增量保存 golden 仍在 §6.1 记 ◐。
 
 > 代码中的 opcode 不再是裸字面量：统一引用 `src/doc/format/sprm_codes.h` 的
 > `kSprm<Name>` 常量；新增 sprm 时先在本表登记，再在同一文件补常量。
