@@ -214,6 +214,7 @@ inline constexpr uint32_t kFcMask = 0x3FFFFFFF;
 
 struct Char {
   uint32_t cp = 0, fc = 0;
+  uint16_t prm = 0;
   // iconv can return up to eight bytes for one legacy-codepage character.
   std::array<char, 8> utf8{};
   uint8_t length = 0;
@@ -239,10 +240,9 @@ inline bool Valid(Bytes b, Fib::Range r) {
   return r.offset <= b.size() && r.size <= b.size() - r.offset;
 }
 
-std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
-                                                  const Fib& fib,
-                                                  uint32_t limit,
-                                                  uint32_t begin = 0);
+std::expected<std::vector<Char>, Error> ReadChars(
+    Bytes word, Bytes table, const Fib& fib, uint32_t limit, uint32_t begin = 0,
+    std::vector<std::vector<uint8_t>>* prcs = nullptr);
 
 std::expected<std::vector<FormatRange>, Error> ReadFkps(Bytes word, Bytes table,
                                                         Fib::Range r,

@@ -23,28 +23,33 @@
 
 #include "base/charset.h"
 #include "doc/format/internal.h"
+#include "doc/format/sprm.h"
 
 namespace doccraft::doc::detail {
 
 using base::DecodeAnsiChar;
 
-std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
-                                                  const Fib& fib,
-                                                  uint32_t limit,
-                                                  uint32_t begin) {
-  if (fib.complex)
-    return std::unexpected(
-        Error{"fast-saved document unsupported (M2 known gap)"});
+std::expected<std::vector<Char>, Error> ReadChars(
+    Bytes word, Bytes table, const Fib& fib, uint32_t limit, uint32_t begin,
+    std::vector<std::vector<uint8_t>>* prcs) {
   if (!Valid(table, {fib.fc_clx, fib.lcb_clx}))
     return std::unexpected(Error{"CLX outside table stream"});
   Bytes b = table.subspan(fib.fc_clx, fib.lcb_clx);
+  if (prcs)
+    prcs->clear();
   size_t p = 0;
+  size_t prc_count = 0;
   while (p < b.size() && b[p] == 1) {
     if (p + 3 > b.size())
       return std::unexpected(Error{"truncated CLX Prc"});
     size_t n = U16(b, p + 1);
     if (n > b.size() - p - 3)
       return std::unexpected(Error{"truncated CLX grpprl"});
+    if (!Walk(b.subspan(p + 3, n), [](uint16_t, Bytes) {}))
+      return std::unexpected(Error{"invalid CLX grpprl"});
+    if (prcs)
+      prcs->emplace_back(b.begin() + p + 3, b.begin() + p + 3 + n);
+    ++prc_count;
     p += 3 + n;
   }
   if (p + 5 > b.size() || b[p] != 2)
@@ -74,6 +79,9 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
       return std::unexpected(Error{"piece table over-covers WordDocument"});
     emitted += length;
     uint32_t raw = U32(b, desc + 8 * i + 2);
+    uint16_t prm = U16(b, desc + 8 * i + 6);
+    if ((prm & 1) && (prm >> 1) >= prc_count)
+      return std::unexpected(Error{"CLX Prm1 index outside Prc array"});
     bool compressed = raw & kFcCompressed;
     uint64_t start = compressed ? (raw & kFcMask) / 2 : raw & kFcMask;
     uint64_t bytes = static_cast<uint64_t>(length) * (compressed ? 1 : 2);
@@ -87,6 +95,7 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
       if (compressed) {
         // Compressed pieces use the document's ANSI code page (FibBase.lid).
         Char ch{character_cp, fc};
+        ch.prm = prm;
         if (fib.codepage == base::kDefaultCodepage &&
             word[start + j] < kCp1252First) {
           const char value = static_cast<char>(word[start + j]);
@@ -128,6 +137,7 @@ std::expected<std::vector<Char>, Error> ReadChars(Bytes word, Bytes table,
           (c >= kUtf16HighSurrogateMin && c <= kUtf16LowSurrogateMax))
         c = kReplacementCharacter;
       Char ch{character_cp, fc};
+      ch.prm = prm;
       ch.newline = c == 13;
       if (c < kCp1252First) {
         ch.utf8[0] = ch.newline ? '\n' : static_cast<char>(c);

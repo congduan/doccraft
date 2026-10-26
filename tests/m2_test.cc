@@ -21,9 +21,11 @@
 
 #include "cfb/cfb_reader.h"
 #include "doc/fib.h"
+#include "doc/format.h"
 #include "doc/text.h"
 #include "docx/writer.h"
 #include "tests/cfb_test_util.h"
+#include "third_party/miniz/miniz.h"
 
 namespace {
 void Put16(std::vector<uint8_t>& b, size_t p, uint16_t v) {
@@ -71,14 +73,81 @@ TEST(FibTest, RejectsEncryption) {
   EXPECT_NE(fib.error().message.find("unsupported (M6)"), std::string::npos);
 }
 
-TEST(PieceTableTest, RejectsFastSavedDocuments) {
+TEST(PieceTableTest, ReadsFastSavedPiecesAndPrc) {
   auto fib = doccraft::doc::ParseFib(Fib(0x0004));
   ASSERT_TRUE(fib);
+  std::vector<uint8_t> table(100), word(1024);
+  // A Prc followed by the final piece table. The two pieces describe an
+  // insertion before older text, as in an incremental save.
+  fib->lcb_clx = 39;
+  table[40] = 1;
+  Put16(table, 41, 3);
+  table[43] = 0x35;  // sprmCFBold
+  table[44] = 0x08;
+  table[45] = 1;
+  table[46] = 2;
+  Put32(table, 47, 28);
+  Put32(table, 51, 0);
+  Put32(table, 55, 2);
+  Put32(table, 59, 5);
+  Put32(table, 65, 0x40000000u | (520u * 2));
+  Put16(table, 69, 1);  // Prm1 references the first Prc.
+  Put32(table, 73, 0x40000000u | (512u * 2));
+  word[520] = 'N';
+  word[521] = 'e';
+  word[512] = 'w';
+  word[513] = '!';
+  word[514] = '\r';
+  auto text = doccraft::doc::ExtractText(word, table, *fib);
+  ASSERT_TRUE(text) << text.error().message;
+  EXPECT_EQ(*text, "New!\n");
+  auto formatted = doccraft::doc::ParseFormatted(word, table, *fib);
+  ASSERT_TRUE(formatted) << formatted.error().message;
+  ASSERT_FALSE(formatted->paragraphs.empty());
+  ASSERT_GE(formatted->paragraphs[0].runs.size(), 2u);
+  EXPECT_TRUE(formatted->paragraphs[0].runs[0].bold);
+  EXPECT_EQ(formatted->paragraphs[0].runs[0].text, "Ne");
+  EXPECT_EQ(formatted->paragraphs[0].runs[1].text, "w!");
+  auto zip = doccraft::docx::Write(*formatted);
+  ASSERT_TRUE(zip) << zip.error().message;
+  mz_zip_archive archive = {};
+  ASSERT_TRUE(mz_zip_reader_init_mem(&archive, zip->data(), zip->size(), 0));
+  size_t xml_size = 0;
+  void* xml_data = mz_zip_reader_extract_file_to_heap(
+      &archive, "word/document.xml", &xml_size, 0);
+  ASSERT_NE(xml_data, nullptr);
+  std::string xml(static_cast<const char*>(xml_data), xml_size);
+  mz_free(xml_data);
+  mz_zip_reader_end(&archive);
+  EXPECT_NE(xml.find("<w:b"), std::string::npos);
+}
+
+TEST(PieceTableTest, RejectsInvalidFastSavedPrcReference) {
+  auto fib = doccraft::doc::ParseFib(Fib(0x0004));
+  ASSERT_TRUE(fib);
+  fib->lcb_clx = 21;
   std::vector<uint8_t> table(80), word(1024);
+  table[40] = 2;
+  Put32(table, 41, 16);
+  Put32(table, 45, 0);
+  Put32(table, 49, 5);
+  Put32(table, 55, 0x40000000u | (512u * 2));
+  Put16(table, 59, 1);  // Prm1 index zero, but there is no Prc.
   auto text = doccraft::doc::ExtractText(word, table, *fib);
   ASSERT_FALSE(text);
-  EXPECT_NE(text.error().message.find("unsupported (M2 known gap)"),
-            std::string::npos);
+  EXPECT_EQ(text.error().message, "CLX Prm1 index outside Prc array");
+}
+
+TEST(PieceTableTest, RejectsTruncatedFastSavedPrc) {
+  auto fib = doccraft::doc::ParseFib(Fib(0x0004));
+  ASSERT_TRUE(fib);
+  fib->lcb_clx = 3;
+  std::vector<uint8_t> table(80), word(1024);
+  table[40] = 1;
+  Put16(table, 41, 4);
+  auto text = doccraft::doc::ExtractText(word, table, *fib);
+  ASSERT_FALSE(text);
+  EXPECT_EQ(text.error().message, "truncated CLX grpprl");
 }
 
 TEST(PieceTableTest, ReadsCompressedAndUtf16Pieces) {

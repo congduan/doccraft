@@ -28,6 +28,7 @@
 
 namespace doccraft::doc {
 using detail::AppendUtf8;
+using detail::ApplyPara;
 using detail::ApplyRun;
 using detail::Bytes;
 using detail::Char;
@@ -59,7 +60,8 @@ using detail::WalkParagraph;
 std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
                                                      const Fib& fib,
                                                      Bytes data) {
-  auto chars = ReadChars(word, table, fib, fib.ccp_text);
+  std::vector<std::vector<uint8_t>> prcs;
+  auto chars = ReadChars(word, table, fib, fib.ccp_text, 0, &prcs);
   if (!chars)
     return std::unexpected(chars.error());
   auto chpx = ReadFkps(word, table, fib.chpx_bte, false);
@@ -78,6 +80,22 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   size_t next_picture = 0;
   doc.fonts = ReadFonts(table, fib.fonts);
   doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
+  auto apply_piece_run = [&](model::Run& run, uint16_t prm) {
+    if (!(prm & 1))
+      return;
+    Walk(prcs[prm >> 1], [&](uint16_t op, Bytes v) {
+      if ((op >> 10 & 7) == 2)
+        ApplyRun(run, op, v, doc.fonts);
+    });
+  };
+  auto apply_piece_para = [&](model::Paragraph& paragraph, uint16_t prm) {
+    if (!(prm & 1))
+      return;
+    Walk(prcs[prm >> 1], [&](uint16_t op, Bytes v) {
+      if ((op >> 10 & 7) == 1)
+        ApplyPara(paragraph, op, v);
+    });
+  };
   ReadLists(doc, table, fib);
   auto sections_result = ReadSections(word, table, fib);
   if (!sections_result)
@@ -137,6 +155,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   size_t next_section = 0;
   const FormatRange* last_pap = nullptr;
   const FormatRange* last_chp = nullptr;
+  uint16_t last_prm = 0;
   const FormatRange* cached_pap = nullptr;
   const FormatRange* cached_chp = nullptr;
   const FormatRange* table_pap = nullptr;
@@ -327,6 +346,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         // that belongs to the last cell before the row closes.
         if (!para.runs.empty()) {
           ApplyParagraphSprms(para, pap, data);
+          apply_piece_para(para, ch.prm);
           frames.back().cell.blocks.push_back({false, doc.paragraphs.size()});
           doc.paragraphs.push_back(std::move(para));
           para = {};
@@ -340,6 +360,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       } else {
         if (!para.runs.empty()) {
           ApplyParagraphSprms(para, pap, data);
+          apply_piece_para(para, ch.prm);
           frames.back().cell.blocks.push_back({false, doc.paragraphs.size()});
           doc.paragraphs.push_back(std::move(para));
           para = {};
@@ -350,6 +371,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     }
     if (ch.newline) {
       ApplyParagraphSprms(para, pap, data);
+      apply_piece_para(para, ch.prm);
       if (frames.empty())
         add_paragraph(std::move(para));
       else
@@ -361,6 +383,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       if (next_section + 1 < sections.size() &&
           ch.cp + 1 == sections[next_section].first) {
         ApplyParagraphSprms(para, pap, data);
+        apply_piece_para(para, ch.prm);
         add_paragraph(std::move(para));
         para = {};
         doc.section_breaks.emplace_back(doc.paragraphs.size() - 1,
@@ -402,7 +425,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (!text.empty() && control != '\x01' && last_run_count != 0 &&
         para.runs.size() == last_run_count &&
         para.runs.back().image_index < 0 && pap == last_pap &&
-        chp == last_chp && hyperlink == last_hyperlink &&
+        chp == last_chp && ch.prm == last_prm && hyperlink == last_hyperlink &&
         page_field == last_page_field) {
       para.runs.back().text += text;
       continue;
@@ -410,6 +433,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     auto remember_run = [&]() {
       last_pap = pap;
       last_chp = chp;
+      last_prm = ch.prm;
       last_hyperlink = hyperlink;
       last_page_field = page_field;
       last_run_count = para.runs.size();
@@ -431,6 +455,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         }
       });
     }
+    apply_piece_run(r, ch.prm);
     if (control == '\x01' && r.object_offset >= 0 && !r.ole_object &&
         !r.embedded_object && !r.binary_data) {
       auto picture = ReadInlinePicture(
