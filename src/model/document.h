@@ -22,6 +22,14 @@
 #include <vector>
 namespace doccraft::model {
 
+enum class ImageFormat { kPng, kJpeg, kWmf, kEmf };
+
+struct Image {
+  ImageFormat format = ImageFormat::kPng;
+  std::vector<uint8_t> bytes;
+  int width = 0, height = 0;  // Display size in twips.
+};
+
 // Run::field_char markers, matching w:fldChar/@w:fldCharType.
 inline constexpr int kFieldCharBegin = 0;
 inline constexpr int kFieldCharSeparate = 1;
@@ -87,6 +95,7 @@ struct Run {
   // Field instruction text, written as w:instrText between begin and separator.
   std::string instr_text;
   int object_offset = -1;
+  int image_index = -1;  // Index into Document::images for U+0001.
   bool binary_data = false, ole_object = false, embedded_object = false;
   bool revision_insert = false, revision_delete = false,
        property_revision = false;
@@ -308,6 +317,7 @@ struct Table {
 };
 
 struct Document {
+  std::vector<Image> images;
   std::vector<Paragraph> paragraphs;
   std::vector<Style> styles;
   Section section;

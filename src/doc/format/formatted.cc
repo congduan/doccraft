@@ -143,10 +143,12 @@ struct FieldFrame {
 // dedicated element. The comparison itself is Run's defaulted operator== so it
 // stays exhaustive as the model grows.
 bool SameRunFormatting(model::Run& prior, model::Run& r) {
-  if (r.symbol_character >= 0 || r.field_char >= 0 || !r.instr_text.empty()) {
+  if (r.symbol_character >= 0 || r.field_char >= 0 || r.image_index >= 0 ||
+      !r.instr_text.empty()) {
     return false;
   }
-  if (prior.field_char >= 0 || !prior.instr_text.empty()) {
+  if (prior.field_char >= 0 || prior.image_index >= 0 ||
+      !prior.instr_text.empty()) {
     return false;
   }
   std::string text = std::move(prior.text);
@@ -513,7 +515,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     }
     const auto* chp = Find(*chpx, ch.fc);
     if (last_run_count != 0 && para.runs.size() == last_run_count &&
-        pap == last_pap && chp == last_chp && hyperlink == last_hyperlink &&
+        para.runs.back().image_index < 0 && pap == last_pap &&
+        chp == last_chp && hyperlink == last_hyperlink &&
         page_field == last_page_field) {
       para.runs.back().text += ch.text;
       continue;
@@ -541,6 +544,17 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
           ApplyRun(r, op, v, doc.fonts);
         }
       });
+    }
+    if (ch.text == "\x01" && r.object_offset >= 0 && !r.ole_object &&
+        !r.embedded_object) {
+      auto picture = ReadInlinePicture(data, r.object_offset);
+      if (!picture)
+        return std::unexpected(picture.error());
+      r.image_index = static_cast<int>(doc.images.size());
+      doc.images.push_back(std::move(*picture));
+      para.runs.push_back(std::move(r));
+      remember_run();
+      continue;
     }
     if (!para.runs.empty()) {
       auto& back = para.runs.back();

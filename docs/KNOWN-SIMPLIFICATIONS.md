@@ -48,6 +48,10 @@
 - 修订标记（`sprmCFRMarkDel`/`sprmCFRMarkIns`）输出为 `w:del`/`w:ins`，但作者固定写 `doccraft`、时间戳省略：作者名需要 `SttbfRMark`（M4），`w:id` 仅保证文件内自增唯一。
 - `sprmTTlp` 只把 `grfatl` 的 bit5–10 映射为 `w:tblLook`：首行/末行/首列/末列直接对应，band 位按「置位=启用带状」取反为 `noHBand`/`noVBand`；`itl`（自动格式索引）丢弃。
 - `sprmCKcd` 以外的新增字符属性只写单向推导：`sprmCFELayout` 的 `iWarichuBracket` 仅在 `fWarichu` 置位时输出，`sprmCFitText` 的 0 宽度视为未设置。
+
+## M5 当前范围
+
+- 正文内联 `U+0001` 图片按 `sprmCPicLocation` 从 Data 流读取 PICF，扫描嵌入 Escher BLIP 并输出 DrawingML 与原格式媒体部件。PNG/JPEG 有 LibreOffice golden 媒体字节对比及像素对拍；WMF/EMF 的压缩和非压缩 BLIP 有合成位流断言，但尚无 LibreOffice 导出的真实元文件 golden。非嵌入或延迟 BLIP、ObjectPool/OLE、浮动图片、裁剪/边框/旋转，以及页眉、脚注等其他故事中的图片留待后续；遇到正文内联图片的缺失或不支持载荷会显式返回错误。
 - 字符单位缩进（`sprmPDxc*`/`sprmPDyl*`）只写 `w:ind/@*Chars` 与 `w:spacing/@*Lines`，不重复写 twips 绝对值；阅读器若忽略 *Chars 会退回样式默认缩进。
 - `sprmSPgbProp` 的枚举按 0=页面边缘/1=文字、0=全部页/1=首页/2=非首页解释；`reserved` 字节非 0 时整条 sprm 视为损坏。
 - `sprmSFProtected` 只在 `sprmSFProtected` 出现时输出 `w:formProt`（值为「未被保护」的反相），文档级 `DOP.fProtEnabled` 尚未解析，未出现该 sprm 的节不写保护节点。

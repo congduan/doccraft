@@ -24,6 +24,9 @@ namespace doccraft::doc {
 std::expected<model::Document, Error> ParseFormatted(
     std::span<const uint8_t> word, std::span<const uint8_t> table,
     const Fib& fib, std::span<const uint8_t> data = {});
-}
+
+std::expected<model::Image, Error> ReadInlinePicture(
+    std::span<const uint8_t> data, uint32_t offset);
+}  // namespace doccraft::doc
 
 #endif  // SRC_DOC_FORMAT_H_

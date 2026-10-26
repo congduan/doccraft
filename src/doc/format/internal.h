@@ -40,6 +40,43 @@ using base::U32;
 // the largest value Word writes for a page object.
 inline constexpr uint16_t kMaxTwips = 31680;
 
+// [MS-DOC] PICF/PICMID and [MS-ODRAW] OfficeArt record layout.
+inline constexpr size_t kPicfHeaderSize = 68;
+inline constexpr uint16_t kPicfShapeFile = 0x0066;
+inline constexpr size_t kPicfGoalOffset = 28;
+inline constexpr size_t kPicfScaleOffset = 32;
+inline constexpr int kPicfScaleUnit = 1000;
+inline constexpr size_t kEscherHeaderSize = 8;
+inline constexpr uint16_t kEscherContainerVersion = 15;
+inline constexpr uint16_t kEscherVersionMask = 0x000F;
+inline constexpr int kEscherInstanceShift = 4;
+inline constexpr int kEscherMaxDepth = 8;
+inline constexpr uint16_t kEscherFbse = 0xF007;
+inline constexpr size_t kFbseFixedSize = 36;
+inline constexpr size_t kFbseNameLengthOffset = 33;
+inline constexpr uint16_t kBlipEmf = 0xF01A;
+inline constexpr uint16_t kBlipWmf = 0xF01B;
+inline constexpr uint16_t kBlipJpeg = 0xF01D;
+inline constexpr uint16_t kBlipPng = 0xF01E;
+inline constexpr uint16_t kBlipJpegAlt = 0xF02A;
+inline constexpr uint16_t kBlipPngOneUid = 0x6E0;
+inline constexpr uint16_t kBlipPngTwoUids = 0x6E1;
+inline constexpr uint16_t kBlipJpegRgbOneUid = 0x46A;
+inline constexpr uint16_t kBlipJpegRgbTwoUids = 0x46B;
+inline constexpr uint16_t kBlipJpegCmykOneUid = 0x6E2;
+inline constexpr uint16_t kBlipJpegCmykTwoUids = 0x6E3;
+inline constexpr uint16_t kBlipWmfOneUid = 0x216;
+inline constexpr uint16_t kBlipWmfTwoUids = 0x217;
+inline constexpr uint16_t kBlipEmfOneUid = 0x3D4;
+inline constexpr uint16_t kBlipEmfTwoUids = 0x3D5;
+inline constexpr size_t kBlipUidSize = 16;
+inline constexpr size_t kBlipTagSize = 1;
+inline constexpr size_t kMetafileHeaderSize = 34;
+inline constexpr size_t kMetafileCompressionOffset = 32;
+inline constexpr uint8_t kMetafileDeflate = 0;
+inline constexpr uint8_t kMetafileUncompressed = 0xFE;
+inline constexpr size_t kMaxImageSize = 64 * 1024 * 1024;
+
 // Operands that mean "absent"/"automatic" carry a saturated value instead of a
 // separate flag.
 inline constexpr uint16_t kUndefinedU16 = 0xFFFF;

@@ -182,7 +182,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ◐ 单元格边框/底纹/边距/对齐/文字方向/浮动表格（sprmTPc 锚点、sprmTTlp 表样式选项）、单元格内多段落与嵌套表格（按 sprmPItap 深度递归）；缺 sprmPItap 的样本仍按单层输出
 
 ### 6.6 对象与图形
-- ☐ 内联图片（PICF + Escher BLIP：png/jpg/wmf/emf 提取与格式保留）
+- ✅ 内联图片（PICF + Escher BLIP：png/jpg/wmf/emf 提取与格式保留；正文图片，其他故事与非嵌入 BLIP 限制见 KNOWN-SIMPLIFICATIONS）
 - ☐ 浮动图片与文字环绕（Escher anchor + 环绕类型映射）
 - ☐ 文本框（Ftxbx/textbox 文本链）
 - ☐ 基本形状/艺术字占位（可降级为占位图，文档化降级策略）

@@ -12,6 +12,80 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+const char* ImageExtension(model::ImageFormat format) {
+  switch (format) {
+    case model::ImageFormat::kPng:
+      return "png";
+    case model::ImageFormat::kJpeg:
+      return "jpg";
+    case model::ImageFormat::kWmf:
+      return "wmf";
+    case model::ImageFormat::kEmf:
+      return "emf";
+  }
+  return "png";
+}
+
+void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
+  if (!ctx.document || index < 0 ||
+      static_cast<size_t>(index) >= ctx.document->images.size())
+    return;
+  const model::Image& image = ctx.document->images[index];
+  if (ctx.image_rids[index] == 0) {
+    const int number = index + 1;
+    std::string name = "media/image" + std::to_string(number) + "." +
+                       ImageExtension(image.format);
+    ctx.image_rids[index] = ctx.next_rid++;
+    ctx.relations.emplace_back(ctx.image_rids[index], name);
+    ctx.parts.push_back(
+        {name, std::string(image.bytes.begin(), image.bytes.end())});
+  }
+  constexpr int64_t kEmuPerTwip = 635;
+  const int64_t width = static_cast<int64_t>(image.width) * kEmuPerTwip;
+  const int64_t height = static_cast<int64_t>(image.height) * kEmuPerTwip;
+  auto inline_node = run.append_child("w:drawing").append_child("wp:inline");
+  Attr(inline_node, "distT", "0");
+  Attr(inline_node, "distB", "0");
+  Attr(inline_node, "distL", "0");
+  Attr(inline_node, "distR", "0");
+  auto extent = inline_node.append_child("wp:extent");
+  Attr(extent, "cx", std::to_string(width));
+  Attr(extent, "cy", std::to_string(height));
+  auto effect = inline_node.append_child("wp:effectExtent");
+  Attr(effect, "l", "0");
+  Attr(effect, "t", "0");
+  Attr(effect, "r", "0");
+  Attr(effect, "b", "0");
+  auto doc_pr = inline_node.append_child("wp:docPr");
+  IntAttr(doc_pr, "id", index + 1);
+  Attr(doc_pr, "name", "Picture " + std::to_string(index + 1));
+  inline_node.append_child("wp:cNvGraphicFramePr");
+  auto graphic = inline_node.append_child("a:graphic");
+  auto graphic_data = graphic.append_child("a:graphicData");
+  Attr(graphic_data, "uri",
+       "http://schemas.openxmlformats.org/drawingml/2006/picture");
+  auto pic = graphic_data.append_child("pic:pic");
+  auto nv = pic.append_child("pic:nvPicPr");
+  auto nv_pr = nv.append_child("pic:cNvPr");
+  IntAttr(nv_pr, "id", index + 1);
+  Attr(nv_pr, "name", "image" + std::to_string(index + 1));
+  nv.append_child("pic:cNvPicPr");
+  auto fill = pic.append_child("pic:blipFill");
+  Attr(fill.append_child("a:blip"), "r:embed",
+       "rId" + std::to_string(ctx.image_rids[index]));
+  auto stretch = fill.append_child("a:stretch");
+  stretch.append_child("a:fillRect");
+  auto sp_pr = pic.append_child("pic:spPr");
+  auto xfrm = sp_pr.append_child("a:xfrm");
+  auto off = xfrm.append_child("a:off");
+  Attr(off, "x", "0");
+  Attr(off, "y", "0");
+  auto ext = xfrm.append_child("a:ext");
+  Attr(ext, "cx", std::to_string(width));
+  Attr(ext, "cy", std::to_string(height));
+  Attr(sp_pr.append_child("a:prstGeom"), "prst", "rect");
+}
+
 void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
                     const model::Section* break_section, WriteContext& ctx) {
   auto pn = parent.append_child("w:p");
@@ -58,6 +132,8 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
     if (r.comment_ref >= 0) {
       IntAttr(rn.append_child("w:commentRangeEnd"), "w:id", r.comment_ref);
       IntAttr(rn.append_child("w:commentReference"), "w:id", r.comment_ref);
+    } else if (r.image_index >= 0) {
+      WriteImage(rn, r.image_index, ctx);
     } else if (r.note_ref >= 0) {
       // A note reference is an empty run carrying the reference element.
       IntAttr(rn.append_child(r.note_endnote ? "w:endnoteReference"
@@ -86,4 +162,3 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
     }
   }
 }
-

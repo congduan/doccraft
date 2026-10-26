@@ -14,7 +14,7 @@
 | ✅ | `0x0800` | sprmCFRMarkDel | A ToggleOperand that specifies whether the text is formatted as deleted revision mark text, which is text that was deleted while revision marking was on. | 字符 CHP §2.6.1；M3Batch8.RevisionMarksWrapRuns |
 | ✅ | `0x0801` | sprmCFRMarkIns | A ToggleOperand that specifies whether the text is formatted as inserted revision mark text, which is text that was inserted while revision marking was on. | 字符 CHP §2.6.1；M3Batch8.RevisionMarksWrapRuns |
 | ✅ | `0x0802` | sprmCFFldVanish | A ToggleOperand that specifies whether the field text is hidden. | 字符 CHP §2.6.1；M3Batch7.HiddenTextSources |
-| N/A | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage. | 字符 CHP §2.6.1；图片/OLE 载荷位置；BLIP 提取与 w:drawing 输出属 M5 图片链，本层仅存 object_offset |
+| ✅ | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage. | 字符 CHP §2.6.1；正文内联图片 Data 偏移、PICF/BLIP 到 `w:drawing`；M5InlineImages.LibreOfficeGoldenKeepsMediaBytes；OLE 分支仍属 M5 后续 |
 | N/A | `0x4804` | sprmCIbstRMark | A signed 16-bit integer that specifies a zero-based index into SttbfRMark.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | N/A | `0x6805` | sprmCDttmRMark | A DTTM that specifies the date and time at which the text was inserted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | N/A | `0x0806` | sprmCFData | A Bool8 that specifies whether the picture character in the text represents binary data. | 字符 CHP §2.6.1；图片二进制标记；载荷同 sprmCPicLocation，随 M5 图片链输出 |
@@ -345,15 +345,15 @@
 
 | 类别 | 总数 | ✅ | ◐ | ☐ | N/A | 覆盖率（✅ / 适用项） |
 |---|---:|---:|---:|---:|---:|---:|
-| 字符 CHP | 84 | 58 | 0 | 0 | 26 | 100% |
+| 字符 CHP | 84 | 59 | 0 | 0 | 25 | 100% |
 | 段落 PAP | 91 | 78 | 0 | 0 | 13 | 100% |
 | 表格 TAP | 80 | 73 | 0 | 0 | 7 | 100% |
 | 节 SEP | 59 | 55 | 0 | 0 | 4 | 100% |
-| **合计** | 314 | 264 | 0 | 0 | 50 | 100% |
+| **合计** | 314 | 265 | 0 | 0 | 49 | 100% |
 
 **口径说明（重要）**：本表只统计 [MS-DOC] §2.6 四张 sprm 表的**属性**覆盖。✅ 表示该 opcode 的解析、IR 字段与 OOXML 输出齐备且有一条断言（相当比例是合成位流断言，而非真实 Word 文档）。它**不等于**格式还原率或产品完成度：结构级特性（图片、文本框、OLE、脚注尾注批注书签、嵌套表格、多节页眉页脚、fast-save、加密）不在本表计数内，见 `DESIGN.md` §6 与 `KNOWN-SIMPLIFICATIONS.md`。
 
-基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，覆盖率达到 100%；后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现（264 / 264 适用项）。
+基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，覆盖率达到 100%；后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现（当前 265 / 265 适用项）。
 
 ## 规范外旧账别名（不计入 314）
 
@@ -429,11 +429,11 @@
 | 行边框颜色 | `0xD61A`–`0xD61D` | 逐单元格 Brc 的 `w:color` |
 | 页面边框/保护 | `0x522F` `0x3006` `0x702C` `0x702D` `0xD235` `0xD236` | `w:pgBorders/@w:offsetFrom+@w:display`、`<w:formProt>`、左右页边框 |
 
-### 6.1 N/A 归类明细（29 项）
+### 6.1 N/A 归类明细（第 8 批 29 项，M5 已转实现 1 项）
 
 | 类别 | opcode | 理由 |
 |---|---|---|
-| M5 图片/OLE 载荷 | `0x6A03` `0x0806` `0x080A` `0x0856` `0x0855` `0x6887` `0x4888` `0x2471` | BLIP/OLE/图片项目符号/文本框环绕需要 M5 的 media 与 drawing 链，本层只保留操作数 |
+| M5 图片/OLE 载荷 | `0x0806` `0x080A` `0x0856` `0x0855` `0x6887` `0x4888` `0x2471` | 非图片二进制/OLE/图片项目符号/文本框环绕仍待 M5 后续；`0x6A03` 的正文图片分支已实现 |
 | M4 修订元数据 | `0xCA89` | 作者与时间戳需要 SttbfRMark，与 `sprmCPropRMark90` 同处理 |
 | 规范允许忽略 | `0xC81A` | §2.6.1 脚注 145 允许实现忽略；公式由 OMML 重排 |
 | 编辑期/增量保存内部状态 | `0xC601` `0xCA31` `0x244B` `0x245A` `0x6465` `0x7469` `0xCA47` | 样式置换表、嵌套表簿记、PGPInfo id；docx 用显式结构或同源读取表达，最终格式等价 |

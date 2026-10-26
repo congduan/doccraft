@@ -102,6 +102,8 @@ struct Part {
 // the header/footer parts discovered while walking the sections. rId1/rId2 are
 // reserved for the styles and numbering parts.
 struct WriteContext {
+  const model::Document* document = nullptr;
+  std::vector<int> image_rids;
   std::map<std::string, int> hyperlinks;
   int revision_id = 0;
   int next_rid = 3;
@@ -134,8 +136,17 @@ bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
 
 std::string BuildContentTypes(const WriteContext& ctx) {
   std::string out = kContentTypesPrefix;
+  if (ctx.document && !ctx.document->images.empty()) {
+    out +=
+        "<Default Extension=\"png\" ContentType=\"image/png\"/>"
+        "<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>"
+        "<Default Extension=\"wmf\" ContentType=\"image/x-wmf\"/>"
+        "<Default Extension=\"emf\" ContentType=\"image/x-emf\"/>";
+  }
   for (const auto& part : ctx.parts) {
     bool header = part.name.starts_with("header");
+    if (!header && !part.name.starts_with("footer"))
+      continue;
     out += "<Override PartName=\"/word/" + part.name +
            "\" "
            "ContentType=\"application/"
@@ -187,6 +198,8 @@ pugi::xml_document BuildRelationships(const WriteContext& ctx) {
     const char* type = "footer";
     if (target.starts_with("header")) {
       type = "header";
+    } else if (target.starts_with("media/")) {
+      type = "image";
     } else if (target == "footnotes.xml") {
       type = "footnotes";
     } else if (target == "endnotes.xml") {
@@ -256,10 +269,19 @@ std::expected<std::vector<uint8_t>, Error> Write(
   using Clock = std::chrono::steady_clock;
   const auto t_start = Clock::now();
   WriteContext ctx;
+  ctx.document = &document;
+  ctx.image_rids.resize(document.images.size());
   pugi::xml_document doc;
   auto root = doc.append_child("w:document");
   Attr(root, "xmlns:w", kWordmlNamespace);
   Attr(root, "xmlns:r", kRelationshipsNamespace);
+  Attr(
+      root, "xmlns:wp",
+      "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing");
+  Attr(root, "xmlns:a",
+       "http://schemas.openxmlformats.org/drawingml/2006/main");
+  Attr(root, "xmlns:pic",
+       "http://schemas.openxmlformats.org/drawingml/2006/picture");
   auto body = root.append_child("w:body");
   WriteBody(body, document, ctx);
 

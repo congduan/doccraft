@@ -73,6 +73,11 @@ target_link_libraries(m3_bookmarks_test PRIVATE doccraft_cfb doccraft_doc doccra
 target_compile_definitions(m3_bookmarks_test PRIVATE DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m3_bookmarks_test)
 
+add_executable(m5_inline_images_test m5_inline_images_test.cc)
+target_link_libraries(m5_inline_images_test PRIVATE doccraft_cfb doccraft_doc doccraft_docx gtest_main)
+target_compile_definitions(m5_inline_images_test PRIVATE DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(m5_inline_images_test)
+
 # Standalone corpus builder for the 50 MiB performance envelope.
 add_executable(perf_repack perf/repack_doc.cc cfb_test_util.cc)
 target_link_libraries(perf_repack PRIVATE doccraft_cfb)
