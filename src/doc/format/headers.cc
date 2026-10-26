@@ -46,10 +46,12 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
     return out;
   }
   model::Paragraph para;
-  for (const auto& ch : chars) {
-    if (ch.cp < base + first || ch.cp >= base + last - 1) {
-      continue;
-    }
+  auto start = std::lower_bound(chars.begin(), chars.end(), base + first,
+                                [](const Char& ch, uint64_t cp) {
+                                  return ch.cp < cp;
+                                });
+  for (auto it = start; it != chars.end() && it->cp < base + last - 1; ++it) {
+    const Char& ch = *it;
     if (ch.newline) {
       if (const auto* x = Find(papx, ch.fc)) {
         para.style = x->style;
