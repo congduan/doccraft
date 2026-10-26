@@ -208,6 +208,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   };
   for (size_t i = 0; i < chars->size(); i++) {
     const Char& ch = (*chars)[i];
+    const auto text = ch.text();
+    const char control = text.size() == 1 ? text[0] : '\0';
     emit_bookmarks(ch.cp);
     // The hyperlink/page target of a field applies to the runs after its
     // separator; pop restores the enclosing field's target.
@@ -234,12 +236,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       marker.instr_text = text;
       para.runs.push_back(std::move(marker));
     };
-    if (ch.text() == "\x13") {
+    if (control == '\x13') {
       fields.push_back({});
       continue;
     }
-    if (!fields.empty() && fields.back().in_instruction &&
-        ch.text() == "\x14") {
+    if (!fields.empty() && fields.back().in_instruction && control == '\x14') {
       FieldFrame& frame = fields.back();
       frame.in_instruction = false;
       ApplyFieldInstruction(frame.instruction, &frame.hyperlink, &frame.page);
@@ -259,7 +260,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       sync_field_state();
       continue;
     }
-    if (!fields.empty() && ch.text() == "\x15") {
+    if (!fields.empty() && control == '\x15') {
       // A field that closes before its separator is malformed: keep its
       // instruction as an unmatched begin/end pair instead of dropping it.
       if (fields.back().mode == FieldMode::kPending) {
@@ -274,7 +275,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       continue;
     }
     if (!fields.empty() && fields.back().in_instruction) {
-      fields.back().instruction += ch.text();
+      fields.back().instruction += text;
       continue;
     }
     if (next_picture < floating->size() &&
@@ -285,7 +286,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       para.runs.push_back(std::move(picture_run));
       last_run_count = 0;
     }
-    if (ch.text() == "\x08")
+    if (control == '\x08')
       continue;
     const auto* pap =
         cached_pap && ch.fc >= cached_pap->first && ch.fc < cached_pap->last
@@ -318,7 +319,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
           cached_depth > 0 ? cached_depth : (cached_table_flag ? 1 : 0);
       set_table_depth(wanted);
     }
-    if (ch.text() == "\x07") {
+    if (control == '\x07') {
       if (frames.empty())
         set_table_depth(1);
       if (cached_row_end) {
@@ -356,7 +357,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       para = {};
       continue;
     }
-    if (ch.text().size() == 1 && ch.text()[0] == '\x0c') {
+    if (control == '\x0c') {
       if (next_section + 1 < sections.size() &&
           ch.cp + 1 == sections[next_section].first) {
         ApplyParagraphSprms(para, pap, data);
@@ -373,7 +374,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       continue;
     }
-    if (ch.text() == "\x05") {
+    if (control == '\x05') {
       // Comment reference mark: the comment itself is written to comments.xml.
       auto found = comment_index.find(ch.cp);
       if (found != comment_index.end()) {
@@ -383,7 +384,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       continue;
     }
-    if (ch.text() == "\x02") {
+    if (control == '\x02') {
       auto found = note_index.find(ch.cp);
       if (found != note_index.end()) {
         model::Run note;
@@ -398,12 +399,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
             ? cached_chp
             : Find(*chpx, ch.fc);
     cached_chp = chp;
-    if (!ch.text().empty() && ch.text() != "\x01" && last_run_count != 0 &&
+    if (!text.empty() && control != '\x01' && last_run_count != 0 &&
         para.runs.size() == last_run_count &&
         para.runs.back().image_index < 0 && pap == last_pap &&
         chp == last_chp && hyperlink == last_hyperlink &&
         page_field == last_page_field) {
-      para.runs.back().text += ch.text();
+      para.runs.back().text += text;
       continue;
     }
     auto remember_run = [&]() {
@@ -430,7 +431,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         }
       });
     }
-    if (ch.text() == "\x01" && r.object_offset >= 0 && !r.ole_object &&
+    if (control == '\x01' && r.object_offset >= 0 && !r.ole_object &&
         !r.embedded_object && !r.binary_data) {
       auto picture = ReadInlinePicture(
           data, r.object_offset, detail::kMaxTotalImageSize - total_image_size);
@@ -448,12 +449,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (!para.runs.empty()) {
       auto& back = para.runs.back();
       if (SameRunFormatting(back, r)) {
-        back.text += ch.text();
+        back.text += text;
         remember_run();
         continue;
       }
     }
-    r.text = ch.text();
+    r.text = text;
     para.runs.push_back(std::move(r));
     remember_run();
   }
