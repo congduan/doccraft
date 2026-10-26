@@ -279,6 +279,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   bool page_field = false;
   std::string hyperlink;
   size_t next_section = 0;
+  const FormatRange* last_pap = nullptr;
+  const FormatRange* last_chp = nullptr;
+  std::string last_hyperlink;
+  bool last_page_field = false;
+  size_t last_run_count = 0;
   auto add_paragraph = [&](model::Paragraph value) {
     doc.blocks.push_back({false, doc.paragraphs.size()});
     doc.paragraphs.push_back(std::move(value));
@@ -506,6 +511,20 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       continue;
     }
+    const auto* chp = Find(*chpx, ch.fc);
+    if (last_run_count != 0 && para.runs.size() == last_run_count &&
+        pap == last_pap && chp == last_chp && hyperlink == last_hyperlink &&
+        page_field == last_page_field) {
+      para.runs.back().text += ch.text;
+      continue;
+    }
+    auto remember_run = [&]() {
+      last_pap = pap;
+      last_chp = chp;
+      last_hyperlink = hyperlink;
+      last_page_field = page_field;
+      last_run_count = para.runs.size();
+    };
     auto baseline = [&]() {
       model::Run value = pap ? InheritedRun(doc, pap->style) : model::Run{};
       value.hyperlink = hyperlink;
@@ -513,8 +532,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       return value;
     };
     model::Run r = baseline();
-    if (const auto* x = Find(*chpx, ch.fc)) {
-      Walk(x->sprms, [&](uint16_t op, Bytes v) {
+    if (chp) {
+      Walk(chp->sprms, [&](uint16_t op, Bytes v) {
         // sprmCPlain discards direct character formatting accumulated so far.
         if (op == kSprmCPlain) {
           r = baseline();
@@ -527,11 +546,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       auto& back = para.runs.back();
       if (SameRunFormatting(back, r)) {
         back.text += ch.text;
+        remember_run();
         continue;
       }
     }
     r.text = ch.text;
     para.runs.push_back(std::move(r));
+    remember_run();
   }
   while (!frames.empty())
     close_table();
