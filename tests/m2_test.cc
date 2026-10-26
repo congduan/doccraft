@@ -154,6 +154,18 @@ TEST(PieceTableTest, RejectsTruncatedFastSavedPrc) {
   EXPECT_EQ(text.error().message, "truncated CLX grpprl");
 }
 
+TEST(PieceTableTest, RejectsOversizedFastSavedPrc) {
+  auto fib = doccraft::doc::ParseFib(Fib(0x0004));
+  ASSERT_TRUE(fib);
+  fib->lcb_clx = 3;
+  std::vector<uint8_t> table(80), word(1024);
+  table[40] = 1;
+  Put16(table, 41, 0x3FA3);
+  auto text = doccraft::doc::ExtractText(word, table, *fib);
+  ASSERT_FALSE(text);
+  EXPECT_EQ(text.error().message, "invalid CLX Prc size");
+}
+
 TEST(PieceTableTest, ReadsCompressedAndUtf16Pieces) {
   auto fib = doccraft::doc::ParseFib(Fib());
   ASSERT_TRUE(fib);

@@ -43,6 +43,9 @@ std::expected<std::vector<Char>, Error> ReadChars(
     if (p + 3 > b.size())
       return std::unexpected(Error{"truncated CLX Prc"});
     size_t n = U16(b, p + 1);
+    // [MS-DOC] §2.9.210: cbGrpprl is signed and at most 0x3FA2.
+    if (n > 0x3FA2)
+      return std::unexpected(Error{"invalid CLX Prc size"});
     if (n > b.size() - p - 3)
       return std::unexpected(Error{"truncated CLX grpprl"});
     if (!Walk(b.subspan(p + 3, n), [](uint16_t, Bytes) {}))
