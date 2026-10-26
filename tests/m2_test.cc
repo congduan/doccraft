@@ -70,7 +70,11 @@ TEST(FibTest, ParsesFlagsAndOffsets) {
 TEST(FibTest, RejectsEncryption) {
   auto fib = doccraft::doc::ParseFib(Fib(0x0100));
   ASSERT_FALSE(fib.has_value());
-  EXPECT_NE(fib.error().message.find("unsupported (M6)"), std::string::npos);
+  EXPECT_EQ(fib.error().message,
+            "RC4 or RC4 CryptoAPI encryption unsupported (M6)");
+  auto xor_fib = doccraft::doc::ParseFib(Fib(0x8100));
+  ASSERT_FALSE(xor_fib.has_value());
+  EXPECT_EQ(xor_fib.error().message, "XOR obfuscation unsupported (M6)");
 }
 
 TEST(PieceTableTest, ReadsFastSavedPiecesAndPrc) {

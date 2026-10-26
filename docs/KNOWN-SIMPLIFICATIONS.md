@@ -19,6 +19,10 @@
 - U+FFFE/U+FFFF 不在 XML 1.0 Char 产生式内，替换为 U+FFFD 而非报错（防止损坏文件产出 not-well-formed 的 document.xml）。
 - 孤立 UTF-16 代理项（未配对的 high/low surrogate）同样替换为 U+FFFD 而不报错。文本抽取路径原先是报错，现在与格式化路径共用唯一的 CLX 读取器 `doc::detail::ReadChars`，因此单字符损坏不再使整篇转换失败。
 
+## M4 当前范围
+
+- FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族，错误信息已明确指出两类；RC4 和 RC4 CryptoAPI 的子类型需读取 Table 流的 EncryptionHeader，当前 `ParseFib` 只接收 WordDocument 流，故尚不细分。未提供密码参数，也不能判断口令错误；§6.8 保持 ◐。
+
 ## M3 当前范围
 
 - 大于约 7 MiB 的 LibreOffice 导出 `.doc` 使用 DIFAT 扩展，最后一个 DIFAT 扇区的 next 字段写 `FREESECT`；[MS-CFB] §2.5 要求 `ENDOFCHAIN`。读取器仅在声明的 DIFAT 扇区数已走完且 FAT 扇区数匹配时兼容这个终止符。合成测试 `CfbReaderTest.ReadsLibreOfficeFreeTerminatedDifat` 与 20/50 MiB 语料覆盖此兼容路径。

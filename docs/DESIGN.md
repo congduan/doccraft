@@ -196,7 +196,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ### 6.8 加密
 - ☐ RC4 加密文档解密（口令参数）
-- ☐ 错误口令的明确报错/加密类型检测报告
+- ◐ 加密类型检测报告：FIB 可区分 XOR 与 RC4 家族并明确拒绝；RC4/RC4 CryptoAPI 子类型与错误口令报告待 M6 解密入口
 
 ### 6.9 健壮性
 - 性能实测基线见 [perf-baseline.md](perf-baseline.md)；当前 50 MiB 样本超过 5 s 目标，后续优化以分阶段计时为依据。
