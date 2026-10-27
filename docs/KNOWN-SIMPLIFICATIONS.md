@@ -23,7 +23,7 @@
 ## M4 当前范围
 
 - Apache POI 的 `Bug33519.doc`（FIB `fComplex=1`）在压力语料中，旧版本将表格拆成 60 个；按段落结束符 PAPX 选择表格状态后为 3 个。以同一 LibreOffice TXT 导出流程对照源文件，旧、新 DOCX 均为 691/691 词且词序一致率 1.000；压力目录中旧 `.our.txt` 的 0.862 是单元格边界被抽取脚本直接拼接造成的口径差异。`M4FastSaved.ParagraphMarkPapKeepsFastSavedCellsTogether` 覆盖文字和结束符落在不同 FC 的情况。该修复尚不能保证 fast-saved 的版式 golden，§6.1 保持 ◐。
-- FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族；Table 流头部进一步区分传统 RC4 与 RC4 CryptoAPI。XOR obfuscation 仍只报告并拒绝转换。
+- FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族；Table 流头部进一步区分传统 RC4 与 RC4 CryptoAPI。XOR obfuscation 已支持 ASCII 1–15 字节口令，按规范校验 FibBase.lKey 并解密 WordDocument、Table、Data 流；非 ASCII 口令暂明确拒绝，尚无真实 Word 生成的 XOR 样本互通验证。
 
 ## Word 6/95 读取边界
 

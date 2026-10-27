@@ -138,7 +138,9 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
   - RC4 CryptoAPI 版本 2–4.2：UTF-16LE 口令与盐作 SHA-1，按块号再散列；
     40-bit 密钥按规范补零。两种模式均先验证加密 verifier，再解密
     WordDocument（前 68 字节明文）、Table（头部明文）与 Data 流。
-- XOR obfuscation（Word 95 遗留）仅检测报告，不做转换（明示不支持原因）
+- XOR obfuscation：[MS-DOC] §2.2.6.1、[MS-OFFCRYPTO] §2.3.7.4–2.3.7.6；
+  校验 FibBase.lKey 的 32 位验证值，按 16 字节遮罩解密 WordDocument（前
+  68 字节保留明文）、Table 与 Data 流。当前口令输入限 ASCII 1–15 字节。
 - ECMA-376 agile encryption 的 doc-in-docx 混合容器：识别并提示
 - 验证语料：一组已知口令的真实加密 .doc（Word 2003/2007 生成）
 
@@ -199,6 +201,9 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ◐ 直接格式 vs 样式格式的优先级正确叠加（表样式条件格式已按 [MS-DOC] 2.4.6.6 的条带、列、行、角顺序输出；段落/字符/编号链仍未完整按规范求值）
 
 ### 6.8 加密
+- ◐ XOR obfuscation 解密（`--password`）：ASCII 1–15 字节口令的合成 `.doc`
+  fixture 与明文 `document.xml` 逐字节一致（`m16_xor_cli`）；非 ASCII 口令及
+  真实 Word 生成样本仍待覆盖。
 - ✅ RC4 加密文档解密（`--password`）：传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；`m6_rc4_cli` 与 `M6Rc4.*`。符合性经规范原文与 LibreOffice 参考实现复核；真实 Word 加密样本互通待补
 - ✅ 加密类型检测报告：XOR、传统 RC4、RC4 CryptoAPI 分别报告；缺口令与错误口令均明确报错（`m6_rc4_cli`）
 
