@@ -198,7 +198,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ◐ 直接格式 vs 样式格式的优先级正确叠加（条件格式按出现顺序合并，未按 2.4.6 排序）
 
 ### 6.8 加密
-- ✅ RC4 加密文档解密（`--password`）：传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；`m6_rc4_cli` 与 `M6Rc4.*`
+- ✅ RC4 加密文档解密（`--password`）：传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；`m6_rc4_cli` 与 `M6Rc4.*`。符合性经规范原文与 LibreOffice 参考实现复核；真实 Word 加密样本互通待补
 - ✅ 加密类型检测报告：XOR、传统 RC4、RC4 CryptoAPI 分别报告；缺口令与错误口令均明确报错（`m6_rc4_cli`）
 
 ### 6.9 健壮性

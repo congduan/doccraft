@@ -25,10 +25,14 @@
 - Apache POI 测试语料中的真实 `Bug33519.doc`（FIB `fComplex=1`、`cQuickSaves=8`）已经转换成功；LibreOffice 从源 `.doc` 与转换后 `.docx` 导出的 UTF-8 文本逐字一致（4520 字符）。该文件像素对拍源为 3 页、输出为 4 页，格式 golden 未通过，因此 fast-saved 不标 ✅。语料来源：<https://svn.apache.org/repos/asf/poi/tags/REL_3_17_FINAL/test-data/document/Bug33519.doc>；原样本未复制进仓库。
 - FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族；Table 流头部进一步区分传统 RC4 与 RC4 CryptoAPI。XOR obfuscation 仍只报告并拒绝转换。
 
+## M6 设计取舍
+
+- §2.1 原定「加密原语用成熟实现、密码学不自造」已反转为按 RFC 6229、RFC 1321、FIPS 180-4 自实现并以标准向量钉死：RC4/MD5/SHA-1 各 <150 行，引 OpenSSL 会破坏单二进制零运行时依赖的发布承诺。
+
 ## M6 加密
 
-- RC4 回归样本由 `m6_fixture_gen` 从仓库明文样本反向加密，分别覆盖传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；verifier、错误口令、跨块解密和 `document.xml` 与明文逐字节一致已验证。尚未获得 Word 实际加密导出的 `.doc` 作外部互通验证。
-- 仅转换 WordDocument、Table、Data 主流。RC4 CryptoAPI 的独立加密属性流（当 `fDocProps=0` 时）不迁移到 OOXML 元数据；嵌入对象在加密文档中的独立存储兼容性尚未验证。
+- RC4 回归样本由 `m6_fixture_gen` 从仓库明文样本反向加密，分别覆盖传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；verifier、错误口令、跨块解密和 `document.xml` 与明文逐字节一致已验证。40-bit CryptoAPI（含 KeySize=0 缺省）由 `M6Rc4.DecryptsCryptoApi40BitKeyVariants` 合成用例覆盖。尚未获得 Word 实际加密导出的 `.doc` 作外部互通验证。
+- 仅转换 WordDocument、Table、Data 主流。RC4 CryptoAPI 的独立加密属性流（按 [MS-DOC] 2.2.6.3 在 `fDocProps` 置位时出现；[MS-OFFCRYPTO] 2.3.5.1 措辞与其相悖，通行实现按 [MS-DOC] 极性）不迁移到 OOXML 元数据；嵌入对象在加密文档中的独立存储兼容性尚未验证。
 - 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉、脚注等其他故事的字段 PLC 尚未接入，故 §6.1 域项保持 ◐。
 
 ## M3 当前范围
