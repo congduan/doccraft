@@ -522,8 +522,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     });
     // Depth is authoritative when present; otherwise fInTable means one
     // level. Character-only piece modifiers do not change table structure.
+    // sprmPItap operands are attacker-controlled 16-bit values, so the frame
+    // stack honours the same kMaxTableDepth clamp as the model field; an
+    // unclamped depth builds a nesting chain the writer cannot traverse.
     if (pap || piece_table_set) {
-      const int wanted = depth > 0 ? depth : (in_table ? 1 : 0);
+      const int bounded = std::min(depth, detail::kMaxTableDepth);
+      const int wanted = bounded > 0 ? bounded : (in_table ? 1 : 0);
       set_table_depth(wanted);
     }
     if (control == '\x07') {
