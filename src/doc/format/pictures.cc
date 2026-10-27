@@ -215,6 +215,62 @@ std::expected<model::Image, Error> ReadInlinePicture(Bytes data,
   return image;
 }
 
+std::expected<std::optional<model::Image>, Error> ReadOlePresentation(
+    Bytes stream, size_t budget) {
+  if (stream.size() < detail::kOlePresentationPrefix)
+    return std::unexpected(Error{"truncated OLE presentation"});
+  const uint32_t marker = U32(stream, 0);
+  if (marker != detail::kOleClipboardMarker &&
+      marker != detail::kOleClipboardMarkerAlt)
+    return std::nullopt;
+  const uint32_t format = U32(stream, 4);
+  if (format != detail::kOleClipboardWmf && format != detail::kOleClipboardEmf)
+    return std::nullopt;
+  const uint32_t target_size = U32(stream, 8);
+  if (target_size < 4 || target_size > stream.size() - 8 ||
+      stream.size() - 8 - target_size < detail::kOlePresentationPrefix - 12)
+    return std::unexpected(Error{"invalid OLE target device size"});
+  const size_t fields = 8 + target_size;
+  const int32_t width = base::S32(stream, fields + 16);
+  const int32_t height = base::S32(stream, fields + 20);
+  const uint32_t size = U32(stream, fields + 24);
+  const size_t start = fields + 28;
+  if (width <= 0 || height <= 0 || size == 0 || size > detail::kMaxImageSize ||
+      size > stream.size() - start)
+    return std::unexpected(
+        Error{"invalid OLE presentation dimensions or size"});
+  if (size > budget)
+    return std::unexpected(Error{"total image size exceeds limit"});
+  Bytes payload = stream.subspan(start, size);
+  if (format == detail::kOleClipboardEmf) {
+    if (payload.size() < detail::kEmfHeaderBytes ||
+        U32(payload, 0) != detail::kEmfHeaderType ||
+        U32(payload, 4) < detail::kEmfHeaderBytes ||
+        U32(payload, 4) > payload.size() ||
+        U32(payload, detail::kEmfSignatureOffset) != detail::kEmfSignature)
+      return std::unexpected(Error{"invalid OLE EMF preview"});
+  } else if (payload.size() < detail::kWmfHeaderBytes ||
+             U16(payload, 2) != detail::kWmfHeaderWords ||
+             (U16(payload, 4) != detail::kWmfVersion1 &&
+              U16(payload, 4) != detail::kWmfVersion3) ||
+             stream.size() - start - size < detail::kOleWmfTrailer) {
+    return std::unexpected(Error{"invalid OLE WMF preview"});
+  }
+  const int64_t twip_width =
+      int64_t{width} * detail::kTwipsPerInch / detail::kOleHimetricPerInch;
+  const int64_t twip_height =
+      int64_t{height} * detail::kTwipsPerInch / detail::kOleHimetricPerInch;
+  if (twip_width <= 0 || twip_height <= 0 || twip_width > detail::kMaxTwips ||
+      twip_height > detail::kMaxTwips)
+    return std::unexpected(Error{"OLE preview dimensions exceed limit"});
+  model::Image image;
+  image.format = format == detail::kOleClipboardEmf ? model::ImageFormat::kEmf
+                                                    : model::ImageFormat::kWmf;
+  image.width = static_cast<int>(twip_width);
+  image.height = static_cast<int>(twip_height);
+  image.bytes.assign(payload.begin(), payload.end());
+  return image;
+}
 namespace {
 struct ArtRecord {
   uint16_t type = 0, instance = 0, version = 0;

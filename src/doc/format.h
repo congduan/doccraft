@@ -25,12 +25,17 @@
 #include "doc/fib.h"
 #include "model/document.h"
 namespace doccraft::doc {
+inline constexpr size_t kMaxDocumentImageBytes = 256 * 1024 * 1024;
 std::expected<model::Document, Error> ParseFormatted(
     std::span<const uint8_t> word, std::span<const uint8_t> table,
     const Fib& fib, std::span<const uint8_t> data = {});
 
 std::expected<model::Image, Error> ReadInlinePicture(
     std::span<const uint8_t> data, uint32_t offset,
+    size_t budget = std::numeric_limits<size_t>::max());
+
+std::expected<std::optional<model::Image>, Error> ReadOlePresentation(
+    std::span<const uint8_t> stream,
     size_t budget = std::numeric_limits<size_t>::max());
 
 struct FloatingPicture {

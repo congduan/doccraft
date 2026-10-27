@@ -80,7 +80,20 @@ inline constexpr uint8_t kMetafileUncompressed = 0xFE;
 inline constexpr size_t kMaxImageSize = 64 * 1024 * 1024;
 // Aggregate cap across all images: metafile deflate can amplify ~1000x per
 // BLIP, so per-image limits alone do not bound total memory.
-inline constexpr size_t kMaxTotalImageSize = 256 * 1024 * 1024;
+inline constexpr size_t kMaxTotalImageSize = kMaxDocumentImageBytes;
+inline constexpr uint32_t kOleClipboardWmf = 3, kOleClipboardEmf = 14;
+inline constexpr uint32_t kOleClipboardMarker = 0xFFFFFFFF;
+inline constexpr uint32_t kOleClipboardMarkerAlt = 0xFFFFFFFE;
+inline constexpr uint32_t kOleHimetricPerInch = 2540;
+inline constexpr uint32_t kTwipsPerInch = 1440;
+inline constexpr size_t kOlePresentationPrefix = 40;
+inline constexpr size_t kOleWmfTrailer = 18;
+inline constexpr size_t kWmfHeaderBytes = 18, kEmfHeaderBytes = 88;
+inline constexpr uint16_t kWmfHeaderWords = 9;
+inline constexpr uint16_t kWmfVersion1 = 0x0100, kWmfVersion3 = 0x0300;
+inline constexpr uint32_t kEmfHeaderType = 1;
+inline constexpr size_t kEmfSignatureOffset = 40;
+inline constexpr uint32_t kEmfSignature = 0x464D4520;
 
 // [MS-DOC] Spa / [MS-ODRAW] drawing records and property identifiers.
 inline constexpr size_t kSpaSize = 26, kSpaFlagsOffset = 20;

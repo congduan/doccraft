@@ -31,6 +31,11 @@
 namespace {
 using namespace doccraft;
 
+void Put32(std::vector<uint8_t>& bytes, size_t at, uint32_t value) {
+  for (size_t i = 0; i < 4; ++i)
+    bytes[at + i] = static_cast<uint8_t>(value >> (8 * i));
+}
+
 std::string Part(const std::vector<uint8_t>& archive, const char* name) {
   mz_zip_archive zip = {};
   if (!mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
@@ -127,5 +132,57 @@ TEST(M4Ole, SyntheticObjectPoolStreamFamilyRoundTrips) {
   auto missing = cfb::RepackageStorage(*cfb, "Root Entry/ObjectPool/_43");
   ASSERT_FALSE(missing);
   EXPECT_EQ(missing.error().code, cfb::ErrorCode::kStreamNotFound);
+}
+
+TEST(M4Ole, OlePresentationMetafilesBecomePreviewParts) {
+  for (const auto format : {3U, 14U}) {
+    std::vector<uint8_t> payload(format == 3 ? 18 : 88);
+    if (format == 3) {
+      payload[0] = 1;
+      payload[2] = 9;
+      payload[4] = 0x00;
+      payload[5] = 0x03;
+    } else {
+      Put32(payload, 0, 1);
+      Put32(payload, 4, 88);
+      Put32(payload, 40, 0x464D4520);
+    }
+    std::vector<uint8_t> pres(40 + payload.size() + (format == 3 ? 18 : 0));
+    Put32(pres, 0, 0xFFFFFFFF);
+    Put32(pres, 4, format);
+    Put32(pres, 8, 4);
+    Put32(pres, 28, 2540);
+    Put32(pres, 32, 1270);
+    Put32(pres, 36, payload.size());
+    std::copy(payload.begin(), payload.end(), pres.begin() + 40);
+    auto image = doc::ReadOlePresentation(pres);
+    ASSERT_TRUE(image) << image.error().message;
+    ASSERT_TRUE(*image);
+    EXPECT_EQ((*image)->width, 1440);
+    EXPECT_EQ((*image)->height, 720);
+    EXPECT_EQ((*image)->bytes, payload);
+    EXPECT_FALSE(doc::ReadOlePresentation(pres, payload.size() - 1));
+    model::Document document;
+    document.images.push_back(std::move(**image));
+    model::OleObject object;
+    object.storage_id = 42;
+    object.program_id = "Package";
+    object.bytes = {1, 2, 3};
+    object.preview_image_index = 0;
+    document.ole_objects.push_back(std::move(object));
+    document.paragraphs.push_back({});
+    model::Run run;
+    run.ole_index = 0;
+    document.paragraphs.back().runs.push_back(run);
+    auto zip = docx::Write(document);
+    ASSERT_TRUE(zip) << zip.error().message;
+    EXPECT_NE(Part(*zip, "word/document.xml").find("<v:imagedata"),
+              std::string::npos);
+    EXPECT_EQ(Part(*zip, format == 3 ? "word/media/image1.wmf"
+                                     : "word/media/image1.emf"),
+              std::string(payload.begin(), payload.end()));
+    Put32(pres, 36, payload.size() + 1);
+    EXPECT_FALSE(doc::ReadOlePresentation(pres));
+  }
 }
 }  // namespace

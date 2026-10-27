@@ -233,6 +233,15 @@ int main(int argc, char** argv) {
     }
     for (const auto& warning : extracted->warnings)
       std::fprintf(stderr, "warning: %s\n", warning.c_str());
+    size_t image_total = 0;
+    for (const auto& image : extracted->images) {
+      if (image.bytes.size() >
+          doccraft::doc::kMaxDocumentImageBytes - image_total) {
+        std::fprintf(stderr, "convert: total image size exceeds limit\n");
+        return 1;
+      }
+      image_total += image.bytes.size();
+    }
     for (auto& object : extracted->ole_objects) {
       if (!cfb) {
         std::fprintf(stderr, "convert: OLE %d: OLE storage has no streams\n",
@@ -245,6 +254,35 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "convert: OLE %d: %s\n", object.storage_id,
                      packaged.error().message.c_str());
         return 1;
+      }
+      if (object.preview_image_index < 0) {
+        const std::string path =
+            "Root Entry/ObjectPool/_" + std::to_string(object.storage_id) + "/";
+        for (const char prefix : {'\x01', '\x02'}) {
+          auto stream = cfb->ReadStream(path + prefix + "OlePres000");
+          if (!stream && stream.error().code !=
+                             doccraft::cfb::ErrorCode::kStreamNotFound) {
+            std::fprintf(stderr, "convert: OLE %d: %s\n", object.storage_id,
+                         stream.error().message.c_str());
+            return 1;
+          }
+          if (!stream)
+            continue;
+          auto image = doccraft::doc::ReadOlePresentation(
+              *stream, doccraft::doc::kMaxDocumentImageBytes - image_total);
+          if (!image) {
+            std::fprintf(stderr, "convert: OLE %d: %s\n", object.storage_id,
+                         image.error().message.c_str());
+            return 1;
+          }
+          if (*image) {
+            image_total += (**image).bytes.size();
+            object.preview_image_index =
+                static_cast<int>(extracted->images.size());
+            extracted->images.push_back(std::move(**image));
+            break;
+          }
+        }
       }
       object.bytes = std::move(*packaged);
     }
