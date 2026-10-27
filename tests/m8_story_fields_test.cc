@@ -624,3 +624,79 @@ TEST(M15StoryPlc, OutOfRangeCommentAnchorSkipsStory) {
             "skipped comment story PLC: invalid comment anchor PLC");
   EXPECT_TRUE(parsed->comments.empty());
 }
+
+TEST(M15StoryPlc, MissingFootnoteReferencesWarns) {
+  Synthetic s = Build("Body\r", "Foot\r\r", "", "", "");
+  s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped footnote story PLC: note PLC entry count mismatch");
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  EXPECT_TRUE(Part(*zip, "word/footnotes.xml").empty());
+  EXPECT_NE(Part(*zip, "word/document.xml").find("Body"), std::string::npos);
+}
+
+TEST(M15StoryPlc, BadEndnoteTextKeepsFootnote) {
+  Synthetic s = Build("Body\r", "Foot\r\r", "", "", "End\r\r");
+  s.fib.fnd_ref = PutNoteRefPlc(s, 1);
+  s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn);
+  s.fib.end_ref = PutNoteRefPlc(s, 2);
+  s.fib.end_txt = {9999, 8};
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped endnote story PLC: invalid note text PLC");
+  ASSERT_EQ(parsed->notes.size(), 1u);
+  EXPECT_FALSE(parsed->notes[0].endnote);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  EXPECT_FALSE(Part(*zip, "word/footnotes.xml").empty());
+  EXPECT_TRUE(Part(*zip, "word/endnotes.xml").empty());
+}
+
+TEST(M15StoryPlc, EqualCommentAnchorCpsKeepBothBodies) {
+  Synthetic s = Build("Body\r", "", "", "One\rTwo\r\r", "");
+  const size_t at = s.table.size();
+  s.table.resize(at + 72);
+  Put32(s.table, at, 1);
+  Put32(s.table, at + 4, 1);
+  Put32(s.table, at + 8, 2);
+  s.fib.and_ref = {static_cast<uint32_t>(at), 72};
+  const size_t text_at = s.table.size();
+  s.table.resize(text_at + 12);
+  Put32(s.table, text_at, 0);
+  Put32(s.table, text_at + 4, 4);
+  Put32(s.table, text_at + 8, s.fib.ccp_atn);
+  s.fib.and_txt = {static_cast<uint32_t>(text_at), 12};
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->warnings.empty());
+  ASSERT_EQ(parsed->comments.size(), 2u);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  EXPECT_EQ(Count(Part(*zip, "word/comments.xml"), "<w:comment w:id="), 2u);
+}
+
+TEST(M15StoryPlc, CommentOwnersTrailingByteKeepsAuthor) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  const size_t at = s.table.size();
+  s.table.resize(at + 5);
+  Put16(s.table, at, 1);
+  Put16(s.table, at + 2, 'A');
+  s.fib.atn_owners = {static_cast<uint32_t>(at), 5};
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->warnings.empty());
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  EXPECT_EQ(parsed->comments[0].author, "A");
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  EXPECT_NE(Part(*zip, "word/comments.xml").find("w:author=\"A\""),
+            std::string::npos);
+}
