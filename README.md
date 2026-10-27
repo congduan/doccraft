@@ -123,12 +123,14 @@ the format-neutral model. See [DESIGN](docs/DESIGN.md) for the full layout.
 
 - RC4-encrypted documents are detected and rejected; password-based decryption
   is not implemented.
-- Complex shapes and WordArt are not restored as editable artwork. Floating
-  image wrap polygons and some text-box styling remain incomplete.
+- Basic floating shapes and WordArt become positioned VML placeholders with
+  shape type and available text; their artwork, fills, strokes, and text wrap
+  may differ. Floating image wrap polygons and some text-box styling remain incomplete.
 - LibreOffice lays out the endnote in `footnote-endnote.doc` on a separate page
   after conversion; the documented page-count exception preserves this gap.
-- Fast-saved samples can preserve text while changing pagination; some OLE
-  objects lack a preview when the source has no field-result image.
+- Fast-saved samples can preserve text while changing pagination. OLE objects
+  without a field-result image use an EMF/WMF OlePres preview when available;
+  other preview formats can remain blank.
 
 The detailed list is in [KNOWN-SIMPLIFICATIONS](docs/KNOWN-SIMPLIFICATIONS.md).
 
