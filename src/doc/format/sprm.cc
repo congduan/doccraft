@@ -1103,16 +1103,13 @@ void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v) {
       p.after_lines_set = true;
       break;
     case kSprmPItap:
-      // spra 3: the absolute table depth is a 4-byte integer.
-      if (S32(v, 0) >= 0 && S32(v, 0) <= kMaxTableDepth)
-        p.table_depth = S32(v, 0);
+      // spra 3: the absolute table depth is a 4-byte integer. Clamp rather
+      // than reject so the field names the depth the frame stack builds.
+      p.table_depth = ClampTableDepth(S32(v, 0));
       break;
-    case kSprmPDtap: {
-      int depth = p.table_depth + S32(v, 0);
-      if (depth >= 0 && depth <= kMaxTableDepth)
-        p.table_depth = depth;
+    case kSprmPDtap:
+      p.table_depth = ClampTableDepth(p.table_depth + S32(v, 0));
       break;
-    }
     default:
       break;
   }

@@ -23,7 +23,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <functional>
 #include <map>
 #include <random>
 #include <string>
@@ -49,6 +48,7 @@ using doccraft::test::ReadSeed;
 using doc::detail::kSprmCFBold;
 using doc::detail::kSprmCHps;
 using doc::detail::kSprmCIco;
+using doc::detail::kSprmPDtap;
 using doc::detail::kSprmPFInTable;
 using doc::detail::kSprmPItap;
 using doc::detail::kSprmPJc;
@@ -69,6 +69,25 @@ constexpr uint32_t kFcCompressedBit = 0x40000000u;
 void Put16(std::vector<uint8_t>& b, size_t p, uint16_t v) {
   b[p] = static_cast<uint8_t>(v);
   b[p + 1] = static_cast<uint8_t>(v >> 8);
+}
+
+// Deepest table nesting reachable from one document-level table block.
+int StructuralDepth(const model::Document& d, size_t table) {
+  int deepest = 1;
+  for (const auto& row : d.tables[table].rows)
+    for (const auto& cell : row)
+      for (const auto& block : cell.blocks)
+        if (block.table)
+          deepest = std::max(deepest, 1 + StructuralDepth(d, block.index));
+  return deepest;
+}
+
+int BodyTableDepth(const model::Document& d) {
+  int deepest = 0;
+  for (const auto& block : d.blocks)
+    if (block.table)
+      deepest = std::max(deepest, StructuralDepth(d, block.index));
+  return deepest;
 }
 
 void Put32(std::vector<uint8_t>& b, size_t p, uint32_t v) {
@@ -109,11 +128,12 @@ SyntheticDoc MakeSyntheticDoc(const std::string& text = "Fuzz!\r",
   const auto indent = Prl(0x8411, {0xD0, 0x02});
   pap.insert(pap.end(), indent.begin(), indent.end());
   pap.insert(pap.end(), extra_pap.begin(), extra_pap.end());
-  // PAPX grpprls are odd-length; the cb byte counts 16-bit words.
-  if ((pap.size() & 1) == 0) {
-    const auto pad = Prl(0x8411, {0, 0});
-    pap.insert(pap.end(), pad.begin(), pad.end());
-  }
+  // PAPX grpprls are odd-length: the cb byte counts 16-bit words, so an even
+  // grpprl takes one zero alignment byte (Walk's trailing-byte rule). A
+  // trailing PRL would not change the parity and cb*2-1-2 would then cut the
+  // last byte mid-PRL.
+  if ((pap.size() & 1) == 0)
+    pap.push_back(0);
   d.word[8] = 20;   // BX offset / 2 -> PAPX at page offset 40
   d.word[511] = 1;  // one FKP run
   Put32(d.word, 0, 1024);
@@ -254,10 +274,9 @@ TEST(Fuzz, FullPipelineSeedMutationNeverCrashes) {
   constexpr size_t kRoundsPerSeed = 2000;
 #endif
   // Wall-clock valve so slower machines finish fewer rounds instead of
-  // timing out; every seed still runs its first kMinRounds rounds.
+  // timing out; every seed still runs its first kMinRoundsPerSeed rounds.
   constexpr size_t kMinRoundsPerSeed = 64;
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(8);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
   std::mt19937 rng(0x5EED1);
   for (const Seed& seed : seeds) {
     SCOPED_TRACE(seed.path);
@@ -364,10 +383,13 @@ TEST(Fuzz, DirectedSprmAndFkpMutationNeverCrashes) {
 // Regression for the first bug the pipeline mutation round found: an
 // sprmPItap operand of 0xFFFF built a 65535-level TableFrame stack whose
 // folded nesting chain overflowed the writer's recursion (stack overflow /
-// SIGSEGV). The frame stack must clamp to kMaxTableDepth like ApplyPara.
+// SIGSEGV). Depth policy is unified across both layers: the frame stack and
+// the ApplyPara model field clamp through the same ClampTableDepth helper,
+// so the built structure and the recorded paragraph depth must agree.
 TEST(Fuzz, SprmItapDepthOperandIsClamped) {
   std::vector<uint8_t> extra = Prl(kSprmPFInTable, {1});
-  const auto itap = Prl(kSprmPItap, {0xFF, 0xFF});
+  // sprmPItap is spra 3: a full 4-byte operand, 0x0000FFFF = 65535.
+  const auto itap = Prl(kSprmPItap, {0xFF, 0xFF, 0x00, 0x00});
   extra.insert(extra.end(), itap.begin(), itap.end());
   const SyntheticDoc d = MakeSyntheticDoc(std::string("A\x07"
                                                       "B\r",
@@ -378,17 +400,34 @@ TEST(Fuzz, SprmItapDepthOperandIsClamped) {
 
   auto document = doc::ParseFormatted(d.word, d.table, d.fib, d.data);
   ASSERT_TRUE(document);
-  std::function<int(size_t)> depth_of = [&](size_t table) {
-    int deepest = 1;
-    for (const auto& row : document->tables[table].rows)
-      for (const auto& cell : row)
-        for (const auto& block : cell.blocks)
-          if (block.table)
-            deepest = std::max(deepest, 1 + depth_of(block.index));
-    return deepest;
-  };
-  for (size_t t = 0; t < document->tables.size(); ++t)
-    EXPECT_LE(depth_of(t), 8) << "table " << t << " nests deeper than 8";
+  // Clamped to kMaxTableDepth, not dropped: the document still nests, but
+  // never deeper than 8.
+  EXPECT_EQ(BodyTableDepth(*document), 8);
+  for (const auto& para : document->paragraphs)
+    EXPECT_EQ(para.table_depth, 8) << "model field must match the structure";
+}
+
+// sprmPDtap is also spra 3 (4-byte signed): +7 from depth 3 must clamp the
+// sum to 8. The pre-unification parse layer dropped the whole sprm instead,
+// recording depth 3 while the frame stack built 8 levels.
+TEST(Fuzz, SprmDtapSummedDepthIsClamped) {
+  std::vector<uint8_t> extra = Prl(kSprmPFInTable, {1});
+  const auto itap = Prl(kSprmPItap, {3, 0, 0, 0});
+  const auto dtap = Prl(kSprmPDtap, {7, 0, 0, 0});
+  extra.insert(extra.end(), itap.begin(), itap.end());
+  extra.insert(extra.end(), dtap.begin(), dtap.end());
+  const SyntheticDoc d = MakeSyntheticDoc(std::string("A\x07"
+                                                      "B\r",
+                                                      4),
+                                          extra);
+  std::string error;
+  EXPECT_TRUE(Converts(d, &error)) << error;
+
+  auto document = doc::ParseFormatted(d.word, d.table, d.fib, d.data);
+  ASSERT_TRUE(document);
+  EXPECT_EQ(BodyTableDepth(*document), 8);
+  for (const auto& para : document->paragraphs)
+    EXPECT_EQ(para.table_depth, 8) << "model field must match the structure";
 }
 
 TEST(Fuzz, ClxPieceTableMutationNeverCrashes) {

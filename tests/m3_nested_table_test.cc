@@ -244,18 +244,27 @@ TEST(M3NestedTable, WriterNestsTableElements) {
 }
 
 TEST(M3NestedTable, DeltaDepthIsAccumulated) {
-  // sprmPDtap adjusts the depth that sprmPItap established.
+  // sprmPDtap adjusts the depth that sprmPItap established. Both operands
+  // are spra 3 (4-byte signed) and clamp to [0, kMaxTableDepth] through the
+  // same ClampTableDepth helper the frame stack uses, so the model field
+  // always names the depth of the structure that was actually built.
   model::Paragraph p;
   const std::vector<uint8_t> absolute{2, 0, 0, 0};
   const std::vector<uint8_t> plus_one{1, 0, 0, 0};
   const std::vector<uint8_t> minus_two{0xFE, 0xFF, 0xFF, 0xFF};
+  const std::vector<uint8_t> over_deep{0xFF, 0xFF, 0x00, 0x00};  // 65535
   doc::detail::ApplyPara(p, 0x6649, doc::detail::Bytes(absolute));
   EXPECT_EQ(p.table_depth, 2);
   doc::detail::ApplyPara(p, 0x664A, doc::detail::Bytes(plus_one));
   EXPECT_EQ(p.table_depth, 3);
   doc::detail::ApplyPara(p, 0x664A, doc::detail::Bytes(minus_two));
   EXPECT_EQ(p.table_depth, 1);
-  // Never below zero.
+  // Clamped at zero, like the frame stack's fInTable fallback floor.
   doc::detail::ApplyPara(p, 0x664A, doc::detail::Bytes(minus_two));
-  EXPECT_EQ(p.table_depth, 1);
+  EXPECT_EQ(p.table_depth, 0);
+  // Over-deep operands clamp to kMaxTableDepth instead of being dropped.
+  doc::detail::ApplyPara(p, 0x6649, doc::detail::Bytes(over_deep));
+  EXPECT_EQ(p.table_depth, 8);
+  doc::detail::ApplyPara(p, 0x664A, doc::detail::Bytes(plus_one));
+  EXPECT_EQ(p.table_depth, 8);
 }

@@ -34,6 +34,7 @@ using detail::ApplyPara;
 using detail::ApplyRun;
 using detail::Bytes;
 using detail::Char;
+using detail::ClampTableDepth;
 using detail::Find;
 using detail::FormatRange;
 using detail::InheritedRun;
@@ -55,6 +56,7 @@ using detail::ReadNoteReferences;
 using detail::ReadNotes;
 using detail::ReadStyles;
 using detail::S16;
+using detail::S32;
 using detail::U16;
 using detail::U32;
 using detail::Valid;
@@ -492,9 +494,9 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
           if (op == kSprmPFTtp || op == kSprmPFInnerTtp)
             cached_row_end = v[0] != 0;
           if (op == kSprmPItap)
-            cached_depth = U16(v, 0);
+            cached_depth = ClampTableDepth(S32(v, 0));
           if (op == kSprmPDtap)
-            cached_depth = std::max(0, cached_depth + S16(v, 0));
+            cached_depth = ClampTableDepth(cached_depth + S32(v, 0));
         });
       }
       table_pap = pap;
@@ -512,19 +514,21 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       } else if (op == kSprmPFTtp || op == kSprmPFInnerTtp) {
         row_end = v[0] != 0;
         piece_table_set = true;
-      } else if (op == kSprmPItap && v.size() >= 2) {
-        depth = U16(v, 0);
+      } else if (op == kSprmPItap && v.size() >= 4) {
+        depth = ClampTableDepth(S32(v, 0));
         piece_table_set = true;
-      } else if (op == kSprmPDtap && v.size() >= 2) {
-        depth = std::max(0, depth + S16(v, 0));
+      } else if (op == kSprmPDtap && v.size() >= 4) {
+        depth = ClampTableDepth(depth + S32(v, 0));
         piece_table_set = true;
       }
     });
     // Depth is authoritative when present; otherwise fInTable means one
     // level. Character-only piece modifiers do not change table structure.
-    // sprmPItap operands are attacker-controlled 16-bit values, so the frame
-    // stack honours the same kMaxTableDepth clamp as the model field; an
-    // unclamped depth builds a nesting chain the writer cannot traverse.
+    // The reads above clamp through ClampTableDepth - the same policy as the
+    // ApplyPara model field - because sprmPItap operands are attacker-
+    // controlled and an unclamped depth builds a nesting chain the writer
+    // cannot traverse. The min here re-asserts the bound in case a future
+    // read path bypasses the clamp.
     if (pap || piece_table_set) {
       const int bounded = std::min(depth, detail::kMaxTableDepth);
       const int wanted = bounded > 0 ? bounded : (in_table ? 1 : 0);

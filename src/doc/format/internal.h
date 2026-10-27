@@ -184,6 +184,15 @@ inline constexpr uint8_t kCssaAllSides = 15;
 // sprmPItap: nested tables deeper than this are clamped (Word stops at 4).
 inline constexpr int kMaxTableDepth = 8;
 
+// sprmPItap/sprmPDtap operands are attacker-controlled 4-byte integers with
+// no spec-defined range handling. Both depth consumers - the ApplyPara model
+// field and the formatted.cc frame stack - clamp through this one helper so
+// the IR depth and the built structure can never disagree; the frame stack
+// additionally falls back to fInTable when the clamped depth is zero.
+inline int ClampTableDepth(int depth) {
+  return std::clamp(depth, 0, kMaxTableDepth);
+}
+
 // sprmTCHorzBands / sprmTCVertBands accept 1-3 rows or columns per band.
 inline constexpr uint8_t kMaxBandSize = 3;
 
