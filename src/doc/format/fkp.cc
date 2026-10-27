@@ -119,7 +119,9 @@ std::expected<std::vector<Char>, Error> ReadChars(
         ch.newline = decoded == "\r" || decoded == "\n";
         if (ch.newline)
           decoded = "\n";
-        ch.SetText(decoded);
+        if (!ch.SetText(decoded))
+          return std::unexpected(
+              Error{"ANSI character expands past UTF-8 scalar"});
         out.push_back(std::move(ch));
         j += static_cast<uint32_t>(used);
         continue;
@@ -151,7 +153,9 @@ std::expected<std::vector<Char>, Error> ReadChars(
       }
       std::string encoded;
       AppendUtf8(encoded, c == 13 ? 10 : c);
-      ch.SetText(encoded);
+      if (!ch.SetText(encoded))
+        return std::unexpected(
+            Error{"UTF-16 character expands past UTF-8 scalar"});
       out.push_back(std::move(ch));
       j += step;
     }

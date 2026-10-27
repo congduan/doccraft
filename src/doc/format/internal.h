@@ -226,20 +226,23 @@ inline constexpr uint32_t kFcMask = 0x3FFFFFFF;
 struct Char {
   uint32_t cp = 0, fc = 0;
   uint16_t prm = 0;
-  // iconv can return up to eight bytes for one legacy-codepage character.
-  std::array<char, 8> utf8{};
+  // One decoded Unicode scalar takes at most four UTF-8 bytes.
+  std::array<char, 4> utf8{};
   uint8_t length = 0;
   bool newline = false;
 
   std::string_view text() const {
     return {utf8.data(), length};
   }
-  void SetText(std::string_view value) {
+  bool SetText(std::string_view value) {
+    if (value.size() > utf8.size())
+      return false;
     length = static_cast<uint8_t>(value.size());
     std::copy(value.begin(), value.end(), utf8.begin());
+    return true;
   }
 };
-static_assert(sizeof(Char) == 20);
+static_assert(sizeof(Char) == 16);
 
 struct FormatRange {
   uint32_t first, last;
