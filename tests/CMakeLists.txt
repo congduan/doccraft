@@ -78,6 +78,8 @@ add_test(NAME docx_zip_validate COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:doccraft> ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc)
 add_test(NAME corpus_text_consistency COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/corpus/compare_text.py $<TARGET_FILE:doccraft>)
+add_test(NAME cli_input_path COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/cli_input_path.py $<TARGET_FILE:doccraft>)
 
 add_executable(m3_batch6_test m3_batch6_test.cc)
 target_link_libraries(m3_batch6_test PRIVATE doccraft_doc doccraft_docx gtest_main)

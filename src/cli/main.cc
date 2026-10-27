@@ -12,10 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cerrno>
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
+#include <expected>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -40,6 +45,25 @@
 #include "model/document.h"
 
 namespace {
+std::expected<void, doccraft::doc::Error> ValidateInput(const char* path) {
+  struct stat info {};
+  if (stat(path, &info) != 0) {
+    if (errno == ENOENT || errno == ENOTDIR)
+      return std::unexpected(doccraft::doc::Error{"input path does not exist"});
+    if (errno == EACCES)
+      return std::unexpected(
+          doccraft::doc::Error{"input file is not readable"});
+    return std::unexpected(doccraft::doc::Error{"input path stat failed"});
+  }
+  if (!S_ISREG(info.st_mode))
+    return std::unexpected(
+        doccraft::doc::Error{"input path is not a regular file"});
+  if ((info.st_mode & (S_IRUSR | S_IRGRP | S_IROTH)) == 0 ||
+      access(path, R_OK) != 0)
+    return std::unexpected(doccraft::doc::Error{"input file is not readable"});
+  return {};
+}
+
 #ifdef __linux__
 long PeakRssKb() {
   rusage usage{};
@@ -80,6 +104,10 @@ int main(int argc, char** argv) {
   }
   const std::string cmd = argv[1];
   if (cmd == "inspect" && argc >= 3) {
+    if (auto valid = ValidateInput(argv[2]); !valid) {
+      std::fprintf(stderr, "inspect: %s\n", valid.error().message.c_str());
+      return 1;
+    }
     std::ifstream file(argv[2], std::ios::binary);
     if (!file) {
       std::fprintf(stderr, "inspect: cannot open %s\n", argv[2]);
@@ -135,6 +163,10 @@ int main(int argc, char** argv) {
       }
     }
 
+    if (auto valid = ValidateInput(argv[2]); !valid) {
+      std::fprintf(stderr, "convert: %s\n", valid.error().message.c_str());
+      return 1;
+    }
     std::ifstream file(argv[2], std::ios::binary);
     if (!file) {
       std::fprintf(stderr, "convert: cannot open input\n");
