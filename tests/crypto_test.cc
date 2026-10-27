@@ -17,9 +17,9 @@
 #include <string_view>
 #include <vector>
 
-#include "crypto/rc4.h"
 #include "crypto/derivation.h"
 #include "crypto/md5.h"
+#include "crypto/rc4.h"
 #include "crypto/sha1.h"
 #include "gtest/gtest.h"
 
@@ -57,7 +57,8 @@ TEST(Crypto, Sha1Fips180Four) {
 
 TEST(Crypto, CryptoApiKeyDerivation) {
   std::array<uint8_t, 16> salt{};
-  for (size_t n = 0; n < salt.size(); ++n) salt[n] = n;
+  for (size_t n = 0; n < salt.size(); ++n)
+    salt[n] = n;
   auto hash = doccraft::crypto::HashPassword("password", salt);
   ASSERT_TRUE(hash);
   EXPECT_EQ(Hex(doccraft::crypto::DeriveRc4Key(*hash, 0, 128)),
@@ -69,11 +70,12 @@ TEST(Crypto, CryptoApiKeyDerivation) {
 
 TEST(Crypto, Md5Rfc1321AndLegacyRc4Derivation) {
   const std::string_view abc = "abc";
-  EXPECT_EQ(Hex(doccraft::crypto::Md5({
-                reinterpret_cast<const uint8_t*>(abc.data()), abc.size()})),
+  EXPECT_EQ(Hex(doccraft::crypto::Md5(
+                {reinterpret_cast<const uint8_t*>(abc.data()), abc.size()})),
             "900150983cd24fb0d6963f7d28e17f72");
   std::array<uint8_t, 16> salt{};
-  for (size_t n = 0; n < salt.size(); ++n) salt[n] = n;
+  for (size_t n = 0; n < salt.size(); ++n)
+    salt[n] = n;
   const auto encoded = doccraft::crypto::EncodePassword("password");
   ASSERT_TRUE(encoded);
   const auto hash = doccraft::crypto::LegacyPasswordHash(*encoded, salt);
