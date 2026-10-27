@@ -1,9 +1,23 @@
 include_directories(${CMAKE_SOURCE_DIR})
 include(GoogleTest)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_executable(crypto_test crypto_test.cc)
 target_link_libraries(crypto_test PRIVATE doccraft_crypto gtest_main)
 gtest_discover_tests(crypto_test)
+
+add_executable(m6_rc4_test m6_rc4_test.cc)
+target_link_libraries(m6_rc4_test PRIVATE doccraft_doc doccraft_crypto gtest_main)
+gtest_discover_tests(m6_rc4_test)
+
+add_executable(m6_fixture_gen m6_fixture_gen.cc cfb_test_util.cc)
+target_link_libraries(m6_fixture_gen PRIVATE doccraft_cfb doccraft_crypto)
+
+add_test(NAME m6_rc4_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/m6_rc4_cli.py $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/encrypted/plain-text-rc4-cryptoapi.doc
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/encrypted/plain-text-rc4-legacy.doc)
 
 add_executable(base_test base_test.cc)
 target_link_libraries(base_test PRIVATE doccraft_base gtest_main)
@@ -28,7 +42,6 @@ add_executable(m3_batch3_test m3_batch3_test.cc)
 target_link_libraries(m3_batch3_test PRIVATE doccraft_cfb doccraft_doc doccraft_docx gtest_main)
 target_compile_definitions(m3_batch3_test PRIVATE DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m3_batch3_test)
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME docx_zip_validate COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/docx/validate_zip.py
   $<TARGET_FILE:doccraft> ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc)
