@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -91,6 +93,49 @@ std::expected<BookmarkMarks, Error> ReadBookmarks(Bytes table, const Fib& fib) {
     const uint32_t finish = U32(end, 4 * ibkl);
     out.marks[begin].push_back({id, name, true});
     out.marks[finish].push_back({id, name, false});
+  }
+  return out;
+}
+
+BookmarkMarks FilterStoryBookmarks(
+    const BookmarkMarks& bookmarks,
+    const std::vector<std::pair<uint64_t, uint64_t>>& ranges, const char* story,
+    std::vector<std::string>* warnings, bool last_cp_is_guard) {
+  std::map<int, uint32_t> starts;
+  std::map<int, uint32_t> ends;
+  for (const auto& [cp, marks] : bookmarks.marks) {
+    for (const auto& mark : marks) {
+      if (mark.start)
+        starts.emplace(mark.id, cp);
+      else
+        ends.emplace(mark.id, cp);
+    }
+  }
+  std::set<int> valid_ids;
+  bool invalid = false;
+  for (const auto& [id, begin] : starts) {
+    for (const auto& [first, last] : ranges) {
+      if (last <= first || begin < first ||
+          begin >= last - (last_cp_is_guard ? 1 : 0))
+        continue;
+      auto end = ends.find(id);
+      if (end != ends.end() && end->second >= begin && end->second < last) {
+        valid_ids.insert(id);
+      } else {
+        invalid = true;
+      }
+      break;
+    }
+  }
+  if (invalid && warnings)
+    warnings->push_back(std::string("skipped ") + story +
+                        " bookmark PLC: invalid range");
+  BookmarkMarks out;
+  for (const auto& [cp, marks] : bookmarks.marks) {
+    for (const auto& mark : marks) {
+      if (valid_ids.contains(mark.id))
+        out.marks[cp].push_back(mark);
+    }
   }
   return out;
 }

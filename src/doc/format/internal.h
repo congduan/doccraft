@@ -351,6 +351,13 @@ struct BookmarkMarks {
 
 std::expected<BookmarkMarks, Error> ReadBookmarks(Bytes table, const Fib& fib);
 
+// Keep complete pairs inside one [first, last) story range. When the final CP
+// is a guard, a bookmark may end there but may not start there.
+BookmarkMarks FilterStoryBookmarks(
+    const BookmarkMarks& bookmarks,
+    const std::vector<std::pair<uint64_t, uint64_t>>& ranges, const char* story,
+    std::vector<std::string>* warnings, bool last_cp_is_guard = true);
+
 // Comment anchor CPs inside the main story, in document order. Comment i of
 // Document::comments is anchored at anchor[i].
 std::expected<std::vector<uint32_t>, Error> ReadCommentAnchors(
@@ -360,7 +367,8 @@ std::expected<std::vector<uint32_t>, Error> ReadCommentAnchors(
 std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
                                         Bytes table, const Fib& fib,
                                         const std::vector<FormatRange>& chpx,
-                                        const std::vector<FormatRange>& papx);
+                                        const std::vector<FormatRange>& papx,
+                                        const BookmarkMarks& bookmarks);
 
 // Reference sites of footnotes/endnotes inside the main story, in document
 // order. Note i of Document::notes is footnote i, then endnote i.
@@ -376,7 +384,8 @@ std::expected<NoteReferenceSet, Error> ReadNoteReferences(
 std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
                                      Bytes table, const Fib& fib,
                                      const std::vector<FormatRange>& chpx,
-                                     const std::vector<FormatRange>& papx);
+                                     const std::vector<FormatRange>& papx,
+                                     const BookmarkMarks& bookmarks);
 
 // The six header/footer stories ([MS-DOC] §2.8.2) of one section:
 // even/odd/default header, then even/odd/default footer.

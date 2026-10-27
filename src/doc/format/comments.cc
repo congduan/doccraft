@@ -150,7 +150,8 @@ std::expected<std::vector<uint32_t>, Error> ReadCommentAnchors(
 std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
                                         Bytes table, const Fib& fib,
                                         const std::vector<FormatRange>& chpx,
-                                        const std::vector<FormatRange>& papx) {
+                                        const std::vector<FormatRange>& papx,
+                                        const BookmarkMarks& bookmarks) {
   if (auto valid = ValidateCommentStory(table, fib); !valid)
     return {};
   auto anchors = ReadAnchors(table, fib.and_ref);
@@ -192,6 +193,15 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
     doc.warnings.push_back("skipped comment field PLC: " +
                            status.error().message);
   }
+  std::vector<std::pair<uint64_t, uint64_t>> ranges;
+  for (size_t i = 0; i < count; ++i) {
+    const uint32_t first = U32(text, 4 * i);
+    const uint32_t last = U32(text, 4 * (i + 1));
+    if (last > first && last <= fib.ccp_atn)
+      ranges.emplace_back(base + first, base + last);
+  }
+  const BookmarkMarks story_bookmarks =
+      FilterStoryBookmarks(bookmarks, ranges, "comment", &doc.warnings);
   for (size_t i = 0; i < count; i++) {
     const uint32_t first = U32(text, 4 * i);
     const uint32_t last = U32(text, 4 * (i + 1));
@@ -206,7 +216,7 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
     if (last > first && last <= fib.ccp_atn) {
       comment.paragraphs =
           ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base, first,
-                              last, &field_status);
+                              last, &field_status, &story_bookmarks);
     }
     doc.comments.push_back(std::move(comment));
   }

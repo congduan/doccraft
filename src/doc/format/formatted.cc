@@ -35,6 +35,7 @@ using detail::ApplyRun;
 using detail::Bytes;
 using detail::Char;
 using detail::ClampTableDepth;
+using detail::FilterStoryBookmarks;
 using detail::Find;
 using detail::FormatRange;
 using detail::InheritedRun;
@@ -218,6 +219,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (!bookmarks) {
     return std::unexpected(bookmarks.error());
   }
+  const detail::BookmarkMarks main_bookmarks = FilterStoryBookmarks(
+      *bookmarks, {{0, fib.ccp_text}}, "main", &doc.warnings, false);
   std::map<uint32_t, uint8_t> field_status;
   if (fib.fields_main.size) {
     auto status =
@@ -326,8 +329,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       frames.emplace_back();
   };
   auto emit_bookmarks = [&](uint32_t cp) {
-    auto found = bookmarks->marks.find(cp);
-    if (found == bookmarks->marks.end()) {
+    auto found = main_bookmarks.marks.find(cp);
+    if (found == main_bookmarks.marks.end()) {
       return;
     }
     for (const auto& mark : found->second) {
@@ -730,11 +733,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     close_table();
   if (!para.runs.empty() || doc.blocks.empty())
     add_paragraph(std::move(para));
-  auto notes = ReadNotes(doc, word, table, fib, *chpx, *papx);
+  auto notes = ReadNotes(doc, word, table, fib, *chpx, *papx, *bookmarks);
   if (!notes) {
     return std::unexpected(notes.error());
   }
-  auto comments = ReadComments(doc, word, table, fib, *chpx, *papx);
+  auto comments = ReadComments(doc, word, table, fib, *chpx, *papx, *bookmarks);
   if (!comments) {
     return std::unexpected(comments.error());
   }

@@ -102,7 +102,8 @@ std::expected<NoteReferenceSet, Error> ReadNoteReferences(
 std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
                                      Bytes table, const Fib& fib,
                                      const std::vector<FormatRange>& chpx,
-                                     const std::vector<FormatRange>& papx) {
+                                     const std::vector<FormatRange>& papx,
+                                     const BookmarkMarks& bookmarks) {
   auto footnotes = ReadTextCps(table, fib.fnd_txt);
   auto endnotes = ReadTextCps(table, fib.end_txt);
   // The reference PLC is authoritative for how many notes exist: some
@@ -140,6 +141,14 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
   auto append = [&](const std::vector<uint32_t>& text_cps, uint64_t base,
                     uint32_t story_length, size_t count, bool endnote,
                     const std::map<uint32_t, uint8_t>& field_status) {
+    std::vector<std::pair<uint64_t, uint64_t>> ranges;
+    for (size_t i = 0; i < count; ++i) {
+      if (text_cps[i + 1] > text_cps[i] && text_cps[i + 1] <= story_length) {
+        ranges.emplace_back(base + text_cps[i], base + text_cps[i + 1]);
+      }
+    }
+    const BookmarkMarks story_bookmarks = FilterStoryBookmarks(
+        bookmarks, ranges, endnote ? "endnote" : "footnote", &doc.warnings);
     for (size_t i = 0; i < count; i++) {
       const uint32_t first = text_cps[i];
       const uint32_t last = text_cps[i + 1];
@@ -148,8 +157,9 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
       }
       model::Note note;
       note.endnote = endnote;
-      note.paragraphs = ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs,
-                                            base, first, last, &field_status);
+      note.paragraphs =
+          ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base, first,
+                              last, &field_status, &story_bookmarks);
       doc.notes.push_back(std::move(note));
     }
   };
