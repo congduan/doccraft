@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install format checker
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Format check
+        run: cmake --build build --target format-check
+
+  # Performance measurements need a stable, dedicated large runner. When one
+  # is available, add a separate manual job using tests/perf/gen_corpus.py and
+  # tests/perf/run_perf.py; do not gate ordinary PRs on shared-runner timings.
