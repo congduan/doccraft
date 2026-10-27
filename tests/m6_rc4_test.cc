@@ -33,9 +33,9 @@ void Put32(std::vector<uint8_t>& bytes, size_t pos, uint32_t value) {
     bytes[pos + n] = static_cast<uint8_t>(value >> (n * 8));
 }
 void Crypt(std::vector<uint8_t>& bytes, size_t skip,
-           std::span<const uint8_t, 20> hash) {
+           std::span<const uint8_t, 20> hash, uint32_t key_bits) {
   for (size_t start = 0; start < bytes.size(); start += 512) {
-    auto key = doccraft::crypto::DeriveRc4Key(hash, start / 512, 128);
+    auto key = doccraft::crypto::DeriveRc4Key(hash, start / 512, key_bits);
     doccraft::crypto::Rc4 rc4(key);
     const size_t end = std::min(start + 512, bytes.size());
     std::vector<uint8_t> discard(std::min(end, skip) - std::min(start, skip));
@@ -47,7 +47,7 @@ void Crypt(std::vector<uint8_t>& bytes, size_t skip,
 struct Streams {
   std::vector<uint8_t> word, table, data;
 };
-Streams Encrypted() {
+Streams Encrypted(uint32_t key_size_field = 128, uint32_t key_bits = 128) {
   Streams result{std::vector<uint8_t>(1024), std::vector<uint8_t>(720),
                  std::vector<uint8_t>(600)};
   Put16(result.word, 0, 0xa5ec);
@@ -73,7 +73,7 @@ Streams Encrypted() {
   Put32(result.table, 12, 4);
   Put32(result.table, 20, 0x6801);
   Put32(result.table, 24, 0x8004);
-  Put32(result.table, 28, 128);
+  Put32(result.table, 28, key_size_field);
   Put32(result.table, 32, 1);
   Put32(result.table, 44, 16);
   std::array<uint8_t, 16> salt{};
@@ -85,7 +85,7 @@ Streams Encrypted() {
   }
   Put32(result.table, 80, 20);
   const auto hash = *doccraft::crypto::HashPassword("password", salt);
-  const auto key = doccraft::crypto::DeriveRc4Key(hash, 0, 128);
+  const auto key = doccraft::crypto::DeriveRc4Key(hash, 0, key_bits);
   doccraft::crypto::Rc4 rc4(key);
   rc4.Xor(verifier);
   std::copy(verifier.begin(), verifier.end(), result.table.begin() + 64);
@@ -100,9 +100,9 @@ Streams Encrypted() {
     result.table[n] = static_cast<uint8_t>(n);
   for (size_t n = 0; n < result.data.size(); ++n)
     result.data[n] = static_cast<uint8_t>(n);
-  Crypt(result.word, 68, hash);
-  Crypt(result.table, 104, hash);
-  Crypt(result.data, 0, hash);
+  Crypt(result.word, 68, hash, key_bits);
+  Crypt(result.table, 104, hash, key_bits);
+  Crypt(result.data, 0, hash, key_bits);
   return result;
 }
 }  // namespace
@@ -117,6 +117,21 @@ TEST(M6Rc4, DecryptsAllStreamsAcrossBlocks) {
   EXPECT_EQ(streams.word[513], static_cast<uint8_t>(513));
   EXPECT_EQ(streams.table[513], static_cast<uint8_t>(513));
   EXPECT_EQ(streams.data[513], static_cast<uint8_t>(513));
+}
+
+TEST(M6Rc4, DecryptsCryptoApi40BitKeyVariants) {
+  // KeySize=40 and the KeySize=0 default both select a 40-bit key whose
+  // remaining 88 bits are zero ([MS-OFFCRYPTO] 2.3.5.1).
+  for (const uint32_t key_size_field : {40u, 0u}) {
+    auto streams = Encrypted(key_size_field, 40);
+    auto fib = doccraft::doc::DecryptRc4(streams.word, streams.table,
+                                         streams.data, "password");
+    ASSERT_TRUE(fib) << fib.error().message;
+    EXPECT_FALSE(fib->encrypted);
+    EXPECT_EQ(streams.word[513], static_cast<uint8_t>(513));
+    EXPECT_EQ(streams.table[513], static_cast<uint8_t>(513));
+    EXPECT_EQ(streams.data[513], static_cast<uint8_t>(513));
+  }
 }
 
 TEST(M6Rc4, RejectsWrongPasswordAndTruncatedHeader) {

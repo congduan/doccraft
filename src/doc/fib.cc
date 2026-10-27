@@ -42,9 +42,9 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.which_table = flags & 0x0200;
   if (f.encrypted)
     return std::unexpected(Error{flags & 0x8000
-                                     ? "XOR obfuscation unsupported (M6)"
-                                     : "RC4 or RC4 CryptoAPI encryption "
-                                       "unsupported (M6)"});
+                                     ? "XOR obfuscation unsupported"
+                                     : "RC4-encrypted document must be "
+                                       "decrypted with a password first"});
   const size_t lw_count_pos = 34u + static_cast<size_t>(U16(word, 32)) * 2;
   if (lw_count_pos + 2 > word.size())
     return std::unexpected(Error{"truncated FIB csw"});

@@ -71,10 +71,10 @@ TEST(FibTest, RejectsEncryption) {
   auto fib = doccraft::doc::ParseFib(Fib(0x0100));
   ASSERT_FALSE(fib.has_value());
   EXPECT_EQ(fib.error().message,
-            "RC4 or RC4 CryptoAPI encryption unsupported (M6)");
+            "RC4-encrypted document must be decrypted with a password first");
   auto xor_fib = doccraft::doc::ParseFib(Fib(0x8100));
   ASSERT_FALSE(xor_fib.has_value());
-  EXPECT_EQ(xor_fib.error().message, "XOR obfuscation unsupported (M6)");
+  EXPECT_EQ(xor_fib.error().message, "XOR obfuscation unsupported");
 }
 
 TEST(PieceTableTest, ReadsFastSavedPiecesAndPrc) {
