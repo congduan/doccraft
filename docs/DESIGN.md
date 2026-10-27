@@ -138,7 +138,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
   - RC4 CryptoAPI 版本 2–4.2：UTF-16LE 口令与盐作 SHA-1，按块号再散列；
     40-bit 密钥按规范补零。两种模式均先验证加密 verifier，再解密
     WordDocument（前 68 字节明文）、Table（头部明文）与 Data 流。
-- XOR obfuscation：[MS-DOC] §2.2.6.1、[MS-OFFCRYPTO] §2.3.7.4–2.3.7.6；
+- XOR obfuscation：[MS-DOC] §2.2.6.1、[MS-OFFCRYPTO] §2.3.7.2–2.3.7.6；
   校验 FibBase.lKey 的 32 位验证值，按 16 字节遮罩解密 WordDocument（前
   68 字节保留明文）、Table 与 Data 流。当前口令输入限 ASCII 1–15 字节。
 - ECMA-376 agile encryption 的 doc-in-docx 混合容器：识别并提示
@@ -193,7 +193,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ◐ 浮动文本框：正文与页眉专用 FTXBXS/Tbkd 故事范围按 shape id 连接各自的 PlcfSpa 锚点，写出 `w:pict/w:txbxContent`；内联形状和链中各形状的独立排版仍待补齐
 - ✅ 基本形状/艺术字占位：OfficeArtFSP 形状类型、FSPA 几何和 GeoText 原文进入 IR；矩形/椭圆/线条输出带形状类型注释的 VML 浮动占位，带 BLIP 的形状仍走图片路径。`M5FloatingImages.GeometryShapePlaceholderKeepsAnchor`、`LibreOfficeBasicShapesKeepGeometry`、`LineAndWordArtTypesKeepIdentity`；外观和环绕限制见 KNOWN-SIMPLIFICATIONS
 - ◐ OLE 嵌入对象：字段分隔符上的 `sprmCPicLocation` 定位 ObjectPool 子存储，完整流族重新封装为 CFB 嵌入部件；字段结果图片优先作预览，缺失时解码 `\1OlePres000`/`\2OlePres000` 的 EMF/WMF 元文件并输出 `w:object/o:OLEObject`。链接语义和其他预览格式仍待补齐
-- ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（脚注、尾注、批注按各自 PLC 输出部件；标准书签的 `SttbfBkmk`/`PlcfBkf`/`PlcfBkl` 覆盖正文与页眉页脚故事，并输出 `w:bookmarkStart`/`w:bookmarkEnd`；页眉页脚书签仅在起止位于同一故事时输出，结束位于故事守卫 CP 时仍会闭合，跨故事配对跳过并警告；脚注、尾注、批注故事中的书签仍未接入；交叉引用与目录域的指令与结果文本按通用复杂域输出）
+- ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（脚注、尾注、批注按各自 PLC 输出部件；标准书签的 `SttbfBkmk`/`PlcfBkf`/`PlcfBkl` 覆盖正文、页眉页脚、脚注、尾注与批注故事，并输出 `w:bookmarkStart`/`w:bookmarkEnd`；非正文书签仅在起止位于同一故事时输出，结束位于故事守卫 CP 时仍会闭合，跨故事配对跳过并警告；文本框书签未接入；交叉引用与目录域的指令与结果文本按通用复杂域输出）
 
 ### 6.7 样式系统
 - ✅ STSH 全量解析（基于样式继承链展开；Word 6/95 旧版 STSH 自 M13 起接入同一链路：名称/基于/下一样式与 UPX 的段落、字符修饰经归一化后同规则叠加；M14 对 STSHI 默认字体和损坏记录给出有界处理与警告，旧版默认字号尚未还原）
