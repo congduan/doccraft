@@ -1108,7 +1108,8 @@ void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v) {
       p.table_depth = ClampTableDepth(S32(v, 0));
       break;
     case kSprmPDtap:
-      p.table_depth = ClampTableDepth(p.table_depth + S32(v, 0));
+      p.table_depth =
+          ClampTableDepth(static_cast<int64_t>(p.table_depth) + S32(v, 0));
       break;
     default:
       break;

@@ -160,7 +160,7 @@
 | ✅ | `0x2447` | sprmPFUsePgsuSettings | A Bool8 value that specifies whether the paragraph adheres to the vertical components of the document grid. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
 | ✅ | `0x2448` | sprmPFAdjustRight | A Bool8 value that specifies whether this paragraph is set to automatically adjust the right indent when a document grid for East Asian characters is defined. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
 | ✅ | `0x6649` | sprmPItap | An integer value that specifies the table depth of this paragraph. | 段落 PAP §2.6.2；sprmPItap 作为表格嵌套深度的权威来源；M3NestedTable.DepthTwoTableLivesInTheEnclosingCell、M4FastSaved.PiecePItapPlacesParagraphInsideTable |
-| ✅ | `0x664A` | sprmPDtap | A signed integer that specifies an addition or subtraction to the existing table depth of this paragraph. | 段落 PAP §2.6.2；深度增量形式，累加到 sprmPItap；M3NestedTable.DeltaDepthIsAccumulated |
+| ✅ | `0x664A` | sprmPDtap | A signed integer that specifies an addition or subtraction to the existing table depth of this paragraph. | 段落 PAP §2.6.2；深度增量形式，累加到 sprmPItap；M3NestedTable.DeltaDepthIsAccumulated、M3NestedTable.DeltaDepthWideArithmetic |
 | N/A | `0x244B` | sprmPFInnerTableCell | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table cell. | 段落 PAP §2.6.2；嵌套表单元格增量保存簿记；不影响格式 |
 | ✅ | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2；嵌套表行结束标记；M3NestedTable.WriterNestsTableElements |
 | ✅ | `0xC64D` | sprmPShd | A SHDOperand value that specifies the background shading for the paragraph. | 段落 PAP §2.6.2 |

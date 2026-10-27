@@ -268,3 +268,27 @@ TEST(M3NestedTable, DeltaDepthIsAccumulated) {
   doc::detail::ApplyPara(p, 0x664A, doc::detail::Bytes(plus_one));
   EXPECT_EQ(p.table_depth, 8);
 }
+
+TEST(M3NestedTable, DeltaDepthWideArithmetic) {
+  model::Paragraph p;
+  const std::vector<uint8_t> absolute{3, 0, 0, 0};
+  doc::detail::ApplyPara(p, 0x6649, doc::detail::Bytes(absolute));
+
+  const auto apply_delta = [&](const std::vector<uint8_t>& operand) {
+    const auto sprm = Prl(0x664A, operand);
+    return doc::detail::WalkParagraph(
+        doc::detail::Bytes(sprm), doc::detail::Bytes(sprm),
+        [&](uint16_t op, doc::detail::Bytes value) {
+          doc::detail::ApplyPara(p, op, value);
+        });
+  };
+
+  EXPECT_TRUE(apply_delta({0xFF, 0xFF, 0xFF, 0x7F}));  // INT32_MAX
+  EXPECT_EQ(p.table_depth, 8);
+  doc::detail::ApplyPara(p, 0x6649, doc::detail::Bytes(absolute));
+  EXPECT_TRUE(apply_delta({0, 0, 0, 0x80}));  // INT32_MIN
+  EXPECT_EQ(p.table_depth, 0);
+  doc::detail::ApplyPara(p, 0x6649, doc::detail::Bytes(absolute));
+  EXPECT_TRUE(apply_delta({0, 0, 0xFF, 0xFF}));  // 0xFFFF0000
+  EXPECT_EQ(p.table_depth, 0);
+}

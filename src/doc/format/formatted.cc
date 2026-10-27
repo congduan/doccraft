@@ -496,7 +496,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
           if (op == kSprmPItap)
             cached_depth = ClampTableDepth(S32(v, 0));
           if (op == kSprmPDtap)
-            cached_depth = ClampTableDepth(cached_depth + S32(v, 0));
+            cached_depth =
+                ClampTableDepth(static_cast<int64_t>(cached_depth) + S32(v, 0));
         });
       }
       table_pap = pap;
@@ -518,7 +519,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         depth = ClampTableDepth(S32(v, 0));
         piece_table_set = true;
       } else if (op == kSprmPDtap && v.size() >= 4) {
-        depth = ClampTableDepth(depth + S32(v, 0));
+        depth = ClampTableDepth(static_cast<int64_t>(depth) + S32(v, 0));
         piece_table_set = true;
       }
     });

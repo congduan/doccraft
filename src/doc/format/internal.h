@@ -189,8 +189,8 @@ inline constexpr int kMaxTableDepth = 8;
 // field and the formatted.cc frame stack - clamp through this one helper so
 // the IR depth and the built structure can never disagree; the frame stack
 // additionally falls back to fInTable when the clamped depth is zero.
-inline int ClampTableDepth(int depth) {
-  return std::clamp(depth, 0, kMaxTableDepth);
+inline int ClampTableDepth(int64_t depth) {
+  return static_cast<int>(std::clamp<int64_t>(depth, 0, kMaxTableDepth));
 }
 
 // sprmTCHorzBands / sprmTCVertBands accept 1-3 rows or columns per band.
