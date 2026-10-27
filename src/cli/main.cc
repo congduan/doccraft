@@ -140,6 +140,10 @@ int main(int argc, char** argv) {
       return 1;
     }
     const bool encrypted = word->size() >= 12 && ((*word)[11] & 0x01);
+    if (has_password && !encrypted) {
+      std::fprintf(stderr,
+                   "warning: --password ignored: document is not encrypted\n");
+    }
     auto fib = doccraft::doc::ParseFib(*word);
     if (encrypted && !has_password && !((*word)[11] & 0x80)) {
       const std::string table_name = ((*word)[11] & 0x02) ? "1Table" : "0Table";

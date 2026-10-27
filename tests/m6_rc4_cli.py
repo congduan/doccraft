@@ -24,6 +24,15 @@ binary, plain, *fixtures = sys.argv[1:]
 with tempfile.TemporaryDirectory() as directory:
     plain_out = pathlib.Path(directory) / "plain.docx"
     subprocess.run([binary, "convert", plain, "-o", str(plain_out)], check=True)
+    passworded = subprocess.run(
+        [binary, "convert", plain, "--password", "doccraft-m6", "-o",
+         str(plain_out)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert passworded.returncode == 0
+    assert "--password ignored" in passworded.stderr
     for encrypted in fixtures:
         encrypted_out = pathlib.Path(directory) / "encrypted.docx"
         subprocess.run(
