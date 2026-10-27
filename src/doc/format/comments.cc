@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -138,6 +139,16 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
   if (!chars) {
     return std::unexpected(chars.error());
   }
+  // PlcfFldAtn CPs are relative to the comment region; a malformed PLC drops
+  // only the flags, never the comment bodies.
+  std::map<uint32_t, uint8_t> field_status;
+  if (auto status =
+          ReadStoryFieldStatus(table, fib.fields_atn, base, fib.ccp_atn)) {
+    field_status = std::move(*status);
+  } else {
+    doc.warnings.push_back("skipped comment field PLC: " +
+                           status.error().message);
+  }
   for (size_t i = 0; i < count; i++) {
     const uint32_t first = U32(text, 4 * i);
     const uint32_t last = U32(text, 4 * (i + 1));
@@ -150,8 +161,9 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
     }
     comment.initials = (*anchors)[i].initials;
     if (last > first && last <= fib.ccp_atn) {
-      comment.paragraphs = ReadStoryParagraphs(*chars, chpx, papx, doc.fonts,
-                                               prcs, base, first, last);
+      comment.paragraphs =
+          ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base, first,
+                              last, &field_status);
     }
     doc.comments.push_back(std::move(comment));
   }

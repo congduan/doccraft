@@ -80,6 +80,13 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.fonts = pair(15);
   f.headers = pair(11);
   f.fields_main = pair(16);
+  // [MS-DOC] FibRgFcLcb97 rows 18-20 (1-based): fcPlcfFldHdr/Ftn/Atn. The
+  // endnote story's PLC is row 49 (fcPlcfFldEdn), right after fcPlcfendTxt;
+  // row 21 (fcPlcfFldMcr) is undefined per spec and stays unread.
+  f.fields_hdr = pair(17);
+  f.fields_ftn = pair(18);
+  f.fields_atn = pair(19);
+  f.fields_edn = pair(48);
   f.and_ref = pair(4);
   f.and_txt = pair(5);
   f.atn_owners = pair(36);

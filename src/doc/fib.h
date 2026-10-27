@@ -36,6 +36,7 @@ struct Fib {
   uint32_t fc_clx = 0, lcb_clx = 0;
   struct Range {
     uint32_t offset = 0, size = 0;
+    bool operator==(const Range&) const = default;
   };
   Range stsh, chpx_bte, papx_bte, sed, fonts, lists, list_overrides, headers;
   // Footnote/endnote reference and text PLCs ([MS-DOC] §2.8.4, §2.8.5).
@@ -47,7 +48,9 @@ struct Fib {
   Range sttb_bkmk, bkf, bkl;
   Range spa_main, spa_hdr, drawing_group, txbx_txt, txbx_bkd;
   Range hdr_txbx_txt, hdr_txbx_bkd;
-  Range fields_main;
+  // Field character PLCs ([MS-DOC] §2.5.10): main, header, footnote, comment
+  // and endnote stories each carry their own Plcfld.
+  Range fields_main, fields_hdr, fields_ftn, fields_atn, fields_edn;
   std::string table_stream() const {
     return which_table ? "1Table" : "0Table";
   }

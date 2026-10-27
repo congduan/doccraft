@@ -287,13 +287,27 @@ void ReadLists(model::Document& doc, Bytes table, const Fib& fib);
 
 model::Run InheritedRun(const model::Document& doc, int style);
 
+// Parses one story's Plcfld ([MS-DOC]: (n+1) CPs then n 2-byte Fld records)
+// into a map keyed by the field-begin CP in absolute document CP
+// space (`base` + the PLC's story-relative CP); the value is the Fld.grffld
+// byte of the matching end entry, whose bit 4 is fLocked and bit 2 is
+// fResultsDirty. `story_length` is the story's ccp. An empty range yields an
+// empty map; anything malformed is an error, so non-main callers can degrade
+// to a warning while the main story keeps failing hard.
+std::expected<std::map<uint32_t, uint8_t>, Error> ReadStoryFieldStatus(
+    Bytes table, Fib::Range r, uint64_t base, uint32_t story_length);
+
 // Turns the CP range [first, last) of one story into paragraphs. `base` is the
 // absolute CP where the story starts; the final paragraph mark is a guard.
+// `field_status` (may be null) carries the story's Plcfld flags keyed by the
+// absolute begin CP; the field hierarchy itself always comes from the 0x13/
+// 0x14/0x15 characters, so a null map only drops fldLock/dirty.
 std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
     const std::vector<std::vector<uint8_t>>& prcs, uint64_t base,
-    uint32_t first, uint32_t last);
+    uint32_t first, uint32_t last,
+    const std::map<uint32_t, uint8_t>* field_status = nullptr);
 
 uint16_t Prm0Opcode(uint8_t isprm);
 

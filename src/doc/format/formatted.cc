@@ -210,31 +210,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   }
   std::map<uint32_t, uint8_t> field_status;
   if (fib.fields_main.size) {
-    if (!Valid(table, fib.fields_main) || fib.fields_main.size < 4 ||
-        (fib.fields_main.size - 4) % 6)
-      return std::unexpected(Error{"invalid main field PLC"});
-    Bytes plc = table.subspan(fib.fields_main.offset, fib.fields_main.size);
-    const size_t count = (plc.size() - 4) / 6;
-    const size_t fld_offset = 4 * (count + 1);
-    std::vector<uint32_t> starts;
-    uint32_t previous = 0;
-    for (size_t i = 0; i < count; ++i) {
-      const uint32_t cp = U32(plc, 4 * i);
-      // Fld.fldch packs the 5-bit character code with three marker flags.
-      const uint8_t kind = plc[fld_offset + 2 * i] & 0x1F;
-      if ((i && cp <= previous) || cp >= fib.ccp_text ||
-          (kind != 0x13 && kind != 0x14 && kind != 0x15))
-        return std::unexpected(Error{"invalid main field PLC entry"});
-      previous = cp;
-      if (kind == 0x13) {
-        starts.push_back(cp);
-      } else if (kind == 0x15 && !starts.empty()) {
-        field_status.emplace(starts.back(), plc[fld_offset + 2 * i + 1]);
-        starts.pop_back();
-      }
-    }
-    if (U32(plc, 4 * count) < previous)
-      return std::unexpected(Error{"invalid main field PLC guard"});
+    auto status =
+        detail::ReadStoryFieldStatus(table, fib.fields_main, 0, fib.ccp_text);
+    if (!status)
+      return std::unexpected(
+          Error{"invalid main field PLC: " + status.error().message});
+    field_status = std::move(*status);
   }
   // CP -> comment id (index + 1), matching w:commentReference/@w:id.
   std::map<uint32_t, int> comment_index;

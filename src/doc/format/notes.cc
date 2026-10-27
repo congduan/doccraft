@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <string>
 #include <vector>
 
 #include "doc/format/sprm.h"
@@ -120,7 +122,8 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
     return std::unexpected(chars.error());
   }
   auto append = [&](const std::vector<uint32_t>& text_cps, uint64_t base,
-                    uint32_t story_length, size_t count, bool endnote) {
+                    uint32_t story_length, size_t count, bool endnote,
+                    const std::map<uint32_t, uint8_t>& field_status) {
     for (size_t i = 0; i < count; i++) {
       const uint32_t first = text_cps[i];
       const uint32_t last = text_cps[i + 1];
@@ -130,12 +133,32 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
       model::Note note;
       note.endnote = endnote;
       note.paragraphs = ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs,
-                                            base, first, last);
+                                            base, first, last, &field_status);
       doc.notes.push_back(std::move(note));
     }
   };
-  append(*footnotes, footnote_base, fib.ccp_ftn, footnote_count, false);
-  append(*endnotes, endnote_base, fib.ccp_edn, endnote_count, true);
+  // PlcfFldFtn / PlcfFldEdn CPs are relative to their own note region; a
+  // malformed PLC drops only the flags, never the note bodies.
+  auto read_status = [&](Fib::Range r, uint64_t base, uint32_t story_length,
+                         const char* what) {
+    std::map<uint32_t, uint8_t> status;
+    if (auto parsed_status =
+            ReadStoryFieldStatus(table, r, base, story_length)) {
+      status = std::move(*parsed_status);
+    } else {
+      doc.warnings.push_back(std::string("skipped ") + what +
+                             " field PLC: " + parsed_status.error().message);
+    }
+    return status;
+  };
+  const auto footnote_status =
+      read_status(fib.fields_ftn, footnote_base, fib.ccp_ftn, "footnote");
+  const auto endnote_status =
+      read_status(fib.fields_edn, endnote_base, fib.ccp_edn, "endnote");
+  append(*footnotes, footnote_base, fib.ccp_ftn, footnote_count, false,
+         footnote_status);
+  append(*endnotes, endnote_base, fib.ccp_edn, endnote_count, true,
+         endnote_status);
   return {};
 }
 }  // namespace doccraft::doc::detail
