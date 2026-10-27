@@ -195,6 +195,124 @@ void PutBookmark(Synthetic& s, uint32_t begin, uint32_t end,
 }
 }  // namespace
 
+TEST(M17StoryBookmarks, FootnoteBookmarkReachesXml) {
+  Synthetic s = Build("X\x02\r", "AB\r\r", "", "", "");
+  s.fib.fnd_ref = PutNoteRefPlc(s, 1);
+  s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn);
+  PutBookmark(s, s.ftn_base, s.ftn_base + 2, "FootMark");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->notes.size(), 1u);
+  ASSERT_FALSE(parsed->notes[0].paragraphs.empty());
+  const auto& runs = parsed->notes[0].paragraphs[0].runs;
+  ASSERT_GE(runs.size(), 3u);
+  EXPECT_TRUE(runs[0].bookmark_start);
+  EXPECT_EQ(runs[0].bookmark_name, "FootMark");
+  EXPECT_EQ(runs[1].text, "AB");
+  EXPECT_FALSE(runs[2].bookmark_start);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string xml = Part(*zip, "word/footnotes.xml");
+  EXPECT_NE(xml.find("<w:bookmarkStart w:id=\"0\" w:name=\"FootMark\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:bookmarkEnd w:id=\"0\"/>"), std::string::npos);
+}
+
+TEST(M17StoryBookmarks, EndnoteBookmarkReachesXml) {
+  Synthetic s = Build("X\x02\r", "", "", "", "AB\r\r");
+  s.fib.end_ref = PutNoteRefPlc(s, 1);
+  s.fib.end_txt = PutTextCpPlc(s, s.fib.ccp_edn);
+  PutBookmark(s, s.edn_base, s.edn_base + 2, "EndMark");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->notes.size(), 1u);
+  EXPECT_TRUE(parsed->notes[0].endnote);
+  ASSERT_FALSE(parsed->notes[0].paragraphs.empty());
+  EXPECT_TRUE(parsed->notes[0].paragraphs[0].runs[0].bookmark_start);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string xml = Part(*zip, "word/endnotes.xml");
+  EXPECT_NE(xml.find("<w:bookmarkStart w:id=\"0\" w:name=\"EndMark\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:bookmarkEnd w:id=\"0\"/>"), std::string::npos);
+}
+
+TEST(M17StoryBookmarks, CommentBookmarkReachesXml) {
+  Synthetic s = Build("X\x05\r", "", "", "AB\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  PutBookmark(s, s.atn_base, s.atn_base + 2, "CommentMark");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  ASSERT_FALSE(parsed->comments[0].paragraphs.empty());
+  EXPECT_TRUE(parsed->comments[0].paragraphs[0].runs[0].bookmark_start);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string xml = Part(*zip, "word/comments.xml");
+  EXPECT_NE(xml.find("<w:bookmarkStart w:id=\"0\" w:name=\"CommentMark\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:bookmarkEnd w:id=\"0\"/>"), std::string::npos);
+}
+
+TEST(M17StoryBookmarks, CrossMainAndFootnoteIsSkipped) {
+  Synthetic s = Build("X\x02\r", "AB\r\r", "", "", "");
+  s.fib.fnd_ref = PutNoteRefPlc(s, 1);
+  s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn);
+  PutBookmark(s, 0, s.ftn_base + 1, "CrossMark");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_FALSE(parsed->warnings.empty());
+  EXPECT_NE(parsed->warnings[0].find("bookmark"), std::string::npos);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  for (const char* part : {"word/document.xml", "word/footnotes.xml"}) {
+    const std::string xml = Part(*zip, part);
+    EXPECT_EQ(xml.find("w:bookmarkStart"), std::string::npos);
+    EXPECT_EQ(xml.find("w:bookmarkEnd"), std::string::npos);
+  }
+}
+
+TEST(M17StoryBookmarks, CommentPairOutsideStoryIsSkipped) {
+  Synthetic s = Build("X\x05\r", "", "", "AB\r\r", "CD\r\r");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  PutBookmark(s, s.atn_base, s.edn_base + 1, "CrossComment");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  ASSERT_FALSE(parsed->comments[0].paragraphs.empty());
+  EXPECT_EQ(parsed->comments[0].paragraphs[0].runs[0].text, "AB");
+  ASSERT_FALSE(parsed->warnings.empty());
+  EXPECT_NE(parsed->warnings[0].find("skipped comment bookmark PLC"),
+            std::string::npos);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string xml = Part(*zip, "word/comments.xml");
+  EXPECT_EQ(xml.find("w:bookmarkStart"), std::string::npos);
+  EXPECT_EQ(xml.find("w:bookmarkEnd"), std::string::npos);
+}
+
+TEST(M17StoryBookmarks, FootnoteGuardClosesBookmark) {
+  Synthetic s = Build("X\x02\r", "AB\r\r", "", "", "");
+  s.fib.fnd_ref = PutNoteRefPlc(s, 1);
+  s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn);
+  PutBookmark(s, s.ftn_base, s.ftn_base + 3, "GuardMark");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->notes.size(), 1u);
+  const auto& runs = parsed->notes[0].paragraphs[0].runs;
+  ASSERT_GE(runs.size(), 3u);
+  EXPECT_TRUE(runs.front().bookmark_start);
+  EXPECT_EQ(runs.back().bookmark_id, 0);
+  EXPECT_FALSE(runs.back().bookmark_start);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string xml = Part(*zip, "word/footnotes.xml");
+  EXPECT_EQ(Count(xml, "<w:bookmarkStart w:id=\"0\""), 1u);
+  EXPECT_EQ(Count(xml, "<w:bookmarkEnd w:id=\"0\"/>"), 1u);
+}
+
 TEST(M9HeaderBookmarks, StandardBookmarkAppearsInHeaderPart) {
   Synthetic s = Build("Body\r", "", "ABCD\r\r", "", "");
   s.fib.headers = PutHeaderPlc(s, 1, s.fib.ccp_hdd);

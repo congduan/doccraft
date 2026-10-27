@@ -25,7 +25,9 @@ with tempfile.TemporaryDirectory() as temp:
          "-o", str(xor_out)], capture_output=True, text=True)
     assert good.returncode == 0, good.stderr
     with zipfile.ZipFile(plain_out) as a, zipfile.ZipFile(xor_out) as b:
-        assert a.read("word/document.xml") == b.read("word/document.xml")
+        assert set(a.namelist()) == set(b.namelist())
+        for part in a.namelist():
+            assert a.read(part) == b.read(part), part
     wrong = subprocess.run(
         [binary, "convert", encrypted, "--password", "wrong", "-o",
          str(xor_out)], capture_output=True, text=True)
