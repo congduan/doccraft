@@ -44,7 +44,7 @@ Compound File Binary Format（[MS-CFB]），自研实现：
 
 Word 97-2003 Binary File Format（[MS-DOC]）：
 
-- **FIB**（File Information Block）：版本探测（nFib 0x00C1→Word97 … 0x011A→Word2007）、
+- **FIB**（File Information Block）：版本探测（旧版 0x0065/0x0068 的文本分支；0x00C1→Word97 … 0x011A→Word2007 的完整分支）、
   flag 位解析（fComplex、fEncrypted、fWhichTblStrm）、各表偏移
 - **Table Stream**（0Table/1Table 选择）: STSH、PLCF 系列、修订信息
 - **文本获取**：-piece table（PLCF of PCD），支持 fcCompressed（按 `FibBase.lid` 的 ANSI 代码页压缩，经 iconv 解码）与
@@ -158,7 +158,8 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ### 6.1 文本与编码
 - ✅ 基本文本抽取（piece table、文档 ANSI 代码页/UTF-16 双模式）
-- ◐ fast-saved 文档（fComplex）：最终 CLX piece 表重建正文，Prm0/Prm1/Prc 修饰覆盖正文和页眉/脚注/批注/文本框故事；piece 上的 sprmPItap 表格深度有合成断言。六个真实样本可转换且文本相似率 99.55%–100%，但四个不逐字一致，版式 golden 未通过
+- ◐ Word 6/95 文本：实测 nFib 0x0065/0x0068 的旧 FIB、同流 CLX 与简单 fcMin 文本可读；CP1251 大文档与 Word 6 俄文样本已对拍，CP950 合成字节有断言。旧版格式表、图片和其他故事尚未支持。
+- ◐ fast-saved 文档（fComplex）：最终 CLX piece 表重建正文，Prm0/Prm1/Prc 修饰覆盖正文和页眉/脚注/批注/文本框故事；piece 上的 sprmPItap 表格深度有合成断言。正文表格状态按段落结束符 PAPX 选取，Bug33519 的 60 个碎表收敛为 3 个且行单元格对齐；旧、新 DOCX 的 LO 文本导出均为 691/691 词；版式 golden 未通过
 - ◐ 特殊字符：tab/CR/VT/非断行空格/连字符/SYM 字符（图片/脚注/批注/绘图等特殊字符随 M4/M5）
 - ◐ 域代码文本与结果（fldChar 层次）：通用复杂域输出 `w:fldChar` begin/separate/end + `w:instrText`，顶层未锁定 HYPERLINK 映射为 `w:hyperlink`、顶层页码类域映射为 `w:fldSimple`，其余（含嵌套/锁定）一律 fldChar 层次；正文 `PlcfFldMom`、页眉/脚注/尾注/批注故事 `PlcfFldHdr/Ftn/Edn/Atn`、正文及页眉文本框故事 `PlcfFldTxbx/PlcffldHdrTxbx` 的 `fldLock`/`dirty` 标志均已接入；`M11TextboxFields.FieldFlagsReachBodyAndHeaderTextboxXml` 合成断言覆盖两个文本框 XML 输出路径。真实 Word 文本框域 golden 尚缺，故保持 ◐；`fcPlcfFldMcr` 规范定义为 undefined 不读；正文 EMBED 对象按 ObjectPool 保存
 - ✅ 多语言/复杂文种（RTL 标记、bidi、复杂文种颜色与字号）

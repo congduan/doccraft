@@ -9,7 +9,7 @@
 ## M2
 
 - `fComplex=1`（增量保存）文档按最终 CLX piece 表读取正文，Prm0 与 Prm1/Prc 字符及段落修饰现也应用于页眉、脚注、批注和文本框故事；piece 上的 `sprmPItap` 已参与正文表格深度判定。Prm0 中仅修订元数据用途的 `sprmPFNumRMIns` 不映射。真实样本的版式 golden 尚未通过，§6.1 保持 ◐。
-- 真实 fast-saved 批量对拍（LibreOffice UTF-8 文本，源 `.doc` vs 转换 `.docx`）：Apache POI 的 `Bug33519.doc` 4522/4522、AbiWord/wv 的 `fastsavedmix.doc` 97/97 逐字一致；`rasp.doc` 2028/2024（相似率 99.9013%）、`o_kurs.doc` 5725/5719（99.8427%）、`ob_is.doc` 38390/38368（99.9375%）、AbiWord/wv 的 `samplefastsaved.doc` 1542/1542（99.5460%）。差异集中在空段落、目录域页码及少数字符；六个样本的版式 golden 均未过。`Bug50955.doc`、`Bug51944.doc` 为非 WordDocument 签名，`Bug60942.doc` 的 CFB 链长超限，`word_with_embeded.doc` 缺 CLX Pcdt，均维持拒绝。`o_kurs.doc` 复制到 fixtures 用于可重用文本框 PLC 尾项及 XML 控制字符回归。另有非 fast-saved 的 `word_with_embeded_ooxml.doc` 121/121 逐字一致，用于 OLE 验证。
+- 真实 fast-saved 批量对拍（LibreOffice UTF-8 文本，源 `.doc` vs 转换 `.docx`）：Apache POI 的 `Bug33519.doc` 表格结构现按段落结束符 PAPX 判定，避免旧 FC 文字片段误关表；`fastsavedmix.doc`、`rasp.doc`、`o_kurs.doc`、`ob_is.doc`、`samplefastsaved.doc` 的既有文本差异与版式 golden 限制仍需逐项复核。`Bug50955.doc`、`Bug51944.doc` 已由 Word 6/95 分支读取；`Bug60942.doc` 的 CFB 链长超限，`word_with_embeded.doc` 缺 CLX Pcdt，仍拒绝。`o_kurs.doc` 复制到 fixtures 用于可重用文本框 PLC 尾项及 XML 控制字符回归。
 - IR 仅包含段落、文本 run 和特殊控制码位置。`0x07` 单元格/行结束与 `0x0B` 换行在最小 DOCX 中写为换行，不重建表格；列表编号、样式、页眉脚注等留待后续里程碑。
 - 当前最小写出为达到语料 `plain-text.doc` 的像素验收，使用其默认字体（Liberation Serif，12pt）及 Letter 页面 1134 twip 页边距。尚未从 DOC 属性读取字体、字号和页面设置，因此其他语料的版式不保证一致。
 - 文本一致率测试把连续表格控制码折叠为单个换行，并剥除 LibreOffice TXT 导出中根据编号属性生成的 `•` 列表标记。这些标记不在 M2 抽取的主文本中；不计此差异时五份语料内容均为 100%。
@@ -22,8 +22,13 @@
 
 ## M4 当前范围
 
-- Apache POI 测试语料中的真实 `Bug33519.doc`（FIB `fComplex=1`、`cQuickSaves=8`）已经转换成功；LibreOffice 从源 `.doc` 与转换后 `.docx` 导出的 UTF-8 文本逐字一致（4520 字符）。该文件像素对拍源为 3 页、输出为 4 页，格式 golden 未通过，因此 fast-saved 不标 ✅。语料来源：<https://svn.apache.org/repos/asf/poi/tags/REL_3_17_FINAL/test-data/document/Bug33519.doc>；原样本未复制进仓库。
+- Apache POI 的 `Bug33519.doc`（FIB `fComplex=1`）在压力语料中，旧版本将表格拆成 60 个；按段落结束符 PAPX 选择表格状态后为 3 个。以同一 LibreOffice TXT 导出流程对照源文件，旧、新 DOCX 均为 691/691 词且词序一致率 1.000；压力目录中旧 `.our.txt` 的 0.862 是单元格边界被抽取脚本直接拼接造成的口径差异。`M4FastSaved.ParagraphMarkPapKeepsFastSavedCellsTogether` 覆盖文字和结束符落在不同 FC 的情况。该修复尚不能保证 fast-saved 的版式 golden，§6.1 保持 ◐。
 - FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族；Table 流头部进一步区分传统 RC4 与 RC4 CryptoAPI。XOR obfuscation 仍只报告并拒绝转换。
+
+## Word 6/95 读取边界
+
+- 实测 Apache POI 的 `Bug50955.doc`、`Bug51944.doc` 为 nFib `0x0068`，`Word6.doc`、`52117.doc` 为 `0x0065`；签名分别出现 `0xA5DC`、`0xA699`，并非先前推测的 `0x0052`。旧 FIB 的字符数在 `0x34`，38 个 fc/lcb 对从 `0x58` 起，CLX 及文本都位于 WordDocument。直接 FC 的 ANSI/UTF-16 PCD 与简单文档的 `fcMin` 已接入；损坏的范围、CLX 和 PCD 显式拒绝。
+- 旧版仅保证正文文本和基本段落切分。旧版 CHPX/PAPX、样式、表格、图片、页眉脚注等格式结构尚未映射，转换后的布局会退化。`52117.doc` 的 lid 为 en-US，但 FFN 字库携带俄文 charset，按 CP1251 解码；该修正只覆盖可在 FFN 中识别的俄文，其他 lid 与字符集冲突仍可能误解码。`Bug51944.doc` 的 lid 同为 en-US，CLI 从有界 `\005SummaryInformation` CodePage 属性读出 950 作为旧版 ANSI 回退代码页；提供的 LO 文本实际无汉字。CP950 繁体解码由 `LegacyWord.Word95AnsiPieceUsesTraditionalChineseCodepage` 的 Big5 字节合成断言验证，尚缺带真实繁体汉字的 Word 95 golden。
 
 ## M6 设计取舍
 
