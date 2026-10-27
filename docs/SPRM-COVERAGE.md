@@ -7,6 +7,7 @@
 > M4 fast-saved CLX：`PieceTableTest.ReadsFastSavedPiecesAndPrc` 与 `PieceTableTest.AppliesFastSavedPrm0Modifier` 验证正文；`M4FastSaved.HeaderStoryAppliesPrcRunFormatting` 验证非正文 Prc；`M4FastSaved.PiecePItapPlacesParagraphInsideTable` 验证 piece 上的表格深度。这改变修饰来源，不改变 §2.6 各 opcode 的既有覆盖状态。真实版式 golden 未过，§6.1 仍记 ◐。
 > M4 第二批文本框：`M4Textbox.LibreOfficeFloatingTextboxKeepsStoryAtAnchor` 与 `M4Textbox.SyntheticFlowBreaksStayInStoryOrder` 覆盖 FTXBXS/Tbkd 与锚点连接；它们是 PLC/故事结构而非 sprm，不改变本表 opcode 状态。§6.6 文本框保持 ◐，限制见 KNOWN-SIMPLIFICATIONS。
 > M11 文本框字段 PLC：`M11TextboxFields.FibExposesBodyAndHeaderTextboxFieldPlcs`、`M11TextboxFields.FieldFlagsReachBodyAndHeaderTextboxXml`、`M11TextboxFields.InvalidPlcWarnsAndKeepsHierarchy` 覆盖 FIB pair 57/59、两类文本框域的锁/脏 XML 标志及损坏 PLC 降级。它们不是 sprm；§6.1 因缺真实 Word 文本框域 golden 保持 ◐。
+> M11 页眉 PLC 双重损坏：`M11HeaderFields.DoublyCorruptPlcsKeepBothWarnings` 断言故事 PLC 与域 PLC 同时损坏时各发一条警告；不改变 sprm 状态。
 > M4 第二批损坏降级：`degraded_fkp_warning`、`degraded_sprm_warning`、`degraded_header_warning` 验证局部跳过、stderr 警告及正文保留；它们不改变正常输入下的各 opcode 覆盖状态。
 
 > 代码中的 opcode 不再是裸字面量：统一引用 `src/doc/format/sprm_codes.h` 的

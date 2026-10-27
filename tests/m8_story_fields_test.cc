@@ -333,6 +333,22 @@ TEST(M11TextboxFields, FibExposesBodyAndHeaderTextboxFieldPlcs) {
   EXPECT_EQ(fib->fields_hdr_txbx, (doc::Fib::Range{200, 22}));
 }
 
+TEST(M11HeaderFields, DoublyCorruptPlcsKeepBothWarnings) {
+  Synthetic s = Build("Body\r", "", "ABCD\r\r", "", "");
+  const size_t at = s.table.size();
+  s.table.resize(at + 32, 0);  // Eight CPs, short of six header stories.
+  Put32(s.table, at + 4 * 7, s.fib.ccp_hdd);
+  s.fib.headers = {static_cast<uint32_t>(at), 32};
+  s.fib.fields_hdr = {0, 3};  // Invalid field PLC size.
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 2u);
+  EXPECT_EQ(parsed->warnings[0], "skipped header field PLC: invalid field PLC");
+  EXPECT_EQ(parsed->warnings[1],
+            "skipped header stories: header story PLC is shorter than the "
+            "section count");
+}
+
 TEST(M8StoryFields, LockedHeaderFieldKeepsFldCharHierarchy) {
   const std::string header_text =
       "\x13 HYPERLINK \"https://example.com\" \x14site\x15\r\r";

@@ -302,14 +302,24 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
   if (sections == 0 || !fib.ccp_hdd || !fib.headers.size) {
     return out;
   }
-  if (!Valid(table, fib.headers) || fib.headers.size % 4 ||
-      fib.headers.size < 4 * (kStoryCount + 1)) {
-    return std::unexpected(Error{"invalid header story PLC"});
-  }
   uint64_t base = static_cast<uint64_t>(fib.ccp_text) + fib.ccp_ftn;
   uint64_t end = base + fib.ccp_hdd;
   if (end > UINT32_MAX) {
     return std::unexpected(Error{"header CP range too large"});
+  }
+  // Read the independent field PLC before validating the story PLC. If both
+  // are damaged, callers still receive each warning.
+  std::map<uint32_t, uint8_t> field_status;
+  if (auto status =
+          ReadStoryFieldStatus(table, fib.fields_hdr, base, fib.ccp_hdd)) {
+    field_status = std::move(*status);
+  } else {
+    doc.warnings.push_back("skipped header field PLC: " +
+                           status.error().message);
+  }
+  if (!Valid(table, fib.headers) || fib.headers.size % 4 ||
+      fib.headers.size < 4 * (kStoryCount + 1)) {
+    return std::unexpected(Error{"invalid header story PLC"});
   }
   std::vector<std::vector<uint8_t>> prcs;
   auto chars = ReadChars(word, table, fib, end, base, &prcs);
@@ -336,14 +346,6 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
   }
   // PlcfFldHdr CPs share the header region's CP space, so one map serves all
   // sections; each story read only looks up begins inside its own range.
-  std::map<uint32_t, uint8_t> field_status;
-  if (auto status =
-          ReadStoryFieldStatus(table, fib.fields_hdr, base, fib.ccp_hdd)) {
-    field_status = std::move(*status);
-  } else {
-    doc.warnings.push_back("skipped header field PLC: " +
-                           status.error().message);
-  }
   // Standard bookmark PLCs use absolute document CPs. Keep only pairs whose
   // starts are text CPs and whose ends are in the same story, including its
   // guard CP. An invalid pair does not remove text or other valid bookmarks.
