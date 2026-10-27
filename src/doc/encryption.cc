@@ -51,9 +51,16 @@ void CryptStream(std::span<uint8_t> stream, size_t plain_prefix,
     rc4.Xor(stream.subspan(crypt_start, end - crypt_start));
   }
 }
-}  // namespace
+enum class Rc4Version { kLegacy, kCryptoApi };
 
-std::expected<std::string_view, Error> DetectRc4Type(
+struct Rc4HeaderInfo {
+  Rc4Version version;
+  uint32_t header_size;
+};
+
+// Shared guard for both public entry points: validates the FIB encryption
+// flags, reads the table-stream header size and classifies the version.
+std::expected<Rc4HeaderInfo, Error> DetectRc4Header(
     std::span<const uint8_t> word, std::span<const uint8_t> table) {
   if (word.size() < kFibPlainBytes)
     return std::unexpected(Error{"truncated encrypted FIB"});
@@ -66,28 +73,32 @@ std::expected<std::string_view, Error> DetectRc4Type(
   const uint16_t major = base::U16(table, 0);
   const uint16_t minor = base::U16(table, 2);
   if (major == 1 && minor == 1)
-    return "legacy RC4/MD5";
+    return Rc4HeaderInfo{Rc4Version::kLegacy, header_size};
   if (major >= 2 && major <= 4 && minor == 2)
-    return "RC4 CryptoAPI";
+    return Rc4HeaderInfo{Rc4Version::kCryptoApi, header_size};
   return std::unexpected(Error{"unsupported RC4 encryption version"});
+}
+}  // namespace
+
+std::expected<std::string_view, Error> DetectRc4Type(
+    std::span<const uint8_t> word, std::span<const uint8_t> table) {
+  const auto info = DetectRc4Header(word, table);
+  if (!info)
+    return std::unexpected(info.error());
+  return info->version == Rc4Version::kLegacy ? "legacy RC4/MD5"
+                                              : "RC4 CryptoAPI";
 }
 
 std::expected<Fib, Error> DecryptRc4(std::span<uint8_t> word,
                                      std::span<uint8_t> table,
                                      std::span<uint8_t> data,
                                      std::string_view password) {
-  if (word.size() < kFibPlainBytes)
-    return std::unexpected(Error{"truncated encrypted FIB"});
-  const uint16_t flags = base::U16(word, 10);
-  if (!(flags & 0x0100) || (flags & 0x8000))
-    return std::unexpected(Error{"not an RC4 encrypted document"});
-  const uint32_t header_size = base::U32(word, 14);
-  if (header_size > table.size() || header_size < 4)
-    return std::unexpected(Error{"truncated RC4 encryption header"});
+  const auto info = DetectRc4Header(word, table);
+  if (!info)
+    return std::unexpected(info.error());
+  const uint32_t header_size = info->header_size;
   const std::span<const uint8_t> header = table.first(header_size);
-  const uint16_t major = base::U16(header, 0);
-  const uint16_t minor = base::U16(header, 2);
-  if (major == 1 && minor == 1) {
+  if (info->version == Rc4Version::kLegacy) {
     if (header_size < kLegacyHeaderBytes)
       return std::unexpected(Error{"truncated legacy RC4 header"});
     const auto encoded = crypto::EncodePassword(password);
@@ -121,8 +132,6 @@ std::expected<Fib, Error> DecryptRc4(std::span<uint8_t> word,
           Error{"invalid decrypted FIB: " + fib.error().message});
     return fib;
   }
-  if ((major < 2 || major > 4) || minor != 2)
-    return std::unexpected(Error{"unsupported RC4 encryption version"});
   if (header_size <
       kCryptoApiPrefixBytes + kEncryptionHeaderMinBytes + kVerifierBytes)
     return std::unexpected(Error{"truncated RC4 encryption header"});
