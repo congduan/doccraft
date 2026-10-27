@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -263,5 +264,63 @@ TEST(LegacyStyles, MalformedTablesWarnInsteadOfFailing) {
   EXPECT_FALSE(document->warnings.empty());
   ASSERT_EQ(document->paragraphs.size(), 1U);
   EXPECT_EQ(document->paragraphs[0].runs[0].text, "AB");
+}
+
+TEST(LegacyStyles, MalformedRecordsWarnInsteadOfFailing) {
+  const std::vector<uint8_t> chpx = {0x5D, 0x00, 0x00};
+  auto name = LegacyStd(1, 0x0FFF, 0, "Normal", nullptr, &chpx);
+  name[8] = 0xFF;  // Pascal name extends beyond the record.
+  auto upx = LegacyStd(1, 0x0FFF, 0, "Normal", nullptr, &chpx);
+  Put16(upx, 16, 0xFFFF);  // CHPX length extends beyond the record.
+  const std::vector<uint8_t> short_record = {0, 0, 0, 0};
+  const std::vector<std::vector<uint8_t>> records = {name, name, upx,
+                                                     short_record};
+  auto stsh = LegacyStsh(records);
+  Append16(stsh, 0xFFFF);  // Final record length extends beyond STSH.
+  Put16(stsh, 2, static_cast<uint16_t>(records.size() + 1));
+  std::vector<uint8_t> word = MakeWord6Base(2048);
+  PutBlob(word, 1024, stsh);
+  Put32(word, 88 + 8, 1024);
+  Put32(word, 92 + 8, static_cast<uint32_t>(stsh.size()));
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(word, word, *fib);
+  ASSERT_TRUE(document) << document.error().message;
+  const auto& warnings = document->warnings;
+  EXPECT_EQ(std::count(warnings.begin(), warnings.end(),
+                       "Word 6/95 style record has a malformed name"),
+            1);
+  EXPECT_EQ(std::count(warnings.begin(), warnings.end(),
+                       "Word 6/95 style record has a malformed UPX"),
+            1);
+  EXPECT_EQ(std::count(warnings.begin(), warnings.end(),
+                       "Word 6/95 stylesheet has a truncated record"),
+            2);
+}
+
+TEST(LegacyStyles, StshiFontFillsOnlyMissingNormalFont) {
+  const auto normal = LegacyStd(1, 0x0FFF, 0, "Normal", nullptr, nullptr);
+  auto stsh = LegacyStsh({normal});
+  stsh.insert(stsh.begin() + 6, 10, 0);  // Extend STSHI from 4 to 14 bytes.
+  Put16(stsh, 0, 14);
+  Put16(stsh, 14, 1);  // STSHI standard ASCII font index.
+  std::vector<uint8_t> word = MakeWord6Base(2048);
+  PutBlob(word, 1024, stsh);
+  Put32(word, 88 + 8, 1024);
+  Put32(word, 92 + 8, static_cast<uint32_t>(stsh.size()));
+  const auto ffn = LegacyFfn(
+      {LegacyFfnEntry(0, "Arial"), LegacyFfnEntry(0, "Times New Roman")});
+  PutBlob(word, 1536, ffn);
+  Put32(word, 88 + 15 * 8, 1536);
+  Put32(word, 92 + 15 * 8, static_cast<uint32_t>(ffn.size()));
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(word, word, *fib);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->styles.size(), 1U);
+  EXPECT_EQ(document->styles[0].run.font, "Times New Roman");
+  EXPECT_EQ(document->styles[0].resolved_run.font, "Times New Roman");
+  // These STSHI variants have no default half-point size field.
+  EXPECT_EQ(document->styles[0].run.size, 0);
 }
 }  // namespace

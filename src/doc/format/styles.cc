@@ -396,15 +396,29 @@ std::vector<model::Style> ReadLegacyStyles(
   size_t p = 2 + info;
   out.resize(count);
   std::string partial_style;
+  bool malformed_name = false;
+  // Word 6/95 STSHI stores its standard CHP font indexes after the 12-byte
+  // fixed fields. Some files contain only the first of the three slots.
+  constexpr size_t kStandardFontOffset = 14;
+  const int standard_font =
+      info >= kStandardFontOffset && U16(b, kStandardFontOffset) < fonts.size()
+          ? U16(b, kStandardFontOffset)
+          : -1;
   for (unsigned i = 0; i < count && p + 2 <= b.size(); i++) {
     const size_t len = U16(b, p);
     p += 2;
-    if (len > b.size() - p)
+    if (len > b.size() - p) {
+      if (warnings)
+        warnings->push_back("Word 6/95 stylesheet has a truncated record");
       break;
+    }
     Bytes d = b.subspan(p, len);
     p += len;
-    if (len < base_size)
-      continue;  // Empty slot: keeps its index in the sheet.
+    if (len < base_size) {
+      if (len && warnings)
+        warnings->push_back("Word 6/95 stylesheet has a truncated record");
+      continue;  // Zero-length empty slot keeps its index in the sheet.
+    }
     auto& s = out[i];
     s.type = U16(d, 2) & 15;
     s.base = U16(d, 2) >> 4;
@@ -412,25 +426,39 @@ std::vector<model::Style> ReadLegacyStyles(
     if (s.base == 0x0fff)
       s.base = -1;
     size_t x = base_size;
-    if (x >= d.size())
+    if (x >= d.size()) {
+      if (!malformed_name && warnings)
+        warnings->push_back("Word 6/95 style record has a malformed name");
+      malformed_name = true;
       continue;
+    }
     const size_t name_len = d[x];
-    if (x + 1 + name_len + 1 > d.size())
+    if (x + 1 + name_len + 1 > d.size()) {
+      if (!malformed_name && warnings)
+        warnings->push_back("Word 6/95 style record has a malformed name");
+      malformed_name = true;
       continue;
+    }
     s.name = DecodeAnsiName(d.subspan(x + 1, name_len), codepage);
     x += 1 + name_len + 1;
     if (x & 1)
       x++;  // Parity-align relative to the record start (base_size is even).
     const unsigned upx = U16(d, 4) & 15;
-    for (unsigned j = 0; j < upx && x + 2 <= d.size(); j++) {
+    for (unsigned j = 0; j < upx; j++) {
       if (x & 1)
         x++;
-      if (x + 2 > d.size())
+      if (x + 2 > d.size()) {
+        if (warnings)
+          warnings->push_back("Word 6/95 style record has a malformed UPX");
         break;
+      }
       const size_t n = U16(d, x);
       x += 2;
-      if (n > d.size() - x)
+      if (n > d.size() - x) {
+        if (warnings)
+          warnings->push_back("Word 6/95 style record has a malformed UPX");
         break;
+      }
       Bytes payload = d.subspan(x, n);
       x += n;
       const bool paragraph_upx = s.type == 1 && j == 0;
@@ -451,6 +479,9 @@ std::vector<model::Style> ReadLegacyStyles(
       });
     }
   }
+  if (!out.empty() && out[0].type == 1 && out[0].base == -1 &&
+      out[0].run.font.empty() && standard_font >= 0)
+    out[0].run.font = fonts[standard_font];
   if (!partial_style.empty() && warnings)
     warnings->push_back("Word 6/95 style '" + partial_style +
                         "' has unsupported sprms");

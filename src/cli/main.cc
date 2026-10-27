@@ -199,7 +199,10 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "convert: %s\n", fib.error().message.c_str());
       return 1;
     }
-    const std::string table_name = fib                    ? fib->table_stream()
+    // Word 6/95 keeps its tables in WordDocument, even if a Table stream
+    // happens to be present in a malformed or repackaged container.
+    const std::string table_name = fib && fib->legacy     ? "WordDocument"
+                                   : fib                  ? fib->table_stream()
                                    : ((*word)[11] & 0x02) ? "1Table"
                                                           : "0Table";
     auto table = cfb->ReadStream(table_name);
