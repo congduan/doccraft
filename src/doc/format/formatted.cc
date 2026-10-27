@@ -206,11 +206,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       std::move(*sections_result);
   if (!sections.empty())
     doc.section = sections.back().second;
-  auto note_refs = ReadNoteReferences(table, fib);
+  auto note_refs = ReadNoteReferences(table, fib, &doc.warnings);
   if (!note_refs) {
     return std::unexpected(note_refs.error());
   }
-  auto comment_anchors = ReadCommentAnchors(table, fib);
+  auto comment_anchors = ReadCommentAnchors(table, fib, &doc.warnings);
   if (!comment_anchors) {
     return std::unexpected(comment_anchors.error());
   }

@@ -38,6 +38,8 @@ std::expected<std::vector<uint32_t>, Error> ReadReferenceCps(Bytes table,
   const size_t count = (r.size - 4) / 6;
   for (size_t i = 0; i <= count; i++) {
     cps.push_back(U32(plc, 4 * i));
+    if (i && cps[i] <= cps[i - 1])
+      return std::unexpected(Error{"invalid note reference PLC CP order"});
   }
   return cps;
 }
@@ -55,25 +57,44 @@ std::expected<std::vector<uint32_t>, Error> ReadTextCps(Bytes table,
   Bytes plc = table.subspan(r.offset, r.size);
   for (size_t i = 0; i < r.size / 4; i++) {
     cps.push_back(U32(plc, 4 * i));
+    if (i && cps[i] <= cps[i - 1])
+      return std::unexpected(Error{"invalid note text PLC CP order"});
   }
   return cps;
 }
 
 }  // namespace
 
-std::expected<NoteReferenceSet, Error> ReadNoteReferences(Bytes table,
-                                                          const Fib& fib) {
+std::expected<NoteReferenceSet, Error> ReadNoteReferences(
+    Bytes table, const Fib& fib, std::vector<std::string>* warnings) {
   NoteReferenceSet out;
-  auto footnotes = ReadReferenceCps(table, fib.fnd_ref);
-  if (!footnotes) {
-    return std::unexpected(footnotes.error());
-  }
-  auto endnotes = ReadReferenceCps(table, fib.end_ref);
-  if (!endnotes) {
-    return std::unexpected(endnotes.error());
-  }
-  out.footnote_cps = std::move(*footnotes);
-  out.endnote_cps = std::move(*endnotes);
+  auto read = [&](Fib::Range reference, Fib::Range text, uint32_t length,
+                  const char* name, std::vector<uint32_t>* target) {
+    auto refs = ReadReferenceCps(table, reference);
+    auto texts = ReadTextCps(table, text);
+    std::string error;
+    if (!refs)
+      error = refs.error().message;
+    else if (!texts)
+      error = texts.error().message;
+    else if (!refs->empty() &&
+             (texts->size() < refs->size() || texts->size() > refs->size() + 1))
+      error = "note PLC entry count mismatch";
+    else if (refs->size() > 1 && (*refs)[refs->size() - 2] >= fib.ccp_text)
+      error = "invalid note reference PLC CP range";
+    else if (!texts->empty() && texts->back() > length)
+      error = "invalid note text PLC CP range";
+    if (!error.empty()) {
+      if (!warnings)
+        return;
+      warnings->push_back(std::string("skipped ") + name +
+                          " story PLC: " + error);
+      return;
+    }
+    *target = std::move(*refs);
+  };
+  read(fib.fnd_ref, fib.fnd_txt, fib.ccp_ftn, "footnote", &out.footnote_cps);
+  read(fib.end_ref, fib.end_txt, fib.ccp_edn, "endnote", &out.endnote_cps);
   return out;
 }
 
@@ -82,30 +103,24 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
                                      const std::vector<FormatRange>& chpx,
                                      const std::vector<FormatRange>& papx) {
   auto footnotes = ReadTextCps(table, fib.fnd_txt);
-  if (!footnotes) {
-    return std::unexpected(footnotes.error());
-  }
   auto endnotes = ReadTextCps(table, fib.end_txt);
-  if (!endnotes) {
-    return std::unexpected(endnotes.error());
-  }
   // The reference PLC is authoritative for how many notes exist: some
   // producers append an extra guard CP to the text PLC.
-  auto refs = ReadNoteReferences(table, fib);
+  auto refs = ReadNoteReferences(table, fib, nullptr);
   if (!refs) {
     return std::unexpected(refs.error());
   }
   auto count = [](size_t references, size_t text_cps) {
     const size_t by_text = text_cps > 1 ? text_cps - 1 : 0;
-    return references == 0 ? by_text : std::min(references, by_text);
+    return std::min(references, by_text);
   };
   auto references = [](const std::vector<uint32_t>& cps) {
     return cps.empty() ? size_t{0} : cps.size() - 1;
   };
   const size_t footnote_count =
-      count(references(refs->footnote_cps), footnotes->size());
+      count(references(refs->footnote_cps), footnotes ? footnotes->size() : 0);
   const size_t endnote_count =
-      count(references(refs->endnote_cps), endnotes->size());
+      count(references(refs->endnote_cps), endnotes ? endnotes->size() : 0);
   if (footnote_count == 0 && endnote_count == 0) {
     return {};
   }

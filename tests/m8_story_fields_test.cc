@@ -522,3 +522,105 @@ TEST(M8StoryFields, BadSizedStoryFieldPlcAlsoDegrades) {
   ASSERT_EQ(parsed->comments.size(), 1u);
   EXPECT_FALSE(parsed->comments[0].paragraphs.empty());
 }
+
+TEST(M15StoryPlc, OutOfRangeFootnoteKeepsBodyAndEndnote) {
+  Synthetic s = Build("Body\r", "Foot\r\r", "", "", "End\r\r");
+  s.fib.fnd_ref = {9999, 10};
+  s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn);
+  s.fib.end_ref = PutNoteRefPlc(s, 0);
+  s.fib.end_txt = PutTextCpPlc(s, s.fib.ccp_edn);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped footnote story PLC: invalid note reference PLC");
+  ASSERT_EQ(parsed->notes.size(), 1u);
+  EXPECT_TRUE(parsed->notes[0].endnote);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  EXPECT_NE(Part(*zip, "word/document.xml").find("Body"), std::string::npos);
+  EXPECT_TRUE(Part(*zip, "word/footnotes.xml").empty());
+  EXPECT_FALSE(Part(*zip, "word/endnotes.xml").empty());
+}
+
+TEST(M15StoryPlc, OutOfRangeEndnoteKeepsBody) {
+  Synthetic s = Build("Body\r", "", "", "", "End\r\r");
+  s.fib.end_ref = PutNoteRefPlc(s, 0);
+  s.fib.end_txt = {9999, 8};
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped endnote story PLC: invalid note text PLC");
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  EXPECT_NE(Part(*zip, "word/document.xml").find("Body"), std::string::npos);
+  EXPECT_TRUE(Part(*zip, "word/endnotes.xml").empty());
+}
+
+TEST(M15StoryPlc, OutOfRangeCommentOwnersSkipsWholeStory) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 0);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  s.fib.atn_owners = {9999, 4};
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped comment story PLC: invalid comment owners array");
+  EXPECT_TRUE(parsed->comments.empty());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  EXPECT_NE(Part(*zip, "word/document.xml").find("Body"), std::string::npos);
+  EXPECT_TRUE(Part(*zip, "word/comments.xml").empty());
+}
+
+TEST(M15StoryPlc, NonIncreasingFootnoteCpsSkipStory) {
+  Synthetic s = Build("Body\r", "Foot\r\r", "", "", "");
+  s.fib.fnd_ref = PutNoteRefPlc(s, 1);
+  s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn);
+  Put32(s.table, s.fib.fnd_ref.offset + 4, 1);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped footnote story PLC: invalid note reference PLC CP order");
+  EXPECT_TRUE(parsed->notes.empty());
+}
+
+TEST(M15StoryPlc, MismatchedEndnoteCountsSkipStory) {
+  Synthetic s = Build("Body\r", "", "", "", "End\r\r");
+  s.fib.end_ref = PutNoteRefPlc(s, 1);
+  s.fib.end_txt = PutTextCpPlc(s, s.fib.ccp_edn);
+  s.fib.end_txt.size = 0;
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped endnote story PLC: note PLC entry count mismatch");
+  EXPECT_TRUE(parsed->notes.empty());
+}
+
+TEST(M15StoryPlc, OutOfRangeCommentTextSkipsStory) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 0);
+  s.fib.and_txt = {9999, 8};
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped comment story PLC: invalid comment text PLC");
+  EXPECT_TRUE(parsed->comments.empty());
+}
+
+TEST(M15StoryPlc, OutOfRangeCommentAnchorSkipsStory) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = {9999, 38};
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped comment story PLC: invalid comment anchor PLC");
+  EXPECT_TRUE(parsed->comments.empty());
+}

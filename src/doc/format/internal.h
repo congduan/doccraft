@@ -353,8 +353,8 @@ std::expected<BookmarkMarks, Error> ReadBookmarks(Bytes table, const Fib& fib);
 
 // Comment anchor CPs inside the main story, in document order. Comment i of
 // Document::comments is anchored at anchor[i].
-std::expected<std::vector<uint32_t>, Error> ReadCommentAnchors(Bytes table,
-                                                               const Fib& fib);
+std::expected<std::vector<uint32_t>, Error> ReadCommentAnchors(
+    Bytes table, const Fib& fib, std::vector<std::string>* warnings);
 
 // Fills Document::comments with the comment bodies and their authors.
 std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
@@ -369,8 +369,8 @@ struct NoteReferenceSet {
   std::vector<uint32_t> endnote_cps;
 };
 
-std::expected<NoteReferenceSet, Error> ReadNoteReferences(Bytes table,
-                                                          const Fib& fib);
+std::expected<NoteReferenceSet, Error> ReadNoteReferences(
+    Bytes table, const Fib& fib, std::vector<std::string>* warnings);
 
 // Fills Document::notes with the footnote and endnote bodies.
 std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,

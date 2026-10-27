@@ -80,6 +80,12 @@ add_test(NAME corpus_text_consistency COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/corpus/compare_text.py $<TARGET_FILE:doccraft>)
 add_test(NAME cli_input_path COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/cli_input_path.py $<TARGET_FILE:doccraft>)
+add_executable(m15_bad_note_fixture m15_bad_note_fixture.cc cfb_test_util.cc)
+target_link_libraries(m15_bad_note_fixture PRIVATE doccraft_cfb)
+add_test(NAME m15_bad_note_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/m15_bad_note_cli.py
+  $<TARGET_FILE:m15_bad_note_fixture> $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/footnote-endnote.doc)
 
 add_executable(m3_batch6_test m3_batch6_test.cc)
 target_link_libraries(m3_batch6_test PRIVATE doccraft_doc doccraft_docx gtest_main)
