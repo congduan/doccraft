@@ -210,7 +210,12 @@ int main(int argc, char** argv) {
           fib->codepage = codepage;
       }
     }
-    if (encrypted && !has_password && !((*word)[11] & 0x80)) {
+    if (encrypted && !has_password && ((*word)[11] & 0x80)) {
+      std::fprintf(stderr,
+                   "convert: XOR obfuscation document requires --password\n");
+      return 1;
+    }
+    if (encrypted && !has_password) {
       const std::string table_name = ((*word)[11] & 0x02) ? "1Table" : "0Table";
       auto encrypted_table = cfb->ReadStream(table_name);
       if (!encrypted_table) {
@@ -246,9 +251,11 @@ int main(int argc, char** argv) {
     }
     auto data = cfb->ReadStream("Data");
     if (encrypted && has_password) {
-      fib = doccraft::doc::DecryptRc4(
-          *word, *table,
-          data ? std::span<uint8_t>(*data) : std::span<uint8_t>(), password);
+      const auto data_span =
+          data ? std::span<uint8_t>(*data) : std::span<uint8_t>();
+      fib = ((*word)[11] & 0x80)
+                ? doccraft::doc::DecryptXor(*word, *table, data_span, password)
+                : doccraft::doc::DecryptRc4(*word, *table, data_span, password);
       if (!fib) {
         std::fprintf(stderr, "convert: %s\n", fib.error().message.c_str());
         return 1;

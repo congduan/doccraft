@@ -24,6 +24,7 @@
 #include "crypto/md5.h"
 #include "crypto/rc4.h"
 #include "crypto/sha1.h"
+#include "crypto/xor.h"
 
 namespace doccraft::doc {
 namespace {
@@ -181,6 +182,31 @@ std::expected<Fib, Error> DecryptRc4(std::span<uint8_t> word,
   if (!fib)
     return std::unexpected(
         Error{"invalid decrypted FIB: " + fib.error().message});
+  return fib;
+}
+
+std::expected<Fib, Error> DecryptXor(std::span<uint8_t> word,
+                                     std::span<uint8_t> table,
+                                     std::span<uint8_t> data,
+                                     std::string_view password) {
+  if (word.size() < kFibPlainBytes)
+    return std::unexpected(Error{"truncated XOR FIB"});
+  const uint16_t flags = base::U16(word, 10);
+  if ((flags & 0x8100) != 0x8100)
+    return std::unexpected(Error{"not an XOR obfuscated document"});
+  const auto key = crypto::DeriveXorKey(password);
+  if (!key)
+    return std::unexpected(Error{std::string(key.error())});
+  if (base::U32(word, 14) != key->verifier)
+    return std::unexpected(Error{"incorrect document password"});
+  crypto::XorTransform(word, kFibPlainBytes, key->mask);
+  crypto::XorTransform(table, 0, key->mask);
+  crypto::XorTransform(data, 0, key->mask);
+  word[11] &= static_cast<uint8_t>(~0x81);
+  auto fib = ParseFib(word);
+  if (!fib)
+    return std::unexpected(
+        Error{"invalid deobfuscated FIB: " + fib.error().message});
   return fib;
 }
 

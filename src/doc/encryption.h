@@ -33,5 +33,10 @@ std::expected<Fib, Error> DecryptRc4(std::span<uint8_t> word,
                                      std::span<uint8_t> data,
                                      std::string_view password);
 
+std::expected<Fib, Error> DecryptXor(std::span<uint8_t> word,
+                                     std::span<uint8_t> table,
+                                     std::span<uint8_t> data,
+                                     std::string_view password);
+
 }  // namespace doccraft::doc
 #endif  // SRC_DOC_ENCRYPTION_H_
