@@ -61,7 +61,7 @@ using detail::Valid;
 using detail::Walk;
 using detail::WalkParagraph;
 
-namespace {
+namespace detail {
 // [MS-DOC] §2.9.215: the seven-bit isprm of Prm0 names one sprm. Entries
 // absent from the table are reserved or have no supported property mapping.
 uint16_t Prm0Opcode(uint8_t isprm) {
@@ -123,7 +123,7 @@ uint16_t Prm0Opcode(uint8_t isprm) {
   }();
   return kOpcodes[isprm];
 }
-}  // namespace
+}  // namespace detail
 
 std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
                                                      const Fib& fib,
@@ -165,7 +165,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (prm & 1) {
       Walk(prcs[prm >> 1], fn);
     } else {
-      uint16_t op = Prm0Opcode((prm >> 1) & 0x7F);
+      uint16_t op = detail::Prm0Opcode((prm >> 1) & 0x7F);
       if (op) {
         uint8_t value = static_cast<uint8_t>(prm >> 8);
         fn(op, Bytes(&value, 1));
@@ -261,6 +261,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   std::vector<TableFrame> frames;
   std::vector<FieldFrame> fields;
   int pending_ole = -1;
+  bool warned_field_control = false;
   bool page_field = false;
   std::string hyperlink;
   size_t next_section = 0;
@@ -445,6 +446,17 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       continue;
     }
     if (!fields.empty() && fields.back().in_instruction) {
+      // Binary object markers sometimes occur inside fast-saved field code
+      // ranges. XML 1.0 cannot represent them, including as numeric refs.
+      if (control && static_cast<unsigned char>(control) < 32 &&
+          control != '\t' && control != '\n' && control != '\r') {
+        if (!warned_field_control) {
+          doc.warnings.push_back(
+              "ignored non-XML control in field instruction");
+          warned_field_control = true;
+        }
+        continue;
+      }
       fields.back().instruction += text;
       continue;
     }
@@ -487,18 +499,37 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       table_pap = pap;
     }
-    // Depth is authoritative when the document carries sprmPItap; otherwise an
-    // in-table paragraph means "one level deep", which is what pre-Word-97
-    // producers and LibreOffice write.
-    if (pap) {
-      const int wanted =
-          cached_depth > 0 ? cached_depth : (cached_table_flag ? 1 : 0);
+    // A fast-saved piece can carry paragraph/table sprms independently of
+    // PAPX. Resolve both before interpreting cell and row marks.
+    bool in_table = cached_table_flag;
+    bool row_end = cached_row_end;
+    int depth = cached_depth;
+    bool piece_table_set = false;
+    walk_piece_prm(ch.prm, [&](uint16_t op, Bytes v) {
+      if (op == kSprmPFInTable) {
+        in_table = v[0] != 0;
+        piece_table_set = true;
+      } else if (op == kSprmPFTtp || op == kSprmPFInnerTtp) {
+        row_end = v[0] != 0;
+        piece_table_set = true;
+      } else if (op == kSprmPItap && v.size() >= 2) {
+        depth = U16(v, 0);
+        piece_table_set = true;
+      } else if (op == kSprmPDtap && v.size() >= 2) {
+        depth = std::max(0, depth + S16(v, 0));
+        piece_table_set = true;
+      }
+    });
+    // Depth is authoritative when present; otherwise fInTable means one
+    // level. Character-only piece modifiers do not change table structure.
+    if (pap || piece_table_set) {
+      const int wanted = depth > 0 ? depth : (in_table ? 1 : 0);
       set_table_depth(wanted);
     }
     if (control == '\x07') {
       if (frames.empty())
         set_table_depth(1);
-      if (cached_row_end) {
+      if (row_end) {
         // The row-end mark is itself a paragraph (the TTP): keep any content
         // that belongs to the last cell before the row closes.
         if (!para.runs.empty()) {

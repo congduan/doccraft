@@ -113,8 +113,9 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
   const uint64_t endnote_base = static_cast<uint64_t>(fib.ccp_text) +
                                 fib.ccp_ftn + fib.ccp_hdd + fib.ccp_atn;
   const uint64_t limit = endnote_base + fib.ccp_edn;
-  auto chars =
-      ReadChars(word, table, fib, static_cast<uint32_t>(limit), fib.ccp_text);
+  std::vector<std::vector<uint8_t>> prcs;
+  auto chars = ReadChars(word, table, fib, static_cast<uint32_t>(limit),
+                         fib.ccp_text, &prcs);
   if (!chars) {
     return std::unexpected(chars.error());
   }
@@ -128,8 +129,8 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
       }
       model::Note note;
       note.endnote = endnote;
-      note.paragraphs =
-          ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, base, first, last);
+      note.paragraphs = ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs,
+                                            base, first, last);
       doc.notes.push_back(std::move(note));
     }
   };

@@ -92,6 +92,13 @@ target_compile_definitions(m4_ole_test PRIVATE
   DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m4_ole_test)
 
+add_executable(m4_fast_saved_test m4_fast_saved_test.cc)
+target_link_libraries(m4_fast_saved_test PRIVATE doccraft_cfb doccraft_doc
+  doccraft_docx gtest_main)
+target_compile_definitions(m4_fast_saved_test PRIVATE
+  DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(m4_fast_saved_test)
+
 add_test(NAME degraded_fkp_warning COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/degraded_fkp.py $<TARGET_FILE:doccraft>
   ${CMAKE_SOURCE_DIR}/tests/fixtures/degraded-fkp.doc

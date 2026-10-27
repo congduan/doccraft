@@ -131,9 +131,10 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
   if (base + fib.ccp_atn > UINT32_MAX) {
     return std::unexpected(Error{"annotation CP range too large"});
   }
+  std::vector<std::vector<uint8_t>> prcs;
   auto chars =
       ReadChars(word, table, fib, static_cast<uint32_t>(base + fib.ccp_atn),
-                static_cast<uint32_t>(base));
+                static_cast<uint32_t>(base), &prcs);
   if (!chars) {
     return std::unexpected(chars.error());
   }
@@ -149,8 +150,8 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
     }
     comment.initials = (*anchors)[i].initials;
     if (last > first && last <= fib.ccp_atn) {
-      comment.paragraphs =
-          ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, base, first, last);
+      comment.paragraphs = ReadStoryParagraphs(*chars, chpx, papx, doc.fonts,
+                                               prcs, base, first, last);
     }
     doc.comments.push_back(std::move(comment));
   }

@@ -266,7 +266,10 @@ model::Run InheritedRun(const model::Document& doc, int style);
 std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
-    uint64_t base, uint32_t first, uint32_t last);
+    const std::vector<std::vector<uint8_t>>& prcs, uint64_t base,
+    uint32_t first, uint32_t last);
+
+uint16_t Prm0Opcode(uint8_t isprm);
 
 std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
     Bytes word, Bytes table, const Fib& fib,

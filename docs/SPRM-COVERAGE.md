@@ -4,7 +4,7 @@
 > ✅ = 解析、IR 与 OOXML 输出齐备且有合成样本断言；◐ = 部分实现；☐ = 待实现；N/A = 不进入 OOXML 输出，附理由，分为四类：规范允许忽略、编辑期/增量保存的内部状态、无 docx 对应属性的排版提示、由 M4/M5 里程碑承载的载荷。
 > 规范 §2.6 是完整 sprm 列表；§2.9 是数据类型定义。旧账的「240 = 已列 152 + 未列 88」未经核实，现按规范重建。
 
-> M4 fast-saved CLX：`PieceTableTest.ReadsFastSavedPiecesAndPrc` 验证 `Prc` 中已有 `sprmCFBold` 经 `Prm1` 应用到 IR 与 OOXML；`PieceTableTest.AppliesFastSavedPrm0Modifier` 验证 `Prm0` 的同一格式路径。这改变修饰来源，不改变 §2.6 各 opcode 的既有覆盖状态。真实增量保存 golden 仍在 §6.1 记 ◐。
+> M4 fast-saved CLX：`PieceTableTest.ReadsFastSavedPiecesAndPrc` 与 `PieceTableTest.AppliesFastSavedPrm0Modifier` 验证正文；`M4FastSaved.HeaderStoryAppliesPrcRunFormatting` 验证非正文 Prc；`M4FastSaved.PiecePItapPlacesParagraphInsideTable` 验证 piece 上的表格深度。这改变修饰来源，不改变 §2.6 各 opcode 的既有覆盖状态。真实版式 golden 未过，§6.1 仍记 ◐。
 > M4 第二批文本框：`M4Textbox.LibreOfficeFloatingTextboxKeepsStoryAtAnchor` 与 `M4Textbox.SyntheticFlowBreaksStayInStoryOrder` 覆盖 FTXBXS/Tbkd 与锚点连接；它们是 PLC/故事结构而非 sprm，不改变本表 opcode 状态。§6.6 文本框保持 ◐，限制见 KNOWN-SIMPLIFICATIONS。
 > M4 第二批损坏降级：`degraded_fkp_warning`、`degraded_sprm_warning`、`degraded_header_warning` 验证局部跳过、stderr 警告及正文保留；它们不改变正常输入下的各 opcode 覆盖状态。
 
@@ -159,7 +159,7 @@
 | ✅ | `0x6646` | sprmPHugePapx | A 4-byte unsigned integer that specifies a location in the Data Stream. | 段落 PAP §2.6.2；M3Batch7.IndirectParagraphSprms |
 | ✅ | `0x2447` | sprmPFUsePgsuSettings | A Bool8 value that specifies whether the paragraph adheres to the vertical components of the document grid. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
 | ✅ | `0x2448` | sprmPFAdjustRight | A Bool8 value that specifies whether this paragraph is set to automatically adjust the right indent when a document grid for East Asian characters is defined. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
-| ✅ | `0x6649` | sprmPItap | An integer value that specifies the table depth of this paragraph. | 段落 PAP §2.6.2；sprmPItap 作为表格嵌套深度的权威来源；M3NestedTable.DepthTwoTableLivesInTheEnclosingCell |
+| ✅ | `0x6649` | sprmPItap | An integer value that specifies the table depth of this paragraph. | 段落 PAP §2.6.2；sprmPItap 作为表格嵌套深度的权威来源；M3NestedTable.DepthTwoTableLivesInTheEnclosingCell、M4FastSaved.PiecePItapPlacesParagraphInsideTable |
 | ✅ | `0x664A` | sprmPDtap | A signed integer that specifies an addition or subtraction to the existing table depth of this paragraph. | 段落 PAP §2.6.2；深度增量形式，累加到 sprmPItap；M3NestedTable.DeltaDepthIsAccumulated |
 | N/A | `0x244B` | sprmPFInnerTableCell | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table cell. | 段落 PAP §2.6.2；嵌套表单元格增量保存簿记；不影响格式 |
 | ✅ | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2；嵌套表行结束标记；M3NestedTable.WriterNestsTableElements |

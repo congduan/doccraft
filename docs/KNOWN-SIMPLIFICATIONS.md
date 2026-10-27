@@ -8,7 +8,8 @@
 
 ## M2
 
-- `fComplex=1`（增量保存）文档现按最终 CLX piece 表读取正文，并应用 Prm0 单条和 Prm1 引用的 Prc 字符/段落修饰；Prm0 中仅修订元数据用途的 `sprmPFNumRMIns` 不映射。非正文故事中的 Prc 格式、piece 上的表格结构修饰，以及真实 Word 增量保存样本的 golden 对拍仍未完成，故 §6.1 保持 ◐。加密文档仍返回 `unsupported (M6)`。
+- `fComplex=1`（增量保存）文档按最终 CLX piece 表读取正文，Prm0 与 Prm1/Prc 字符及段落修饰现也应用于页眉、脚注、批注和文本框故事；piece 上的 `sprmPItap` 已参与正文表格深度判定。Prm0 中仅修订元数据用途的 `sprmPFNumRMIns` 不映射。真实样本的版式 golden 尚未通过，§6.1 保持 ◐。加密文档仍返回 `unsupported (M6)`。
+- 真实 fast-saved 批量对拍（LibreOffice UTF-8 文本，源 `.doc` vs 转换 `.docx`）：Apache POI 的 `Bug33519.doc` 4522/4522、AbiWord/wv 的 `fastsavedmix.doc` 97/97 逐字一致；`rasp.doc` 2028/2024（相似率 99.9013%）、`o_kurs.doc` 5725/5719（99.8427%）、`ob_is.doc` 38390/38368（99.9375%）、AbiWord/wv 的 `samplefastsaved.doc` 1542/1542（99.5460%）。差异集中在空段落、目录域页码及少数字符；六个样本的版式 golden 均未过。`Bug50955.doc`、`Bug51944.doc` 为非 WordDocument 签名，`Bug60942.doc` 的 CFB 链长超限，`word_with_embeded.doc` 缺 CLX Pcdt，均维持拒绝。`o_kurs.doc` 复制到 fixtures 用于可重用文本框 PLC 尾项及 XML 控制字符回归。另有非 fast-saved 的 `word_with_embeded_ooxml.doc` 121/121 逐字一致，用于 OLE 验证。
 - IR 仅包含段落、文本 run 和特殊控制码位置。`0x07` 单元格/行结束与 `0x0B` 换行在最小 DOCX 中写为换行，不重建表格；列表编号、样式、页眉脚注等留待后续里程碑。
 - 当前最小写出为达到语料 `plain-text.doc` 的像素验收，使用其默认字体（Liberation Serif，12pt）及 Letter 页面 1134 twip 页边距。尚未从 DOC 属性读取字体、字号和页面设置，因此其他语料的版式不保证一致。
 - 文本一致率测试把连续表格控制码折叠为单个换行，并剥除 LibreOffice TXT 导出中根据编号属性生成的 `•` 列表标记。这些标记不在 M2 抽取的主文本中；不计此差异时五份语料内容均为 100%。

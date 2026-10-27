@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "doc/format/sprm.h"
+#include "doc/format/sprm_codes.h"
 
 namespace doccraft::doc::detail {
 namespace {
@@ -40,12 +41,27 @@ constexpr size_t kStoryPreamble = 6;
 std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
-    uint64_t base, uint32_t first, uint32_t last) {
+    const std::vector<std::vector<uint8_t>>& prcs, uint64_t base,
+    uint32_t first, uint32_t last) {
   std::vector<model::Paragraph> out;
   if (last <= first) {
     return out;
   }
   model::Paragraph para;
+  auto walk_prm = [&](uint16_t prm, auto fn) {
+    if (!prm)
+      return;
+    if (prm & 1) {
+      if ((prm >> 1) < prcs.size())
+        Walk(prcs[prm >> 1], fn);
+    } else {
+      const uint16_t op = Prm0Opcode((prm >> 1) & 0x7F);
+      if (op) {
+        const uint8_t value = static_cast<uint8_t>(prm >> 8);
+        fn(op, Bytes(&value, 1));
+      }
+    }
+  };
   auto start = std::lower_bound(chars.begin(), chars.end(), base + first,
                                 [](const Char& ch, uint64_t cp) {
                                   return ch.cp < cp;
@@ -59,6 +75,10 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
           ApplyPara(para, op, v);
         });
       }
+      walk_prm(ch.prm, [&](uint16_t op, Bytes v) {
+        if ((op >> 10 & 7) == 1)
+          ApplyPara(para, op, v);
+      });
       out.push_back(std::move(para));
       para = {};
     } else if (ch.text().size() != 1 ||
@@ -69,6 +89,14 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
           ApplyRun(r, op, v, fonts);
         });
       }
+      walk_prm(ch.prm, [&](uint16_t op, Bytes v) {
+        if ((op >> 10 & 7) != 2)
+          return;
+        if (op == kSprmCPlain)
+          r = {};
+        else
+          ApplyRun(r, op, v, fonts);
+      });
       r.text = ch.text();
       if (!para.runs.empty() && SameRunFormatting(para.runs.back(), r)) {
         para.runs.back().text += ch.text();
@@ -111,7 +139,8 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
   if (end > UINT32_MAX) {
     return std::unexpected(Error{"header CP range too large"});
   }
-  auto chars = ReadChars(word, table, fib, end, base);
+  std::vector<std::vector<uint8_t>> prcs;
+  auto chars = ReadChars(word, table, fib, end, base, &prcs);
   if (!chars) {
     return std::unexpected(chars.error());
   }
@@ -130,8 +159,8 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
       if (last < first || last > fib.ccp_hdd) {
         return std::unexpected(Error{"header CP range outside story"});
       }
-      out[section][story] =
-          ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, base, first, last);
+      out[section][story] = ReadStoryParagraphs(*chars, chpx, papx, doc.fonts,
+                                                prcs, base, first, last);
     }
   }
   return out;

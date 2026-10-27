@@ -47,7 +47,9 @@ std::expected<Plc, Error> ReadPlc(Bytes table, Fib::Range range, size_t stride,
   if (count > kMaxDrawingRecords)
     return std::unexpected(Error{"textbox PLC count exceeds limit"});
   Plc plc{table.subspan(range.offset, range.size), count, stride, limit};
-  if (plc.Cp(0) != 0 || plc.Cp(count) > limit)
+  // The last FTXBXS/Tbkd is reusable. Some Word writers leave its final
+  // guard CP outside ccpTxbx; no text is read from that range.
+  if (plc.Cp(0) != 0 || plc.Cp(count - 1) > limit)
     return std::unexpected(Error{"textbox PLC CP outside story"});
   for (size_t i = 0; i < count; i++) {
     if (plc.Cp(i + 1) <= plc.Cp(i))
@@ -75,16 +77,14 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
   auto bkd = ReadPlc(table, fib.txbx_bkd, kTbkdSize, fib.ccp_txbx);
   if (!bkd)
     return std::unexpected(bkd.error());
-  if (txt->Cp(txt->count) != fib.ccp_txbx ||
-      bkd->Cp(bkd->count) != fib.ccp_txbx)
-    return std::unexpected(Error{"textbox PLC guard outside story"});
   const uint64_t base = static_cast<uint64_t>(fib.ccp_text) + fib.ccp_ftn +
                         fib.ccp_hdd + fib.ccp_atn + fib.ccp_edn;
   if (base + fib.ccp_txbx > UINT32_MAX)
     return std::unexpected(Error{"textbox story CP range too large"});
+  std::vector<std::vector<uint8_t>> prcs;
   auto chars =
       ReadChars(word, table, fib, static_cast<uint32_t>(base + fib.ccp_txbx),
-                static_cast<uint32_t>(base));
+                static_cast<uint32_t>(base), &prcs);
   if (!chars)
     return std::unexpected(chars.error());
   // The final FTXBXS and Tbkd entries are reusable guards. A linked chain
@@ -107,17 +107,19 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
   }
   for (size_t i = 0; i + 1 < bkd->count; i++) {
     const int index = S16(bkd->Item(i), 0);
-    if (index < 0 || !by_ftxbxs.contains(static_cast<size_t>(index)))
+    if (index < 0 || static_cast<size_t>(index) + 1 >= txt->count)
       return std::unexpected(Error{"textbox break index outside FTXBXS"});
     const size_t f = static_cast<size_t>(index);
+    if (!by_ftxbxs.contains(f))
+      continue;  // Reusable FTXBXS has no visible story.
     if (bkd->Cp(i) < txt->Cp(f) || bkd->Cp(i + 1) > txt->Cp(f + 1))
       return std::unexpected(Error{"textbox break outside text range"});
     // Only the final range has the paragraph guard. Interior flow breaks can
     // split a run, so include their final character in the first component.
     const uint32_t end =
         bkd->Cp(i + 1) == txt->Cp(f + 1) ? bkd->Cp(i + 1) : bkd->Cp(i + 1) + 1;
-    auto paragraphs =
-        ReadStoryParagraphs(*chars, chpx, papx, fonts, base, bkd->Cp(i), end);
+    auto paragraphs = ReadStoryParagraphs(*chars, chpx, papx, fonts, prcs, base,
+                                          bkd->Cp(i), end);
     auto& target = boxes[by_ftxbxs.at(f)].paragraphs;
     for (auto& paragraph : paragraphs)
       target.push_back(std::move(paragraph));
