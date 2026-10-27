@@ -158,7 +158,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ### 6.1 文本与编码
 - ✅ 基本文本抽取（piece table、文档 ANSI 代码页/UTF-16 双模式）
-- ◐ Word 6/95 文本：实测 nFib 0x0065/0x0068 的旧 FIB、同流 CLX 与简单 fcMin 文本可读；CP1251 大文档与 Word 6 俄文样本已对拍，CP950 合成字节有断言。旧版格式表、图片和其他故事尚未支持。
+- ◐ Word 6/95 文本：实测 nFib 0x0065/0x0068 的旧 FIB、同流 CLX 与简单 fcMin 文本可读；CP1251 大文档与 Word 6 俄文样本已对拍，CP950 合成字节有断言。M12 起读取旧版 CHPX/PAPX FKP（1 字节 opcode 归一化为现代 sprm），M13 起旧版 STSH 样式表（pair 1：8 字节 STD 基座、Pascal 名、偶对齐 UPX、based-on/next 链）与 FFN 字体表（pair 15：cbFfnM1 条目、文档代码页 ANSI 名）进入同一条样式继承链，`sprmCFtc` 字体索引解析为字体名；与 LibreOffice 对 4 份真实样本的 styles.xml 逐字段一致。旧版图片、页眉脚注、完整表格属性与其他故事尚未支持。
 - ◐ fast-saved 文档（fComplex）：最终 CLX piece 表重建正文，Prm0/Prm1/Prc 修饰覆盖正文和页眉/脚注/批注/文本框故事；piece 上的 sprmPItap 表格深度有合成断言。正文表格状态按段落结束符 PAPX 选取，Bug33519 的 60 个碎表收敛为 3 个且行单元格对齐；旧、新 DOCX 的 LO 文本导出均为 691/691 词；版式 golden 未通过
 - ◐ 特殊字符：tab/CR/VT/非断行空格/连字符/SYM 字符（图片/脚注/批注/绘图等特殊字符随 M4/M5）
 - ◐ 域代码文本与结果（fldChar 层次）：通用复杂域输出 `w:fldChar` begin/separate/end + `w:instrText`，顶层未锁定 HYPERLINK 映射为 `w:hyperlink`、顶层页码类域映射为 `w:fldSimple`，其余（含嵌套/锁定）一律 fldChar 层次；正文 `PlcfFldMom`、页眉/脚注/尾注/批注故事 `PlcfFldHdr/Ftn/Edn/Atn`、正文及页眉文本框故事 `PlcfFldTxbx/PlcffldHdrTxbx` 的 `fldLock`/`dirty` 标志均已接入；`M11TextboxFields.FieldFlagsReachBodyAndHeaderTextboxXml` 合成断言覆盖两个文本框 XML 输出路径。真实 Word 文本框域 golden 尚缺，故保持 ◐；`fcPlcfFldMcr` 规范定义为 undefined 不读；正文 EMBED 对象按 ObjectPool 保存
@@ -194,7 +194,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（脚注、尾注、批注按各自 PLC 输出部件；标准书签的 `SttbfBkmk`/`PlcfBkf`/`PlcfBkl` 覆盖正文与页眉页脚故事，并输出 `w:bookmarkStart`/`w:bookmarkEnd`；页眉页脚书签仅在起止位于同一故事时输出，结束位于故事守卫 CP 时仍会闭合，跨故事配对跳过并警告；脚注、尾注、批注故事中的书签仍未接入；交叉引用与目录域的指令与结果文本按通用复杂域输出）
 
 ### 6.7 样式系统
-- ✅ STSH 全量解析（基于样式继承链展开）
+- ✅ STSH 全量解析（基于样式继承链展开；Word 6/95 旧版 STSH 自 M13 起接入同一链路：名称/基于/下一样式与 UPX 的段落、字符修饰经归一化后同规则叠加）
 - ✅ 样式映射到 docx styles.xml（段落/字符/表格/编号样式，含表样式条件格式 `w:tblStylePr`）
 - ◐ 直接格式 vs 样式格式的优先级正确叠加（表样式条件格式已按 [MS-DOC] 2.4.6.6 的条带、列、行、角顺序输出；段落/字符/编号链仍未完整按规范求值）
 

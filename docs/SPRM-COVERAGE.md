@@ -5,7 +5,7 @@
 > 规范 §2.6 是完整 sprm 列表；§2.9 是数据类型定义。旧账的「240 = 已列 152 + 未列 88」未经核实，现按规范重建。
 
 > M4 fast-saved CLX：`PieceTableTest.ReadsFastSavedPiecesAndPrc` 与 `PieceTableTest.AppliesFastSavedPrm0Modifier` 验证正文；`M4FastSaved.HeaderStoryAppliesPrcRunFormatting` 验证非正文 Prc；`M4FastSaved.PiecePItapPlacesParagraphInsideTable` 验证 piece 上的表格深度。这改变修饰来源，不改变 §2.6 各 opcode 的既有覆盖状态。真实版式 golden 未过，§6.1 仍记 ◐。
-> M4 表格回归：`M4FastSaved.ParagraphMarkPapKeepsFastSavedCellsTogether` 验证 fast-saved 的正文 FC 与段落结束符 FC 分离时，`sprmPFInTable`/`sprmPFTtp` 由结束符 PAPX 控制整段；真实 `Bug33519.doc` 的表格从 60 个碎片收敛为三张完整表，旧、新 DOCX 的 LO 文本导出均为 691/691 词。Word 6/95 的 FIB/PCD 文本通路由 `LegacyWord.*` 覆盖，旧版 sprm 尚未接入，因此不改变本表的 Word 97+ opcode 状态。
+> M4 表格回归：`M4FastSaved.ParagraphMarkPapKeepsFastSavedCellsTogether` 验证 fast-saved 的正文 FC 与段落结束符 FC 分离时，`sprmPFInTable`/`sprmPFTtp` 由结束符 PAPX 控制整段；真实 `Bug33519.doc` 的表格从 60 个碎片收敛为三张完整表，旧、新 DOCX 的 LO 文本导出均为 691/691 词。Word 6/95 自 M12 起把旧版 1 字节 opcode 归一化到本表的现代 opcode（见文末「Word 6/95 旧版 opcode」），现代路径状态不变。
 > M4 第二批文本框：`M4Textbox.LibreOfficeFloatingTextboxKeepsStoryAtAnchor` 与 `M4Textbox.SyntheticFlowBreaksStayInStoryOrder` 覆盖 FTXBXS/Tbkd 与锚点连接；它们是 PLC/故事结构而非 sprm，不改变本表 opcode 状态。§6.6 文本框保持 ◐，限制见 KNOWN-SIMPLIFICATIONS。
 > M11 文本框字段 PLC：`M11TextboxFields.FibExposesBodyAndHeaderTextboxFieldPlcs`、`M11TextboxFields.FieldFlagsReachBodyAndHeaderTextboxXml`、`M11TextboxFields.InvalidPlcWarnsAndKeepsHierarchy` 覆盖 FIB pair 57/59、两类文本框域的锁/脏 XML 标志及损坏 PLC 降级。它们不是 sprm；§6.1 因缺真实 Word 文本框域 golden 保持 ◐。
 > M11 页眉 PLC 双重损坏：`M11HeaderFields.DoublyCorruptPlcsKeepBothWarnings` 断言故事 PLC 与域 PLC 同时损坏时各发一条警告；不改变 sprm 状态。
@@ -363,6 +363,34 @@
 M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们不对应 sprm opcode，因此不改变本表的覆盖计数。
 
 基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，覆盖率达到 100%；后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现（当前 265 / 265 适用项）。
+
+## Word 6/95 旧版 opcode（不计入 314）
+
+> 旧版 grpprl 用 1 字节 opcode（LibreOffice `sprmids.hxx` v6 命名空间 + wvWare
+> `rgsprmWord6` 双源核对）。`src/doc/format/fkp.cc` 的 `NormalizeLegacySprms`
+> 把已支持项翻译为上表现代 opcode 后走同一 IR 路径；FKP 与样式 UPX 共用。
+> 未列出的 opcode 一律警告并跳过该组剩余修饰（partial-keep）。
+
+| 旧版 opcode | sprm | 现代去向 | 备注 |
+|---|---|---|---|
+| `0x05` | sprmPJc | sprmPJc80 | 1B |
+| `0x07`/`0x08`/`0x09` | sprmPFKeep/KeepFollow/PageBreakBefore | 同名 | 1B |
+| `0x0F` | sprmPChgTabsPapx | —（丢弃） | 变长，按 cb 消费避免错位；制表位不迁移 |
+| `0x10`/`0x11`/`0x13` | sprmPDxaRight/Left/Left1 | sprmPDxa*80 | 2B |
+| `0x14` | sprmPDyaLine | 同名 | 4B |
+| `0x15`/`0x16` | sprmPDyaBefore/After | 同名 | 2B |
+| `0x18`/`0x19` | sprmPFInTable/PFTtp | 同名 | 1B |
+| `0x2C` | sprmPFNoAutoHyph | 同名 | 1B；M13 |
+| `0x33` | sprmPFWidowControl | 同名 | 1B |
+| `0x55`/`0x56`/`0x57` | sprmCFBold/Italic/Strike | 同名 | 1B |
+| `0x5D` | sprmCFtc | sprmCRgFtc0 | 2B；M13 起映射字体名 |
+| `0x5E` | sprmCKul | 同名 | 1B |
+| `0x60` | sprmCDxaSpace | 同名 | 2B；M13 |
+| `0x62` | sprmCIco | 同名 | 1B |
+| `0x63` | sprmCHps | 同名 | **2B**；wvWare spra 位与 LO aSprms 表双证，hps<256 时与 1 字节读法等价；M13 修正 |
+
+> 实测样本中仍遇到的未映射项：`0x37` sprmPWr（框架环绕）、`0x61` sprmCLid（语言；
+> 现代对应 sprmCRgLid0 操作数宽度不同，不能直译）。
 
 ## 规范外旧账别名（不计入 314）
 
