@@ -128,6 +128,54 @@ TEST(M4FastSaved, PiecePItapPlacesParagraphInsideTable) {
   EXPECT_EQ(parsed->paragraphs[0].runs[0].text, "A");
 }
 
+TEST(M4FastSaved, ParagraphMarkPapKeepsFastSavedCellsTogether) {
+  doc::Fib fib;
+  fib.ccp_text = 4;
+  fib.fc_clx = 0;
+  fib.lcb_clx = 57;
+  fib.papx_bte = {64, 12};
+  fib.complex = true;
+  std::vector<uint8_t> word(1536), table(100);
+  table[0] = 2;
+  Put32(table, 1, 52);
+  for (size_t i = 0; i <= 4; i++)
+    Put32(table, 5 + 4 * i, i);
+  for (size_t i = 0; i < 4; i++) {
+    const uint32_t fc = i % 2 ? 768 + i / 2 : 512 + i / 2;
+    Put32(table, 5 + 20 + 8 * i + 2, 0x40000000u | (fc * 2));
+  }
+  word[512] = 'A';
+  word[513] = 'B';
+  word[768] = '\x07';
+  word[769] = '\x07';
+  Put32(table, 64, 512);
+  Put32(table, 68, 770);
+  Put32(table, 72, 2);
+  const size_t fkp = 1024;
+  const uint32_t boundaries[] = {512, 514, 768, 769, 770};
+  for (size_t i = 0; i < 5; i++)
+    Put32(word, fkp + 4 * i, boundaries[i]);
+  word[fkp + 20 + 13 * 2] = 200;  // PAPX at byte 400.
+  word[fkp + 20 + 13 * 3] = 210;  // PAPX at byte 420.
+  word[fkp + 400] = 3;
+  Put16(word, fkp + 403, 0x2416);
+  word[fkp + 405] = 1;
+  word[fkp + 420] = 0;
+  word[fkp + 421] = 4;
+  Put16(word, fkp + 424, 0x2416);
+  word[fkp + 426] = 1;
+  Put16(word, fkp + 427, 0x2417);
+  word[fkp + 429] = 1;
+  word[fkp + 511] = 4;
+  auto parsed = doc::ParseFormatted(word, table, fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->tables.size(), 1U);
+  ASSERT_EQ(parsed->tables[0].rows.size(), 1U);
+  ASSERT_EQ(parsed->tables[0].rows[0].size(), 2U);
+  EXPECT_EQ(parsed->paragraphs[0].runs[0].text, "A");
+  EXPECT_EQ(parsed->paragraphs[1].runs[0].text, "B");
+}
+
 TEST(M4FastSaved, RealReusableTextboxGuardsKeepXmlValid) {
   const std::string path = std::string(DOCCRAFT_SOURCE_DIR) +
                            "/tests/fixtures/fast-saved-o-kurs.doc";

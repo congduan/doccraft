@@ -328,6 +328,20 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       para.runs.push_back(std::move(run));
     }
   };
+  // In fast-saved files the text and its terminating paragraph mark can live
+  // at unrelated FCs. PAPX belongs to the terminating mark for the whole
+  // paragraph, including its table membership and row-end state.
+  std::vector<uint32_t> paragraph_fc;
+  if (fib.complex && !fib.legacy) {
+    paragraph_fc.resize(chars->size());
+    uint32_t end_fc = chars->empty() ? 0 : chars->back().fc;
+    for (size_t j = chars->size(); j-- > 0;) {
+      const Char& current = (*chars)[j];
+      if (current.newline || current.text() == "\x07")
+        end_fc = current.fc;
+      paragraph_fc[j] = end_fc;
+    }
+  }
   for (size_t i = 0; i < chars->size(); i++) {
     const Char& ch = (*chars)[i];
     const auto text = ch.text();
@@ -480,10 +494,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     }
     if (control == '\x08')
       continue;
+    const uint32_t pap_fc = paragraph_fc.empty() ? ch.fc : paragraph_fc[i];
     const auto* pap =
-        cached_pap && ch.fc >= cached_pap->first && ch.fc < cached_pap->last
+        cached_pap && pap_fc >= cached_pap->first && pap_fc < cached_pap->last
             ? cached_pap
-            : Find(*papx, ch.fc);
+            : Find(*papx, pap_fc);
     cached_pap = pap;
     if (pap != table_pap) {
       cached_table_flag = false;
