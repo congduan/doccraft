@@ -155,7 +155,22 @@ TEST(M4Ole, OlePresentationMetafilesBecomePreviewParts) {
     Put32(pres, 32, 1270);
     Put32(pres, 36, payload.size());
     std::copy(payload.begin(), payload.end(), pres.begin() + 40);
-    auto image = doc::ReadOlePresentation(pres);
+    const auto source = cfb::test::CfbBuilder()
+                            .AddStream(
+                                "ObjectPool/_42/\x01"
+                                "OlePres000",
+                                pres)
+                            .Build();
+    auto container = cfb::CfbReader::Open(source);
+    ASSERT_TRUE(container) << container.error().message;
+    auto preview = container->ReadStream(
+        "Root Entry/ObjectPool/_42/\x01"
+        "OlePres000");
+    ASSERT_TRUE(preview) << preview.error().message;
+    auto packaged =
+        cfb::RepackageStorage(*container, "Root Entry/ObjectPool/_42");
+    ASSERT_TRUE(packaged) << packaged.error().message;
+    auto image = doc::ReadOlePresentation(*preview);
     ASSERT_TRUE(image) << image.error().message;
     ASSERT_TRUE(*image);
     EXPECT_EQ((*image)->width, 1440);
@@ -167,7 +182,7 @@ TEST(M4Ole, OlePresentationMetafilesBecomePreviewParts) {
     model::OleObject object;
     object.storage_id = 42;
     object.program_id = "Package";
-    object.bytes = {1, 2, 3};
+    object.bytes = std::move(*packaged);
     object.preview_image_index = 0;
     document.ole_objects.push_back(std::move(object));
     document.paragraphs.push_back({});
