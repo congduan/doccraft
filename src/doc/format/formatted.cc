@@ -151,8 +151,16 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   for (const auto& picture : *floating)
     total_image_size += picture.image.bytes.size();
   size_t next_picture = 0;
-  doc.fonts = ReadFonts(table, fib.fonts);
-  doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
+  if (fib.legacy) {
+    // Word 6/95 keeps both tables in WordDocument with pre-97 layouts.
+    doc.fonts =
+        detail::ReadLegacyFonts(table, fib.fonts, fib.codepage, &doc.warnings);
+    doc.styles = detail::ReadLegacyStyles(table, fib.stsh, doc.fonts,
+                                          fib.codepage, &doc.warnings);
+  } else {
+    doc.fonts = ReadFonts(table, fib.fonts);
+    doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
+  }
   auto textboxes = detail::ReadTextboxes(word, table, fib, *chpx, *papx,
                                          doc.fonts, &doc.warnings);
   if (!textboxes)

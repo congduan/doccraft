@@ -234,6 +234,7 @@ void AppendLegacySprm(std::vector<uint8_t>& out, uint16_t op, Bytes value) {
   out.push_back(static_cast<uint8_t>(op >> 8));
   out.insert(out.end(), value.begin(), value.end());
 }
+}  // namespace
 
 // Word 6/95 grpprls use one-byte opcodes. Translate the scalar properties
 // understood by this converter; stop at an unknown operand so its bytes can
@@ -301,6 +302,10 @@ bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = kSprmPFWidowControl;
         size = 1;
         break;
+      case kLegacySprmPFNoAutoHyph:
+        modern = kSprmPFNoAutoHyph;
+        size = 1;
+        break;
       case kLegacySprmCFBold:
         modern = kSprmCFBold;
         size = 1;
@@ -314,8 +319,9 @@ bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         size = 1;
         break;
       case kLegacySprmCFtc:
+        modern = kSprmCRgFtc0;
         size = 2;
-        break;  // Legacy font table is not yet decoded.
+        break;
       case kLegacySprmCKul:
         modern = kSprmCKul;
         size = 1;
@@ -324,20 +330,21 @@ bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = kSprmCIco;
         size = 1;
         break;
+      case kLegacySprmCDxaSpace:
+        modern = kSprmCDxaSpace;
+        size = 2;
+        break;
       case kLegacySprmCHps:
         modern = kSprmCHps;
-        size = 1;
+        size = 2;  // Word 6 stores the full half-point word, not a byte.
         break;
       default:
         return false;
     }
     if (!size || size > raw.size() - p)
       return false;
-    if (modern) {
+    if (modern)
       AppendLegacySprm(out, modern, raw.subspan(p, size));
-      if (code == kLegacySprmCHps)
-        out.push_back(0);  // Modern sprmCHps has a two-byte operand.
-    }
     p += size;
   }
   return true;
@@ -399,7 +406,6 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
       return std::unexpected(Error{"overlapping Word 6/95 FKP ranges"});
   return out;
 }
-}  // namespace
 
 std::expected<std::vector<FormatRange>, Error> ReadFkps(
     Bytes word, Bytes table, Fib::Range r, bool para,

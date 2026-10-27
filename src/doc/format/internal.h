@@ -283,6 +283,22 @@ std::vector<std::string> ReadFonts(Bytes table, Fib::Range r);
 std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
                                      const std::vector<std::string>& fonts);
 
+// Word 6/95 tables live in WordDocument and use the pre-97 layouts: the FFN
+// entries are byte-counted with ANSI names in the document code page, and the
+// STD records carry an 8-byte base, a Pascal name and parity-aligned UPXs of
+// Word 6 sprms. Both warn and skip on anything they cannot parse.
+std::vector<std::string> ReadLegacyFonts(Bytes word, Fib::Range r,
+                                         uint32_t codepage,
+                                         std::vector<std::string>* warnings);
+
+std::vector<model::Style> ReadLegacyStyles(
+    Bytes word, Fib::Range r, const std::vector<std::string>& fonts,
+    uint32_t codepage, std::vector<std::string>* warnings);
+
+// Translates a Word 6/95 one-byte-opcode grpprl into the modern sprm stream
+// consumed by Walk(); returns false when an opcode is unsupported.
+bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out);
+
 void ReadLists(model::Document& doc, Bytes table, const Fib& fib);
 
 model::Run InheritedRun(const model::Document& doc, int style);

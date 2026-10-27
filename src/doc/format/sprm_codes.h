@@ -34,12 +34,14 @@ inline constexpr uint8_t kLegacySprmPDyaBefore = 0x15;
 inline constexpr uint8_t kLegacySprmPDyaAfter = 0x16;
 inline constexpr uint8_t kLegacySprmPFInTable = 0x18;
 inline constexpr uint8_t kLegacySprmPFTtp = 0x19;
+inline constexpr uint8_t kLegacySprmPFNoAutoHyph = 0x2C;
 inline constexpr uint8_t kLegacySprmPFWidowControl = 0x33;
 inline constexpr uint8_t kLegacySprmCFBold = 0x55;
 inline constexpr uint8_t kLegacySprmCFItalic = 0x56;
 inline constexpr uint8_t kLegacySprmCFStrike = 0x57;
 inline constexpr uint8_t kLegacySprmCFtc = 0x5D;
 inline constexpr uint8_t kLegacySprmCKul = 0x5E;
+inline constexpr uint8_t kLegacySprmCDxaSpace = 0x60;
 inline constexpr uint8_t kLegacySprmCIco = 0x62;
 inline constexpr uint8_t kLegacySprmCHps = 0x63;
 

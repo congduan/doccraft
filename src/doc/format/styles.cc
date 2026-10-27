@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/charset.h"
 #include "doc/format/sprm.h"
 
 namespace doccraft::doc::detail {
@@ -296,9 +297,8 @@ std::vector<model::Style> ReadStyleSheet(
   return out;
 }
 
-std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
-                                     const std::vector<std::string>& fonts) {
-  std::vector<model::Style> styles = ReadStyleSheet(table, r, fonts);
+// Orders conditional blocks and resolves based-on chains for a parsed sheet.
+std::vector<model::Style> FinishStyles(std::vector<model::Style> styles) {
   // [MS-DOC] 2.4.6.6: later matching conditions override earlier ones.
   // These CNFC values are a precedence table, not their STSH appearance order.
   constexpr int kCnfPrecedence[] = {0x0040, 0x0080, 0x0010, 0x0020,
@@ -320,6 +320,141 @@ std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
     ResolveStyle(styles, state, i);
   }
   return styles;
+}
+
+std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
+                                     const std::vector<std::string>& fonts) {
+  return FinishStyles(ReadStyleSheet(table, r, fonts));
+}
+
+namespace {
+// Decodes a NUL-terminated ANSI run in the document code page.
+std::string DecodeAnsiName(Bytes b, uint32_t codepage) {
+  std::string out;
+  for (size_t i = 0; i < b.size();) {
+    if (!b[i])
+      break;
+    size_t used = base::DecodeAnsiChar(codepage, b.subspan(i), out);
+    if (used == 0) {
+      out += "\xEF\xBF\xBD";  // U+FFFD
+      used = 1;
+    }
+    i += used;
+  }
+  return out;
+}
+}  // namespace
+
+std::vector<std::string> ReadLegacyFonts(Bytes word, Fib::Range r,
+                                         uint32_t codepage,
+                                         std::vector<std::string>* warnings) {
+  std::vector<std::string> out;
+  if (!r.size)
+    return out;
+  if (!Valid(word, r) || r.size < 3) {
+    if (warnings)
+      warnings->push_back("invalid Word 6/95 font table");
+    return out;
+  }
+  Bytes b = word.subspan(r.offset, r.size);
+  // The table opens with its own total byte count, then cbFfnM1-sized
+  // entries: flags, wWeight, chs, ixchAlt and the ANSI name.
+  size_t p = 2;
+  while (p < b.size()) {
+    const size_t cb_ffn_m1 = b[p];
+    if (cb_ffn_m1 < 6 || cb_ffn_m1 + 1 > b.size() - p) {
+      if (warnings)
+        warnings->push_back("Word 6/95 font table has a malformed entry");
+      break;
+    }
+    out.push_back(DecodeAnsiName(b.subspan(p + 6, cb_ffn_m1 - 5), codepage));
+    p += cb_ffn_m1 + 1;
+  }
+  return out;
+}
+
+std::vector<model::Style> ReadLegacyStyles(
+    Bytes word, Fib::Range r, const std::vector<std::string>& fonts,
+    uint32_t codepage, std::vector<std::string>* warnings) {
+  std::vector<model::Style> out;
+  if (!r.size)
+    return out;
+  const char* kInvalid = "invalid Word 6/95 stylesheet";
+  if (!Valid(word, r) || r.size < 6) {
+    if (warnings)
+      warnings->push_back(kInvalid);
+    return FinishStyles(std::move(out));
+  }
+  Bytes b = word.subspan(r.offset, r.size);
+  const size_t info = U16(b, 0);
+  const unsigned count = U16(b, 2), base_size = U16(b, 4);
+  if (info < 4 || 2 + info > b.size() || count > 4096 || base_size != 8) {
+    if (warnings)
+      warnings->push_back(kInvalid);
+    return FinishStyles(std::move(out));
+  }
+  size_t p = 2 + info;
+  out.resize(count);
+  std::string partial_style;
+  for (unsigned i = 0; i < count && p + 2 <= b.size(); i++) {
+    const size_t len = U16(b, p);
+    p += 2;
+    if (len > b.size() - p)
+      break;
+    Bytes d = b.subspan(p, len);
+    p += len;
+    if (len < base_size)
+      continue;  // Empty slot: keeps its index in the sheet.
+    auto& s = out[i];
+    s.type = U16(d, 2) & 15;
+    s.base = U16(d, 2) >> 4;
+    s.next = U16(d, 4) >> 4;
+    if (s.base == 0x0fff)
+      s.base = -1;
+    size_t x = base_size;
+    if (x >= d.size())
+      continue;
+    const size_t name_len = d[x];
+    if (x + 1 + name_len + 1 > d.size())
+      continue;
+    s.name = DecodeAnsiName(d.subspan(x + 1, name_len), codepage);
+    x += 1 + name_len + 1;
+    if (x & 1)
+      x++;  // Parity-align relative to the record start (base_size is even).
+    const unsigned upx = U16(d, 4) & 15;
+    for (unsigned j = 0; j < upx && x + 2 <= d.size(); j++) {
+      if (x & 1)
+        x++;
+      if (x + 2 > d.size())
+        break;
+      const size_t n = U16(d, x);
+      x += 2;
+      if (n > d.size() - x)
+        break;
+      Bytes payload = d.subspan(x, n);
+      x += n;
+      const bool paragraph_upx = s.type == 1 && j == 0;
+      Bytes grpprl = payload;
+      if (paragraph_upx) {
+        if (n < 2)
+          continue;  // The PAPX UPX leads with its istd.
+        grpprl = payload.subspan(2);
+      }
+      std::vector<uint8_t> normalized;
+      if (!NormalizeLegacySprms(grpprl, normalized) && partial_style.empty())
+        partial_style = s.name;
+      Walk(normalized, [&](uint16_t op, Bytes v) {
+        if (paragraph_upx)
+          ApplyPara(s.paragraph, op, v);
+        else
+          ApplyRun(s.run, op, v, fonts);
+      });
+    }
+  }
+  if (!partial_style.empty() && warnings)
+    warnings->push_back("Word 6/95 style '" + partial_style +
+                        "' has unsupported sprms");
+  return FinishStyles(std::move(out));
 }
 
 model::Run InheritedRun(const model::Document& doc, int style) {

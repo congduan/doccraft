@@ -113,6 +113,12 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
     const size_t font_fc = U32(word, kLegacyPairStart + kLegacyFontPair * 8);
     const size_t font_size =
         U32(word, kLegacyPairStart + kLegacyFontPair * 8 + 4);
+    // The Word 6/95 fc/lcb array keeps the modern slot numbering: pair 1 is
+    // fcStshfOld and pair 15 is fcSttbfFfn, both inside WordDocument.
+    f.stsh = {U32(word, kLegacyPairStart + 8),
+              U32(word, kLegacyPairStart + 12)};
+    f.fonts = {static_cast<uint32_t>(font_fc),
+               static_cast<uint32_t>(font_size)};
     if (f.codepage == base::kDefaultCodepage && font_size >= 7 &&
         font_fc <= word.size() && font_size <= word.size() - font_fc) {
       size_t pos = font_fc + 2;
