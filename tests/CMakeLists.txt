@@ -92,6 +92,19 @@ target_compile_definitions(m4_ole_test PRIVATE
   DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m4_ole_test)
 
+add_test(NAME degraded_fkp_warning COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/degraded_fkp.py $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/degraded-fkp.doc
+  "warning: skipped CHPX FKP page" "After textbox")
+add_test(NAME degraded_header_warning COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/degraded_fkp.py $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/degraded-header.doc
+  "warning: skipped header stories" "Body line 0")
+add_test(NAME degraded_sprm_warning COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/degraded_fkp.py $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/degraded-sprm.doc
+  "warning: skipped CHPX FKP page" "After textbox")
+
 # Standalone corpus builder for the 50 MiB performance envelope.
 add_executable(perf_repack perf/repack_doc.cc cfb_test_util.cc)
 target_link_libraries(perf_repack PRIVATE doccraft_cfb)

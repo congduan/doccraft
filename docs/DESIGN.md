@@ -200,7 +200,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ### 6.9 健壮性
 - 性能实测基线见 [perf-baseline.md](perf-baseline.md)；当前 50 MiB 样本超过 5 s 目标，后续优化以分阶段计时为依据。
-- ☐ 损坏文档的优雅降级（跳过坏块 + 警告列表，不崩溃）
+- ◐ 损坏文档的优雅降级：正文可读时跳过局部坏 CHPX FKP 页/坏 sprm 序列或坏页眉故事，`convert` 向 stderr 输出警告且退出码为 0；CFB/CLX 截断和 PAPX 表格结构损坏仍拒绝，更多故事及格式路径待覆盖
 - ☐ 超大文档流式处理（分块、内存上限）
 - ☐ fuzz 测试套件零崩溃
 

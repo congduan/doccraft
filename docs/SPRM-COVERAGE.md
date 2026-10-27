@@ -6,6 +6,7 @@
 
 > M4 fast-saved CLX：`PieceTableTest.ReadsFastSavedPiecesAndPrc` 验证 `Prc` 中已有 `sprmCFBold` 经 `Prm1` 应用到 IR 与 OOXML；`PieceTableTest.AppliesFastSavedPrm0Modifier` 验证 `Prm0` 的同一格式路径。这改变修饰来源，不改变 §2.6 各 opcode 的既有覆盖状态。真实增量保存 golden 仍在 §6.1 记 ◐。
 > M4 第二批文本框：`M4Textbox.LibreOfficeFloatingTextboxKeepsStoryAtAnchor` 与 `M4Textbox.SyntheticFlowBreaksStayInStoryOrder` 覆盖 FTXBXS/Tbkd 与锚点连接；它们是 PLC/故事结构而非 sprm，不改变本表 opcode 状态。§6.6 文本框保持 ◐，限制见 KNOWN-SIMPLIFICATIONS。
+> M4 第二批损坏降级：`degraded_fkp_warning`、`degraded_sprm_warning`、`degraded_header_warning` 验证局部跳过、stderr 警告及正文保留；它们不改变正常输入下的各 opcode 覆盖状态。
 
 > 代码中的 opcode 不再是裸字面量：统一引用 `src/doc/format/sprm_codes.h` 的
 > `kSprm<Name>` 常量；新增 sprm 时先在本表登记，再在同一文件补常量。

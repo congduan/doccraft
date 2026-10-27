@@ -159,9 +159,9 @@ std::expected<std::vector<Char>, Error> ReadChars(
   return out;
 }
 
-std::expected<std::vector<FormatRange>, Error> ReadFkps(Bytes word, Bytes table,
-                                                        Fib::Range r,
-                                                        bool para) {
+std::expected<std::vector<FormatRange>, Error> ReadFkps(
+    Bytes word, Bytes table, Fib::Range r, bool para,
+    std::vector<std::string>* warnings) {
   std::vector<FormatRange> out;
   if (!r.size)
     return out;
@@ -174,49 +174,64 @@ std::expected<std::vector<FormatRange>, Error> ReadFkps(Bytes word, Bytes table,
   std::vector<uint8_t> seen(word.size() / 512);
   for (size_t k = 0; k < pages; k++) {
     size_t pn = U32(plc, 4 * (pages + 1) + 4 * k) & kPnFkpMask;
-    if (pn >= seen.size())
-      return std::unexpected(Error{"FKP page outside WordDocument"});
-    if (seen[pn]++)
-      return std::unexpected(Error{"duplicate FKP page"});
-    Bytes f = word.subspan(pn * 512, 512);
-    size_t n = f[511], stride = para ? 13 : 1;
-    if (n == 0 || n > (para ? 29 : 101) || 4 * (n + 1) + stride * n > 511)
-      return std::unexpected(Error{"invalid FKP run count"});
-    for (size_t j = 0; j < n; j++) {
-      uint32_t first = U32(f, 4 * j), last = U32(f, 4 * (j + 1));
-      if (last <= first)
-        return std::unexpected(Error{"invalid FKP FC order"});
-      size_t off = 2 * f[4 * (n + 1) + stride * j];
-      FormatRange x{first, last, {}};
-      if (off) {
-        if (off >= 511)
-          return std::unexpected(Error{"invalid FKP format offset"});
-        size_t len = 0, start = 0;
-        if (para) {
-          size_t cb = f[off];
-          if (cb) {
-            len = cb * 2 - 1;
-            start = off + 1;
+    const size_t before = out.size();
+    auto read_page = [&]() -> std::expected<void, Error> {
+      if (pn >= seen.size())
+        return std::unexpected(Error{"FKP page outside WordDocument"});
+      if (seen[pn]++)
+        return std::unexpected(Error{"duplicate FKP page"});
+      Bytes f = word.subspan(pn * 512, 512);
+      size_t n = f[511], stride = para ? 13 : 1;
+      if (n == 0 || n > (para ? 29 : 101) || 4 * (n + 1) + stride * n > 511)
+        return std::unexpected(Error{"invalid FKP run count"});
+      for (size_t j = 0; j < n; j++) {
+        uint32_t first = U32(f, 4 * j), last = U32(f, 4 * (j + 1));
+        if (last <= first)
+          return std::unexpected(Error{"invalid FKP FC order"});
+        size_t off = 2 * f[4 * (n + 1) + stride * j];
+        FormatRange x{first, last, {}};
+        if (off) {
+          if (off >= 511)
+            return std::unexpected(Error{"invalid FKP format offset"});
+          size_t len = 0, start = 0;
+          if (para) {
+            size_t cb = f[off];
+            if (cb) {
+              len = cb * 2 - 1;
+              start = off + 1;
+            } else {
+              if (off + 2 > 511)
+                return std::unexpected(Error{"truncated PAPX"});
+              len = 2 * f[off + 1];
+              start = off + 2;
+            }
+            if (len < 2 || len > 511 - start)
+              return std::unexpected(Error{"invalid PAPX size"});
+            x.style = U16(f, start);
+            start += 2;
+            len -= 2;
           } else {
-            if (off + 2 > 511)
-              return std::unexpected(Error{"truncated PAPX"});
-            len = 2 * f[off + 1];
-            start = off + 2;
+            len = f[off];
+            start = off + 1;
+            if (len > 511 - start)
+              return std::unexpected(Error{"invalid CHPX size"});
           }
-          if (len < 2 || len > 511 - start)
-            return std::unexpected(Error{"invalid PAPX size"});
-          x.style = U16(f, start);
-          start += 2;
-          len -= 2;
-        } else {
-          len = f[off];
-          start = off + 1;
-          if (len > 511 - start)
-            return std::unexpected(Error{"invalid CHPX size"});
+          x.sprms.assign(f.begin() + start, f.begin() + start + len);
+          if (!Walk(x.sprms, [](uint16_t, Bytes) {}))
+            return std::unexpected(Error{"invalid FKP sprm sequence"});
         }
-        x.sprms.assign(f.begin() + start, f.begin() + start + len);
+        out.push_back(std::move(x));
       }
-      out.push_back(std::move(x));
+      return {};
+    };
+    auto page = read_page();
+    if (!page) {
+      if (!warnings)
+        return std::unexpected(page.error());
+      out.resize(before);
+      warnings->push_back(std::string("skipped ") + (para ? "PAPX" : "CHPX") +
+                          " FKP page " + std::to_string(pn) + ": " +
+                          page.error().message);
     }
   }
 

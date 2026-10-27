@@ -348,6 +348,7 @@ struct Table {
 };
 
 struct Document {
+  std::vector<std::string> warnings;
   std::vector<Image> images;
   std::vector<OleObject> ole_objects;
   std::vector<Textbox> textboxes;

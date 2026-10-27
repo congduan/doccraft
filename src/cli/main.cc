@@ -140,6 +140,8 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "convert: %s\n", extracted.error().message.c_str());
       return 1;
     }
+    for (const auto& warning : extracted->warnings)
+      std::fprintf(stderr, "warning: %s\n", warning.c_str());
     for (auto& object : extracted->ole_objects) {
       auto packaged = doccraft::cfb::RepackageStorage(
           *cfb, "Root Entry/ObjectPool/_" + std::to_string(object.storage_id));

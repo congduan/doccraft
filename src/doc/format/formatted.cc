@@ -132,13 +132,14 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   auto chars = ReadChars(word, table, fib, fib.ccp_text, 0, &prcs);
   if (!chars)
     return std::unexpected(chars.error());
-  auto chpx = ReadFkps(word, table, fib.chpx_bte, false);
+  model::Document doc;
+  auto chpx = ReadFkps(word, table, fib.chpx_bte, false, &doc.warnings);
   if (!chpx)
     return std::unexpected(chpx.error());
+  // PAPX can carry table structure; losing it can change cell boundaries.
   auto papx = ReadFkps(word, table, fib.papx_bte, true);
   if (!papx)
     return std::unexpected(papx.error());
-  model::Document doc;
   size_t total_image_size = 0;
   auto floating = ReadFloatingPictures(word, table, fib);
   if (!floating)
@@ -676,22 +677,25 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       doc.section_breaks.empty() ? 1 : doc.section_breaks.size() + 1;
   auto headers =
       ReadHeaders(doc, word, table, fib, *chpx, *papx, section_count);
-  if (!headers)
-    return std::unexpected(headers.error());
-  for (size_t k = 0; k < section_count; k++) {
-    detail::SectionHeaders& stories = (*headers)[k];
-    model::Section* target = nullptr;
-    if (k + 1 == section_count)
-      target = &doc.section;
-    else if (k < doc.section_breaks.size())
-      target = &doc.section_breaks[k].second;
-    if (target == nullptr)
-      continue;
-    target->headers = stories;
-    if (!stories[4].empty() || !stories[5].empty())
-      target->first_page_different = true;
-    if (!stories[0].empty() || !stories[2].empty())
-      target->odd_even_different = true;
+  if (!headers) {
+    doc.warnings.push_back("skipped header stories: " +
+                           headers.error().message);
+  } else {
+    for (size_t k = 0; k < section_count; k++) {
+      detail::SectionHeaders& stories = (*headers)[k];
+      model::Section* target = nullptr;
+      if (k + 1 == section_count)
+        target = &doc.section;
+      else if (k < doc.section_breaks.size())
+        target = &doc.section_breaks[k].second;
+      if (target == nullptr)
+        continue;
+      target->headers = stories;
+      if (!stories[4].empty() || !stories[5].empty())
+        target->first_page_different = true;
+      if (!stories[0].empty() || !stories[2].empty())
+        target->odd_even_different = true;
+    }
   }
   return doc;
 }
