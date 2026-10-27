@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "crypto/rc4.h"
+#include "crypto/derivation.h"
 #include "crypto/sha1.h"
 #include "gtest/gtest.h"
 
@@ -51,4 +52,16 @@ TEST(Crypto, Sha1Fips180Four) {
             "a9993e364706816aba3e25717850c26c9cd0d89d");
   EXPECT_EQ(Hex(doccraft::crypto::Sha1({})),
             "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+}
+
+TEST(Crypto, CryptoApiKeyDerivation) {
+  std::array<uint8_t, 16> salt{};
+  for (size_t n = 0; n < salt.size(); ++n) salt[n] = n;
+  auto hash = doccraft::crypto::HashPassword("password", salt);
+  ASSERT_TRUE(hash);
+  EXPECT_EQ(Hex(doccraft::crypto::DeriveRc4Key(*hash, 0, 128)),
+            "c25141865f8d11622c27586270440db4");
+  EXPECT_EQ(Hex(doccraft::crypto::DeriveRc4Key(*hash, 1, 40)),
+            "a614652b010000000000000000000000");
+  EXPECT_FALSE(doccraft::crypto::HashPassword("\xc0\xaf", salt));
 }
