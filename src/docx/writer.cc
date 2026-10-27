@@ -104,6 +104,7 @@ struct Part {
 struct WriteContext {
   const model::Document* document = nullptr;
   std::vector<int> image_rids;
+  std::vector<int> ole_rids;
   std::map<std::string, int> hyperlinks;
   int revision_id = 0;
   int next_rid = 3;
@@ -142,6 +143,11 @@ std::string BuildContentTypes(const WriteContext& ctx) {
         "<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>"
         "<Default Extension=\"wmf\" ContentType=\"image/x-wmf\"/>"
         "<Default Extension=\"emf\" ContentType=\"image/x-emf\"/>";
+  }
+  if (ctx.document && !ctx.document->ole_objects.empty()) {
+    out +=
+        "<Default Extension=\"bin\" ContentType=\"application/"
+        "vnd.openxmlformats-officedocument.oleObject\"/>";
   }
   for (const auto& part : ctx.parts) {
     bool header = part.name.starts_with("header");
@@ -204,6 +210,8 @@ pugi::xml_document BuildRelationships(const WriteContext& ctx) {
       type = "footnotes";
     } else if (target == "endnotes.xml") {
       type = "endnotes";
+    } else if (target.starts_with("embeddings/")) {
+      type = "oleObject";
     }
     auto rel = relations.append_child("Relationship");
     Attr(rel, "Id", "rId" + std::to_string(rid));
@@ -271,12 +279,20 @@ std::expected<std::vector<uint8_t>, Error> Write(
   WriteContext ctx;
   ctx.document = &document;
   ctx.image_rids.resize(document.images.size());
+  ctx.ole_rids.resize(document.ole_objects.size());
+  for (const auto& object : document.ole_objects) {
+    if (object.bytes.empty())
+      return std::unexpected(Error{"OLE object storage is missing"});
+  }
   pugi::xml_document doc;
   auto root = doc.append_child("w:document");
   Attr(root, "xmlns:w", kWordmlNamespace);
   Attr(root, "xmlns:r", kRelationshipsNamespace);
-  if (!document.textboxes.empty()) {
+  if (!document.textboxes.empty() || !document.ole_objects.empty()) {
     Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
+  }
+  if (!document.ole_objects.empty()) {
+    Attr(root, "xmlns:o", "urn:schemas-microsoft-com:office:office");
   }
   Attr(
       root, "xmlns:wp",

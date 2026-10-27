@@ -186,7 +186,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ◐ 浮动图片与文字环绕（Escher anchor + 环绕类型映射）：FSPA anchor 定位（bx/by → margin/page/text，复用浮动表格语义）与主流环绕（topAndBottom/around=Square/none/rough=Tight→Through 合成覆盖）已通，LibreOffice golden 对拍达其内部基线下限；轮廓级 Tight/Through 区分需真实 Word 样本（LibreOffice 导出两者同为 wr=4），已知限制登记 KNOWN-SIMPLIFICATIONS
 - ◐ 正文浮动文本框：PlcftxbxTxt/PlcfTxbxBkd 故事范围、FTXBXS shape id 与 PlcfSpaMom 锚点连接，按 Tbkd 顺序展开并写出 `w:pict/w:txbxContent`；内联形状、链中各形状的独立排版、页眉文本框及复杂形状外观仍待补齐
 - ☐ 基本形状/艺术字占位（可降级为占位图，文档化降级策略）
-- ☐ OLE 嵌入对象（对象流透传 + 预览图）
+- ◐ OLE 嵌入对象：字段分隔符上的 `sprmCPicLocation` 定位 ObjectPool 子存储，完整流族重新封装为 CFB 嵌入部件，字段结果图片作预览并输出 `w:object/o:OLEObject`；仅有 `\1OlePres000` 而无字段结果图的预览尚未解码
 - ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（脚注、尾注、批注与书签已按 PLC 解析并输出 `footnotes.xml`/`endnotes.xml`/`comments.xml`/`w:bookmarkStart`-`End`；交叉引用与目录域的指令与结果文本按通用复杂域输出）
 
 ### 6.7 样式系统

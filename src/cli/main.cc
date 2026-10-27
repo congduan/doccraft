@@ -20,9 +20,11 @@
 #include <iterator>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cfb/cfb_reader.h"
+#include "cfb/cfb_writer.h"
 #include "doc/fib.h"
 #include "doc/format.h"
 #include "doc/text.h"
@@ -137,6 +139,16 @@ int main(int argc, char** argv) {
     if (!extracted) {
       std::fprintf(stderr, "convert: %s\n", extracted.error().message.c_str());
       return 1;
+    }
+    for (auto& object : extracted->ole_objects) {
+      auto packaged = doccraft::cfb::RepackageStorage(
+          *cfb, "Root Entry/ObjectPool/_" + std::to_string(object.storage_id));
+      if (!packaged) {
+        std::fprintf(stderr, "convert: OLE %d: %s\n", object.storage_id,
+                     packaged.error().message.c_str());
+        return 1;
+      }
+      object.bytes = std::move(*packaged);
     }
     const auto t_format = Clock::now();
     auto archive = doccraft::docx::Write(*extracted);

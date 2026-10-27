@@ -43,6 +43,13 @@ struct Image {
   std::optional<ImageAnchor> anchor;
 };
 
+struct OleObject {
+  std::string program_id;
+  int storage_id = -1;
+  std::vector<uint8_t> bytes;
+  int preview_image_index = -1;
+};
+
 // Run::field_char markers, matching w:fldChar/@w:fldCharType.
 inline constexpr int kFieldCharBegin = 0;
 inline constexpr int kFieldCharSeparate = 1;
@@ -111,6 +118,7 @@ struct Run {
   int object_offset = -1;
   int image_index = -1;    // Index into Document::images for U+0001.
   int textbox_index = -1;  // Index into Document::textboxes at shape anchor.
+  int ole_index = -1;  // Index into Document::ole_objects at field separator.
   bool binary_data = false, ole_object = false, embedded_object = false;
   bool revision_insert = false, revision_delete = false,
        property_revision = false;
@@ -341,6 +349,7 @@ struct Table {
 
 struct Document {
   std::vector<Image> images;
+  std::vector<OleObject> ole_objects;
   std::vector<Textbox> textboxes;
   std::vector<Paragraph> paragraphs;
   std::vector<Style> styles;

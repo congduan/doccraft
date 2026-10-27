@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <functional>
 #include <map>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -258,6 +259,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   };
   std::vector<TableFrame> frames;
   std::vector<FieldFrame> fields;
+  int pending_ole = -1;
   bool page_field = false;
   std::string hyperlink;
   size_t next_section = 0;
@@ -393,10 +395,41 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         emit_instruction(frame.instruction);
         emit_field_char(model::kFieldCharSeparate);
       }
+      // [MS-DOC] sprmCPicLocation on the field separator is the decimal
+      // ObjectPool storage name, not a Data-stream picture offset.
+      model::Run object;
+      if (const auto* x = Find(*chpx, ch.fc)) {
+        Walk(x->sprms, [&](uint16_t op, Bytes v) {
+          ApplyRun(object, op, v, doc.fonts);
+        });
+      }
+      walk_piece_prm(ch.prm, [&](uint16_t op, Bytes v) {
+        if ((op >> 10 & 7) == 2)
+          ApplyRun(object, op, v, doc.fonts);
+      });
+      if (object.ole_object) {
+        if (object.object_offset < 0)
+          return std::unexpected(Error{"OLE field has no ObjectPool id"});
+        std::istringstream instruction(frame.instruction);
+        std::string kind, program_id;
+        instruction >> kind >> program_id;
+        if (kind != "EMBED" && kind != "LINK" && kind != "CONTROL")
+          return std::unexpected(Error{"invalid OLE field instruction"});
+        model::OleObject value;
+        value.storage_id = object.object_offset;
+        value.program_id = std::move(program_id);
+        pending_ole = static_cast<int>(doc.ole_objects.size());
+        doc.ole_objects.push_back(std::move(value));
+        model::Run marker;
+        marker.ole_index = pending_ole;
+        para.runs.push_back(std::move(marker));
+        last_run_count = 0;
+      }
       sync_field_state();
       continue;
     }
     if (!fields.empty() && control == '\x15') {
+      pending_ole = -1;
       // A field that closes before its separator is malformed: keep its
       // instruction as an unmatched begin/end pair instead of dropping it.
       if (fields.back().mode == FieldMode::kPending) {
@@ -602,6 +635,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       total_image_size += picture->bytes.size();
       r.image_index = static_cast<int>(doc.images.size());
       doc.images.push_back(std::move(*picture));
+      if (pending_ole >= 0) {
+        doc.ole_objects[static_cast<size_t>(pending_ole)].preview_image_index =
+            r.image_index;
+        pending_ole = -1;
+        last_run_count = 0;
+        continue;
+      }
       para.runs.push_back(std::move(r));
       remember_run();
       continue;

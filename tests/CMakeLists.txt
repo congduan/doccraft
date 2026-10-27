@@ -85,6 +85,13 @@ target_compile_definitions(m4_textbox_test PRIVATE
   DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m4_textbox_test)
 
+add_executable(m4_ole_test m4_ole_test.cc cfb_test_util.cc)
+target_link_libraries(m4_ole_test PRIVATE doccraft_cfb doccraft_doc
+  doccraft_docx gtest_main)
+target_compile_definitions(m4_ole_test PRIVATE
+  DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(m4_ole_test)
+
 # Standalone corpus builder for the 50 MiB performance envelope.
 add_executable(perf_repack perf/repack_doc.cc cfb_test_util.cc)
 target_link_libraries(perf_repack PRIVATE doccraft_cfb)

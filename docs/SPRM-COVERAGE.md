@@ -17,13 +17,13 @@
 | ✅ | `0x0800` | sprmCFRMarkDel | A ToggleOperand that specifies whether the text is formatted as deleted revision mark text, which is text that was deleted while revision marking was on. | 字符 CHP §2.6.1；M3Batch8.RevisionMarksWrapRuns |
 | ✅ | `0x0801` | sprmCFRMarkIns | A ToggleOperand that specifies whether the text is formatted as inserted revision mark text, which is text that was inserted while revision marking was on. | 字符 CHP §2.6.1；M3Batch8.RevisionMarksWrapRuns |
 | ✅ | `0x0802` | sprmCFFldVanish | A ToggleOperand that specifies whether the field text is hidden. | 字符 CHP §2.6.1；M3Batch7.HiddenTextSources |
-| ✅ | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage. | 字符 CHP §2.6.1；正文内联图片 Data 偏移、PICF/BLIP 到 `w:drawing`；M5InlineImages.LibreOfficeGoldenKeepsMediaBytes、M5InlineImages.SameChpxTextDoesNotAbsorbPicture、M5InlineImages.AggregateImageLimitAcceptsBoundaryRejectsOverflow；OLE 分支仍属 M5 后续 |
+| ✅ | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage. | 字符 CHP §2.6.1；正文内联图片 Data 偏移、PICF/BLIP 到 `w:drawing`；M5InlineImages.LibreOfficeGoldenKeepsMediaBytes、M5InlineImages.SameChpxTextDoesNotAbsorbPicture、M5InlineImages.AggregateImageLimitAcceptsBoundaryRejectsOverflow；OLE 字段分隔符 ObjectPool id 到嵌入部件由 M4Ole.RealObjectPoolSubstorageIsIndependentCfbPart 验证 |
 | N/A | `0x4804` | sprmCIbstRMark | A signed 16-bit integer that specifies a zero-based index into SttbfRMark.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | N/A | `0x6805` | sprmCDttmRMark | A DTTM that specifies the date and time at which the text was inserted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | N/A | `0x0806` | sprmCFData | A Bool8 that specifies whether the picture character in the text represents binary data. | 字符 CHP §2.6.1；图片二进制标记；二进制数据不作为内联图片读取，M5InlineImages.BinaryDataMarkerDoesNotReadPicture；载荷留待后续 |
 | N/A | `0x4807` | sprmCIdslRMark | An unsigned 16-bit integer that specifies the reason value of the inserted or modified revision mark text.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | ✅ | `0x6A09` | sprmCSymbol | A CSymbolOperand structure that designates the character as a symbol and specifies the font and character code for the symbol. | 字符 CHP §2.6.1 |
-| N/A | `0x080A` | sprmCFOle2 | A Bool8 value that specifies whether the character is a placeholder for an OLE object. | 字符 CHP §2.6.1；OLE 占位符；w:object 需要嵌入部件，随 M5 对象链输出 |
+| ✅ | `0x080A` | sprmCFOle2 | A Bool8 value that specifies whether the character is a placeholder for an OLE object. | 字符 CHP §2.6.1；字段分隔符识别 ObjectPool 对象，M4Ole.RealObjectPoolSubstorageIsIndependentCfbPart |
 | ✅ | `0x2A0C` | sprmCHighlight | An Ico value that specifies the highlighting color of the text. | 字符 CHP §2.6.1 |
 | ✅ | `0x0811` | sprmCFWebHidden | A ToggleOperand value that specifies whether the text is hidden in Web Layout view of the document.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |
 | N/A | `0x6815` | sprmCRsidProp | An integer value that specifies a revision save ID, as specified in [ECMA-376] Part 1, Section 17.15.1.70 rsid (Single Session Revision Save ID), associated with character formatting.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
@@ -59,7 +59,7 @@
 | ✅ | `0x2A53` | sprmCFDStrike | A ToggleOperand value that specifies whether the text is formatted with the double strikethrough effect. | 字符 CHP §2.6.1 |
 | ✅ | `0x0854` | sprmCFImprint | A ToggleOperand value that specifies whether the text is formatted with the imprint effect. | 字符 CHP §2.6.1 |
 | N/A | `0x0855` | sprmCFSpec | A ToggleOperand value that specifies whether the current text has a meaning that differs or displays differently than the underlying character to which it is applied. | 字符 CHP §2.6.1；特殊字符标记；所列字符（图片/脚注/批注/域/绘图）渲染分别由 M4/M5 链承载 |
-| N/A | `0x0856` | sprmCFObj | A Bool8 value that specifies whether the current text represents an embedded object. | 字符 CHP §2.6.1；嵌入对象占位符；同 sprmCFOle2，随 M5 输出 |
+| ◐ | `0x0856` | sprmCFObj | A Bool8 value that specifies whether the current text represents an embedded object. | 字符 CHP §2.6.1；IR 已保存，OLE 嵌入按 sprmCFOle2/CPicLocation 输出；其他对象类型未覆盖 |
 | N/A | `0xCA57` | sprmCPropRMark90 | A PropRMarkOperand value that specifies whether the character run has an associated property revision mark, as well as its author and date/time.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | ✅ | `0x0858` | sprmCFEmboss | A ToggleOperand value that specifies whether the text is embossed. | 字符 CHP §2.6.1 |
 | ✅ | `0x2859` | sprmCSfxText | A byte that specifies a text effect to apply to the text.；M3Batch5.CharacterLanguageAndScriptOpcodes | 字符 CHP §2.6.1 |

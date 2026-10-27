@@ -26,7 +26,7 @@ const char* ImageExtension(model::ImageFormat format) {
   return "png";
 }
 
-void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
+void RegisterImage(int index, WriteContext& ctx) {
   if (!ctx.document || index < 0 ||
       static_cast<size_t>(index) >= ctx.document->images.size())
     return;
@@ -40,6 +40,14 @@ void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
     ctx.parts.push_back(
         {name, std::string(image.bytes.begin(), image.bytes.end())});
   }
+}
+
+void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
+  if (!ctx.document || index < 0 ||
+      static_cast<size_t>(index) >= ctx.document->images.size())
+    return;
+  RegisterImage(index, ctx);
+  const model::Image& image = ctx.document->images[index];
   constexpr int64_t kEmuPerTwip = 635;
   const int64_t width = static_cast<int64_t>(image.width) * kEmuPerTwip;
   const int64_t height = static_cast<int64_t>(image.height) * kEmuPerTwip;
@@ -156,6 +164,53 @@ void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
   Attr(sp_pr.append_child("a:prstGeom"), "prst", "rect");
 }
 
+void WriteOle(pugi::xml_node run, int index, WriteContext& ctx) {
+  if (!ctx.document || index < 0 ||
+      static_cast<size_t>(index) >= ctx.document->ole_objects.size())
+    return;
+  const auto& object = ctx.document->ole_objects[index];
+  if (ctx.ole_rids[index] == 0) {
+    const std::string name =
+        "embeddings/oleObject" + std::to_string(index + 1) + ".bin";
+    ctx.ole_rids[index] = ctx.next_rid++;
+    ctx.relations.emplace_back(ctx.ole_rids[index], name);
+    ctx.parts.push_back(
+        {name, std::string(object.bytes.begin(), object.bytes.end())});
+  }
+  int width = 1440, height = 1440;
+  if (object.preview_image_index >= 0 &&
+      static_cast<size_t>(object.preview_image_index) <
+          ctx.document->images.size()) {
+    const auto& image = ctx.document->images[object.preview_image_index];
+    width = image.width;
+    height = image.height;
+    RegisterImage(object.preview_image_index, ctx);
+  }
+  auto container = run.append_child("w:object");
+  IntAttr(container, "w:dxaOrig", width);
+  IntAttr(container, "w:dyaOrig", height);
+  const std::string shape_id = "ole_shape_" + std::to_string(index + 1);
+  auto shape = container.append_child("v:shape");
+  Attr(shape, "id", shape_id);
+  Attr(shape, "style", "width:" + std::to_string(width / 20.0) +
+                           "pt;height:" + std::to_string(height / 20.0) +
+                           "pt");
+  if (object.preview_image_index >= 0 &&
+      static_cast<size_t>(object.preview_image_index) <
+          ctx.image_rids.size()) {
+    Attr(shape.append_child("v:imagedata"), "r:id",
+         "rId" +
+             std::to_string(ctx.image_rids[object.preview_image_index]));
+  }
+  auto ole = container.append_child("o:OLEObject");
+  Attr(ole, "Type", "Embed");
+  Attr(ole, "ProgID", object.program_id);
+  Attr(ole, "ShapeID", shape_id);
+  Attr(ole, "DrawAspect", "Content");
+  Attr(ole, "ObjectID", "_" + std::to_string(object.storage_id));
+  Attr(ole, "r:id", "rId" + std::to_string(ctx.ole_rids[index]));
+}
+
 void WriteTextbox(pugi::xml_node run, int index, WriteContext& ctx) {
   if (!ctx.document || index < 0 ||
       static_cast<size_t>(index) >= ctx.document->textboxes.size())
@@ -230,6 +285,8 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       WriteImage(rn, r.image_index, ctx);
     } else if (r.textbox_index >= 0) {
       WriteTextbox(rn, r.textbox_index, ctx);
+    } else if (r.ole_index >= 0) {
+      WriteOle(rn, r.ole_index, ctx);
     } else if (r.note_ref >= 0) {
       // A note reference is an empty run carrying the reference element.
       IntAttr(rn.append_child(r.note_endnote ? "w:endnoteReference"
