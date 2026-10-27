@@ -2,6 +2,31 @@ include_directories(${CMAKE_SOURCE_DIR})
 include(GoogleTest)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# Deterministic in-process mutation suite (M6): whole-pipeline seed mutation,
+# directed sprm/FKP mutation and CLX/piece-table mutation. Zero crashes is the
+# invariant; the gtest binary is the slowest test-safe way to run it in CI.
+add_executable(fuzz_test fuzz_test.cc fuzz_util.cc)
+target_link_libraries(fuzz_test PRIVATE doccraft_cfb doccraft_doc
+  doccraft_docx gtest_main)
+target_compile_definitions(fuzz_test PRIVATE
+  DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(fuzz_test)
+
+# Optional continuous-fuzzing entry point. Requires clang with the libFuzzer
+# runtime; not built by default and not part of ctest.
+option(DOCCRAFT_ENABLE_LIBFUZZER
+  "Build the libFuzzer driver for the convert pipeline (clang only)" OFF)
+if(DOCCRAFT_ENABLE_LIBFUZZER)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "DOCCRAFT_ENABLE_LIBFUZZER requires the clang compiler")
+  endif()
+  add_executable(doccraft_fuzz fuzz_driver.cc fuzz_util.cc)
+  target_link_libraries(doccraft_fuzz PRIVATE doccraft_cfb doccraft_doc
+    doccraft_docx)
+  target_compile_options(doccraft_fuzz PRIVATE -fsanitize=fuzzer)
+  target_link_options(doccraft_fuzz PRIVATE -fsanitize=fuzzer)
+endif()
+
 add_executable(crypto_test crypto_test.cc)
 target_link_libraries(crypto_test PRIVATE doccraft_crypto gtest_main)
 gtest_discover_tests(crypto_test)
