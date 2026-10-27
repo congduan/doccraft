@@ -77,8 +77,9 @@ std::expected<NoteReferenceSet, Error> ReadNoteReferences(
       error = refs.error().message;
     else if (!texts)
       error = texts.error().message;
-    else if (!refs->empty() &&
-             (texts->size() < refs->size() || texts->size() > refs->size() + 1))
+    else if ((refs->empty() && !texts->empty()) ||
+             (!refs->empty() && (texts->size() < refs->size() ||
+                                 texts->size() > refs->size() + 1)))
       error = "note PLC entry count mismatch";
     else if (refs->size() > 1 && (*refs)[refs->size() - 2] >= fib.ccp_text)
       error = "invalid note reference PLC CP range";
@@ -170,10 +171,14 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
       read_status(fib.fields_ftn, footnote_base, fib.ccp_ftn, "footnote");
   const auto endnote_status =
       read_status(fib.fields_edn, endnote_base, fib.ccp_edn, "endnote");
-  append(*footnotes, footnote_base, fib.ccp_ftn, footnote_count, false,
-         footnote_status);
-  append(*endnotes, endnote_base, fib.ccp_edn, endnote_count, true,
-         endnote_status);
+  if (footnote_count != 0) {
+    append(*footnotes, footnote_base, fib.ccp_ftn, footnote_count, false,
+           footnote_status);
+  }
+  if (endnote_count != 0) {
+    append(*endnotes, endnote_base, fib.ccp_edn, endnote_count, true,
+           endnote_status);
+  }
   return {};
 }
 }  // namespace doccraft::doc::detail

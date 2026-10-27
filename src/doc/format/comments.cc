@@ -51,7 +51,7 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(Bytes table,
   for (size_t i = 0; i < count; i++) {
     CommentAnchor anchor;
     anchor.cp = U32(plc, 4 * i);
-    if (i && anchor.cp <= previous)
+    if (i && anchor.cp < previous)
       return std::unexpected(Error{"invalid comment anchor PLC CP order"});
     previous = anchor.cp;
     const size_t atrd = 4 * (count + 1) + kAtrdSize * i;
@@ -95,8 +95,7 @@ std::expected<std::vector<std::string>, Error> ReadAuthors(Bytes table,
     p += cch * 2;
     out.push_back(std::move(name));
   }
-  if (p != b.size())
-    return std::unexpected(Error{"invalid comment owners array"});
+  // Some producers leave one padding byte after the last complete Xst.
   return out;
 }
 
