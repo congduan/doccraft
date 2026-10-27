@@ -37,7 +37,7 @@
 
 - RC4 回归样本由 `m6_fixture_gen` 从仓库明文样本反向加密，分别覆盖传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；verifier、错误口令、跨块解密和 `document.xml` 与明文逐字节一致已验证。40-bit CryptoAPI（含 KeySize=0 缺省）由 `M6Rc4.DecryptsCryptoApi40BitKeyVariants` 合成用例覆盖。尚未获得 Word 实际加密导出的 `.doc` 作外部互通验证。
 - 仅转换 WordDocument、Table、Data 主流。RC4 CryptoAPI 的独立加密属性流（按 [MS-DOC] 2.2.6.3 在 `fDocProps` 置位时出现；[MS-OFFCRYPTO] 2.3.5.1 措辞与其相悖，通行实现按 [MS-DOC] 极性）不迁移到 OOXML 元数据；嵌入对象在加密文档中的独立存储兼容性尚未验证。
-- 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉、脚注等其他故事的字段 PLC 尚未接入，故 §6.1 域项保持 ◐。
+- 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉/脚注/尾注/批注故事的字段 PLC 自 M8 起接入（见「M8 当前范围」）；文本框故事的字段 PLC 仍未接入，故 §6.1 域项保持 ◐。
 
 ## M6 变异加固
 
@@ -54,7 +54,7 @@
 - 对拍的非零下限受 LibreOffice 自身 `.doc`/`.docx` 导入差异影响。同一 `.doc` 由 LibreOffice 另存 `.docx` 后回读，`cjk-text` 仍为 1470 bad_px（0.068%）、`table-merge-direction` 为 785（0.037%）、`complex-table` 为 38（0.002%）；`table-borders-shading` 则为 0。热力图显示前三者的差异集中在文字笔画或位置，并非推断中的表格边框宽度错误。doccraft 的单元格左内边距补偿使 `table-borders-shading` 降至 0，`table-merge-direction` 降至 282（0.013%）；其余差异不按像素零差目标盲目改写规范属性。
 
 - CHP/PAP/SEP 的常用 sprm、STSH 样式链、LSTF/LVL 列表、首节页眉页脚和基础表格网格已读写。表格单元格合并、复杂边框底纹、浮雕/阴影等效果仍简化；复杂格式需要独立样本验证。
-- 多节文档逐节写出属性切换、行号与脚注位置，并为每节生成独立的页眉页脚部件（PlcfHdd 每节 6 个故事，首个故事前有 6 个保留 CP）。两条限制：其一，节内页眉里的图片、域代码与表格只保留文本与段落格式，不含 drawing 部件；其二，故事末段落是守卫标记，会被丢弃，因此「仅有一个空段落」的页眉在输出中不存在。
+- 多节文档逐节写出属性切换、行号与脚注位置，并为每节生成独立的页眉页脚部件（PlcfHdd 每节 6 个故事，首个故事前有 6 个保留 CP）。两条限制：其一，节内页眉里的图片与表格只保留文本与段落格式，不含 drawing 部件（域自 M8 起按正文语义输出）；其二，故事末段落是守卫标记，会被丢弃，因此「仅有一个空段落」的页眉在输出中不存在。
 - 样式表保留段落、字符、表格和编号样式的条目及继承链接；表格样式的条件格式（`sprmTCnf`/`sprmPCnf`/`sprmCCnf`）按 `cnfc` 聚合成 `w:tblStylePr`，但同一条件的 TAPX/PAPX/CHPX 三段只按出现顺序合并，尚未按 2.4.6 的属性优先级重排。
 - `sprmPHugePapx` 和 `sprmPTableProps` 会按 Data 流偏移读取嵌套 PrcData；超出流边界则忽略该引用。其复杂表格语义未全部映射。
 - 浮动段落框映射 `w:framePr` 的位置/尺寸/间距/锁定、首字下沉（`sprmPDcs`）与纵向文字流（`sprmPFrameTextFlow`，仅宽高非默认时才输出）；`w:drawing` 级锚点与绕排多边形仍缺。
@@ -63,11 +63,11 @@
 - SHD80 系列（`sprmCShd80`/`sprmPShd80`/`sprmTDefTableShd80`）走 16 色调色板，索引 0（自动色）不产生 `w:shd`；现代 SHD 操作数仍以 COLORREF 优先。
 - `sprmPIncLvl` 只在 `sprmPIlfo != 0` 时累加 `ilvl`，按规范应增量 `istd` 的段落样式分支未实现。
 - `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。
-- 域处理按「顶层特例 + 其余通用」分层：只有顶层未锁定、未标脏的 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。正文 `PlcfFldMom` 结束记录的 `fLocked`/`fResultsDirty` 已映射为 `w:fldLock`/`w:dirty`；其他故事的字段 PLC 尚未读取。
+- 域处理按「顶层特例 + 其余通用」分层：只有顶层未锁定、未标脏的 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。`PlcfFldMom`/`PlcfFldHdr`/`PlcfFldFtn`/`PlcfFldEdn`/`PlcfFldAtn` 结束记录的 `fLocked`/`fResultsDirty` 已映射为 `w:fldLock`/`w:dirty`；文本框故事的字段 PLC（`fcPlcfFldTxbx`/`fcPlcffldHdrTxbx`）尚未读取。
 - 域结果里的图片、对象、脚注引用等仍是 M5 载荷；嵌套在超链接结果中的域会把外层链接降级为普通文本。
 - 嵌套表格按 `sprmPItap`（绝对深度）建立递归结构：`Cell::blocks` 与正文一样是 Block 序列，深度下降时把内层表格挂到外层单元格上。两条限制：其一，深度信息只来自 `sprmPItap`/`sprmPDtap`，若生产者不写这两个 sprm（缺失时按「在表格内 = 一层」推断），嵌套仍会被摊平；其二，LibreOffice 导出 `.doc` 时会把嵌套表格摊平成段落，所以本级只有合成位流样本（`tests/m3_nested_table_test.cc`），没有真实 Word 样本。
 - `sprmPFInnerTableCell` 仍未使用：结构与深度已由 `sprmPItap` 决定，该标记不参与判定。
-- 脚注/尾注已按 `PlcffndRef`/`PlcffndTxt`（FIB pair 2/3）与 `PlcfendRef`/`PlcfendTxt`（pair 46/47，注意不是 44/45——那两个是 fcPms/fcFormFldSttbs）解析，正文里的 `0x02` 变成引用 run，`Document::notes` 保存正文并按 `w:footnoteReference`/`w:endnoteReference` + `footnotes.xml`/`endnotes.xml`（含 separator/continuationSeparator）输出。限制：脚注内容只按 CHPX/PAPX 还原文本与段落格式，脚注内的图片、表格、域不处理；脚注编号始终自动编号（不还原自定义标记）；`PlcfendTxt` 末尾可能多一个守卫 CP，实际条数以引用 PLC 为准。
+- 脚注/尾注已按 `PlcffndRef`/`PlcffndTxt`（FIB pair 2/3）与 `PlcfendRef`/`PlcfendTxt`（pair 46/47，注意不是 44/45——那两个是 fcPms/fcFormFldSttbs）解析，正文里的 `0x02` 变成引用 run，`Document::notes` 保存正文并按 `w:footnoteReference`/`w:endnoteReference` + `footnotes.xml`/`endnotes.xml`（含 separator/continuationSeparator）输出。限制：脚注内容只按 CHPX/PAPX 还原文本与段落格式，脚注内的图片、表格不处理（域自 M8 起处理，含 `PlcfFldFtn`/`PlcfFldEdn` 标志）；脚注编号始终自动编号（不还原自定义标记）；`PlcfendTxt` 末尾可能多一个守卫 CP，实际条数以引用 PLC 为准。
 - FIB 里 note PLC 的偏移若指向 table 流之外，现在会让转换直接失败（与其他 PLC 读取一致的策略）。合成测试曾把 FIB 的 rgFcLcb 覆盖成文本字节，就是因为这个策略被暴露出来；真实损坏文档需要 M6 的降级策略来决定是跳过还是报错。
 - 批注按 `PlcfandRef`（FIB pair 4）+ `PlcfandTxt`（pair 5）+ `GrpXstAtnOwners`（pair 36）解析：正文的 `0x05` 变成锚点 run，`Document::comments` 保存正文与作者，输出 `comments.xml` 与 `w:commentRangeStart`/`w:commentRangeEnd`/`w:commentReference`。限制：锚点是**零长度区间**（真实 Word 里批注可覆盖一段文字，本实现只在引用点开合）；作者名依赖 ATRDPre10 第 20 字节的作者索引，索引越界时退化为姓名缩写（该偏移是从 LibreOffice 样本反推的，未经 Word 样本验证）；批注时间戳未保留（ATRDPre10 无日期字段，`w:date` 省略）。
 - 书签按 `SttbfBkmk`（FIB pair 21）+ `PlcfBkf`（pair 22）+ `PlcfBkl`（pair 23）解析，`w:bookmarkStart`/`w:bookmarkEnd` 输出在正文对应 CP 处。限制：`BKF` 的其他字段（`ITBKLSync` 等）忽略；名字缺失时按 `Bookmark<序号>` 兜底；只处理主文本（`ccpText`）范围的书签，页眉/脚注/批注故事内的书签不输出；未做 `ibkl` 之外的配对校验，`ibkl` 越界的书签整条丢弃。
@@ -91,3 +91,10 @@
 - `sprmSFProtected` 只在 `sprmSFProtected` 出现时输出 `w:formProt`（值为「未被保护」的反相），文档级 `DOP.fProtEnabled` 尚未解析，未出现该 sprm 的节不写保护节点。
 - M3 仅保留越界不崩溃底线。针对 sprm 攻击面的专项分析、定向 fuzz 和防御补强移至 M6。
 - `src/base/binary.h` 的 `U16`/`U32`/`U64`/`S16` 统一了字节序解码，但不做边界检查：越界安全仍由调用方的前置 `subspan`/范围判断保证。带游标、越界即 `std::expected` 失败的读取器需要重写全部调用点，随 M6 的 fuzz 加固一起做。
+
+## M8 当前范围
+
+- 非正文故事的字段接入：页眉/页脚（`PlcfFldHdr`，FIB pair 17 0 基）、脚注（`PlcfFldFtn`，pair 18）、尾注（`PlcfFldEdn`，pair 48）、批注（`PlcfFldAtn`，pair 19）各自读到「字段开始绝对 CP → grffldEnd 字节」映射，页眉用一张全区域映射按故事区间自动归属各节。各故事的域语义与正文同构：域层次永远来自文本中的 `0x13`/`0x14`/`0x15`，PLC 只补充 `fldLock`/`dirty` 标志——这同时是文本框故事的现状（`ReadStoryParagraphs` 无映射时照常解析层次，`fcPlcfFldTxbx`/`fcPlcffldHdrTxbx` 即 pair 57/59 未接）。`fcPlcfFldMcr`（pair 20）按规范「undefined and MUST be ignored」不读。宏/杂项（mcr）与 glsy 故事的字段因此不存在接入问题。
+- 故事字段 PLC 的降级策略：条目 CP 非严格递增、越过本故事 ccp、fldch 种类非法或尺寸不满足 `(size-4) mod 6 == 0` 时，整张 PLC 跳过并输出警告（`skipped <故事> field PLC: …`），该故事退化为「有域层次、无锁/脏标志」，正文与故事正文不受影响；正文 `PlcfFldMom` 维持严格失败策略不变。
+- 锁定域的输出与正文逐字节同构：`w:fldLock` 写在 begin/separate/end 三个标记上；锁定 HYPERLINK 的结果 run 仍包在 `w:hyperlink` 里（沿用正文既有行为）。页眉/脚注/脚注/尾注/批注部件复用 `WriteParagraph`，无独立的域输出逻辑。
+- 超链接关系（`w:hyperlink r:id`）在页眉/脚注等部件中仍指向 `word/_rels/document.xml.rels`：部件各自的关系文件尚未生成，这是 writer 全局的既有简化（页眉图片同样如此），非 M8 引入。

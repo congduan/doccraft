@@ -160,7 +160,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ✅ 基本文本抽取（piece table、文档 ANSI 代码页/UTF-16 双模式）
 - ◐ fast-saved 文档（fComplex）：最终 CLX piece 表重建正文，Prm0/Prm1/Prc 修饰覆盖正文和页眉/脚注/批注/文本框故事；piece 上的 sprmPItap 表格深度有合成断言。六个真实样本可转换且文本相似率 99.55%–100%，但四个不逐字一致，版式 golden 未通过
 - ◐ 特殊字符：tab/CR/VT/非断行空格/连字符/SYM 字符（图片/脚注/批注/绘图等特殊字符随 M4/M5）
-- ◐ 域代码文本与结果（fldChar 层次）：通用复杂域输出 `w:fldChar` begin/separate/end + `w:instrText`，`HYPERLINK` 仍映射为 `w:hyperlink`、页码类域映射为 `w:fldSimple`；`PlcfFldMom` 的 `fldLock`/`dirty` 标志已保留，正文 EMBED 对象按 ObjectPool 保存；其他故事的字段 PLC 仍未接入
+- ◐ 域代码文本与结果（fldChar 层次）：通用复杂域输出 `w:fldChar` begin/separate/end + `w:instrText`，顶层未锁定 HYPERLINK 映射为 `w:hyperlink`、顶层页码类域映射为 `w:fldSimple`，其余（含嵌套/锁定）一律 fldChar 层次；正文 `PlcfFldMom` 与页眉/脚注/尾注/批注故事的 `PlcfFldHdr/Ftn/Edn/Atn` 的 `fldLock`/`dirty` 标志均已保留，各故事字段语义与正文同构（文本框故事有文本驱动的字段层次但未接 PLC 标志；`fcPlcfFldMcr` 规范定义为 undefined 不读）；正文 EMBED 对象按 ObjectPool 保存
 - ✅ 多语言/复杂文种（RTL 标记、bidi、复杂文种颜色与字号）
 
 ### 6.2 字符格式（CHP）
