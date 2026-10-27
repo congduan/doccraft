@@ -20,8 +20,10 @@
 namespace doccraft::crypto {
 
 Rc4::Rc4(std::span<const uint8_t> key) {
-  for (size_t n = 0; n < 256; ++n) state_[n] = static_cast<uint8_t>(n);
-  if (key.empty()) return;
+  for (size_t n = 0; n < 256; ++n)
+    state_[n] = static_cast<uint8_t>(n);
+  if (key.empty())
+    return;
   uint8_t j = 0;
   for (size_t n = 0; n < 256; ++n) {
     j = static_cast<uint8_t>(j + state_[n] + key[n % key.size()]);

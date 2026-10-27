@@ -6,7 +6,7 @@ with no third-party runtime dependencies.
 doccraft reads Word 97–2003 binary documents and writes ECMA-376 Transitional
 DOCX. It runs locally without an Office installation. The converter is at
 **v0.9.0-rc1 preparation**: the main feature paths are implemented, while M6
-hardening and RC4 decryption remain open.
+hardening remains open.
 
 ## Quick start
 
@@ -20,6 +20,7 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 
 build/src/cli/doccraft convert input.doc -o output.docx
+build/src/cli/doccraft convert protected.doc --password secret -o output.docx
 build/src/cli/doccraft inspect input.doc
 ```
 
@@ -36,7 +37,7 @@ build/src/cli/doccraft inspect input.doc
   language ID to ANSI code-page mapping. The implementation lists 15 code-page
   decoders; non-CP1252 decoding requires iconv at build time.
 - Recovery: final piece-table reconstruction for fast-saved documents,
-  encrypted-document detection with explicit rejection, and warnings for
+  legacy RC4 and RC4 CryptoAPI decryption with a password, and warnings for
   selected recoverable formatting or header damage.
 
 Feature states and their boundaries are in [the design checklist](docs/DESIGN.md)

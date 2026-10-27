@@ -25,11 +25,11 @@ std::array<uint8_t, 20> Sha1(std::span<const uint8_t> input) {
   std::vector<uint8_t> bytes(input.begin(), input.end());
   const uint64_t bit_count = static_cast<uint64_t>(bytes.size()) * 8;
   bytes.push_back(0x80);
-  while (bytes.size() % 64 != 56) bytes.push_back(0);
+  while (bytes.size() % 64 != 56)
+    bytes.push_back(0);
   for (int shift = 56; shift >= 0; shift -= 8)
     bytes.push_back(static_cast<uint8_t>(bit_count >> shift));
-  uint32_t h[5] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476,
-                   0xc3d2e1f0};
+  uint32_t h[5] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0};
   for (size_t offset = 0; offset < bytes.size(); offset += 64) {
     uint32_t w[80] = {};
     for (size_t n = 0; n < 16; ++n) {
@@ -63,7 +63,11 @@ std::array<uint8_t, 20> Sha1(std::span<const uint8_t> input) {
       b = a;
       a = temp;
     }
-    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
+    h[0] += a;
+    h[1] += b;
+    h[2] += c;
+    h[3] += d;
+    h[4] += e;
   }
   std::array<uint8_t, 20> digest{};
   for (size_t n = 0; n < 20; ++n)

@@ -31,8 +31,7 @@ std::expected<std::array<uint8_t, 20>, std::string_view> HashPassword(
 std::vector<uint8_t> DeriveRc4Key(std::span<const uint8_t, 20> password_hash,
                                   uint32_t block, uint32_t key_bits);
 std::array<uint8_t, 5> LegacyPasswordHash(
-    std::span<const uint8_t> utf16_password,
-    std::span<const uint8_t, 16> salt);
+    std::span<const uint8_t> utf16_password, std::span<const uint8_t, 16> salt);
 std::array<uint8_t, 16> DeriveLegacyRc4Key(
     std::span<const uint8_t, 5> password_hash, uint32_t block);
 

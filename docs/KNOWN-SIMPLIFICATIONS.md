@@ -8,7 +8,7 @@
 
 ## M2
 
-- `fComplex=1`（增量保存）文档按最终 CLX piece 表读取正文，Prm0 与 Prm1/Prc 字符及段落修饰现也应用于页眉、脚注、批注和文本框故事；piece 上的 `sprmPItap` 已参与正文表格深度判定。Prm0 中仅修订元数据用途的 `sprmPFNumRMIns` 不映射。真实样本的版式 golden 尚未通过，§6.1 保持 ◐。加密文档仍返回 `unsupported (M6)`。
+- `fComplex=1`（增量保存）文档按最终 CLX piece 表读取正文，Prm0 与 Prm1/Prc 字符及段落修饰现也应用于页眉、脚注、批注和文本框故事；piece 上的 `sprmPItap` 已参与正文表格深度判定。Prm0 中仅修订元数据用途的 `sprmPFNumRMIns` 不映射。真实样本的版式 golden 尚未通过，§6.1 保持 ◐。
 - 真实 fast-saved 批量对拍（LibreOffice UTF-8 文本，源 `.doc` vs 转换 `.docx`）：Apache POI 的 `Bug33519.doc` 4522/4522、AbiWord/wv 的 `fastsavedmix.doc` 97/97 逐字一致；`rasp.doc` 2028/2024（相似率 99.9013%）、`o_kurs.doc` 5725/5719（99.8427%）、`ob_is.doc` 38390/38368（99.9375%）、AbiWord/wv 的 `samplefastsaved.doc` 1542/1542（99.5460%）。差异集中在空段落、目录域页码及少数字符；六个样本的版式 golden 均未过。`Bug50955.doc`、`Bug51944.doc` 为非 WordDocument 签名，`Bug60942.doc` 的 CFB 链长超限，`word_with_embeded.doc` 缺 CLX Pcdt，均维持拒绝。`o_kurs.doc` 复制到 fixtures 用于可重用文本框 PLC 尾项及 XML 控制字符回归。另有非 fast-saved 的 `word_with_embeded_ooxml.doc` 121/121 逐字一致，用于 OLE 验证。
 - IR 仅包含段落、文本 run 和特殊控制码位置。`0x07` 单元格/行结束与 `0x0B` 换行在最小 DOCX 中写为换行，不重建表格；列表编号、样式、页眉脚注等留待后续里程碑。
 - 当前最小写出为达到语料 `plain-text.doc` 的像素验收，使用其默认字体（Liberation Serif，12pt）及 Letter 页面 1134 twip 页边距。尚未从 DOC 属性读取字体、字号和页面设置，因此其他语料的版式不保证一致。
@@ -23,7 +23,12 @@
 ## M4 当前范围
 
 - Apache POI 测试语料中的真实 `Bug33519.doc`（FIB `fComplex=1`、`cQuickSaves=8`）已经转换成功；LibreOffice 从源 `.doc` 与转换后 `.docx` 导出的 UTF-8 文本逐字一致（4520 字符）。该文件像素对拍源为 3 页、输出为 4 页，格式 golden 未通过，因此 fast-saved 不标 ✅。语料来源：<https://svn.apache.org/repos/asf/poi/tags/REL_3_17_FINAL/test-data/document/Bug33519.doc>；原样本未复制进仓库。
-- FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族，错误信息已明确指出两类；RC4 和 RC4 CryptoAPI 的子类型需读取 Table 流的 EncryptionHeader，当前 `ParseFib` 只接收 WordDocument 流，故尚不细分。未提供密码参数，也不能判断口令错误；§6.8 保持 ◐。
+- FIB 的 `fObfuscated` 可区分 XOR obfuscation 与 RC4 家族；Table 流头部进一步区分传统 RC4 与 RC4 CryptoAPI。XOR obfuscation 仍只报告并拒绝转换。
+
+## M6 加密
+
+- RC4 回归样本由 `m6_fixture_gen` 从仓库明文样本反向加密，分别覆盖传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；verifier、错误口令、跨块解密和 `document.xml` 与明文逐字节一致已验证。尚未获得 Word 实际加密导出的 `.doc` 作外部互通验证。
+- 仅转换 WordDocument、Table、Data 主流。RC4 CryptoAPI 的独立加密属性流（当 `fDocProps=0` 时）不迁移到 OOXML 元数据；嵌入对象在加密文档中的独立存储兼容性尚未验证。
 - 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉、脚注等其他故事的字段 PLC 尚未接入，故 §6.1 域项保持 ◐。
 
 ## M3 当前范围

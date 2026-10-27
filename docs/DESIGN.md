@@ -113,7 +113,8 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - **用库**（成熟基础设施，不重复造轮子）：
   - ZIP 容器：**miniz**（M3 起，替换 M2 手写 store+CRC32；deflate 支持顺带获得）
   - XML 生成：**pugixml**（M3 起，样式表生成与转义）
-  - 加密原语（M6 RC4 等）：用成熟实现，密码学不自造
+  - 加密原语（M6 RC4/MD5/SHA-1）：按 RFC 6229、RFC 1321、FIPS 180-4
+    实现并以标准向量验证；不引入破坏单二进制零运行时依赖的库
   - 字符集解码：**iconv**（libc 设施：glibc 内置，macOS/Linux 走 libiconv；
     不新增传递依赖，未找到时编译期退化到内置 CP1252 表）。见
     `src/base/charset.cc`。
@@ -132,9 +133,11 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ## 4. 加密文档方案
 
-- RC4 Encryption（Word 97-2003 主流）：[MS-DOC] 2.4.2 / [MS-OFFCRYPTO] 二进制加密
-  - 流程：Password → SHA-1 迭代 → RC4 密钥；解密 FIB 确认（验证加密标识），
-    解密 Table Stream 与 Text/Char/Fld/Parit 段
+- RC4 Encryption：[MS-DOC] §2.2.6.2/2.2.6.3、[MS-OFFCRYPTO] §2.3.5/2.3.6
+  - 传统 RC4 版本 1.1：UTF-16LE 口令 → MD5 盐混合 → 每 512 字节派生密钥。
+  - RC4 CryptoAPI 版本 2–4.2：UTF-16LE 口令与盐作 SHA-1，按块号再散列；
+    40-bit 密钥按规范补零。两种模式均先验证加密 verifier，再解密
+    WordDocument（前 68 字节明文）、Table（头部明文）与 Data 流。
 - XOR obfuscation（Word 95 遗留）仅检测报告，不做转换（明示不支持原因）
 - ECMA-376 agile encryption 的 doc-in-docx 混合容器：识别并提示
 - 验证语料：一组已知口令的真实加密 .doc（Word 2003/2007 生成）
@@ -195,8 +198,8 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ◐ 直接格式 vs 样式格式的优先级正确叠加（条件格式按出现顺序合并，未按 2.4.6 排序）
 
 ### 6.8 加密
-- ☐ RC4 加密文档解密（口令参数）
-- ◐ 加密类型检测报告：FIB 可区分 XOR 与 RC4 家族并明确拒绝；RC4/RC4 CryptoAPI 子类型与错误口令报告待 M6 解密入口
+- ✅ RC4 加密文档解密（`--password`）：传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；`m6_rc4_cli` 与 `M6Rc4.*`
+- ✅ 加密类型检测报告：XOR、传统 RC4、RC4 CryptoAPI 分别报告；缺口令与错误口令均明确报错（`m6_rc4_cli`）
 
 ### 6.9 健壮性
 - 性能实测基线见 [perf-baseline.md](perf-baseline.md)；当前 50 MiB 样本超过 5 s 目标，后续优化以分阶段计时为依据。
