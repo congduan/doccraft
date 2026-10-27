@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -260,6 +261,22 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
       }
     }
   }
+  // The final paragraph mark is a guard, but a bookmark may end at its CP.
+  // Attach that end to the final paragraph without reading the guard as text.
+  if (bookmarks) {
+    if (auto found = bookmarks->marks.find(base + last - 1);
+        found != bookmarks->marks.end()) {
+      auto* final_para =
+          para.runs.empty() && !out.empty() ? &out.back() : &para;
+      for (const auto& mark : found->second) {
+        if (mark.start)
+          continue;
+        model::Run marker;
+        marker.bookmark_id = mark.id;
+        final_para->runs.push_back(std::move(marker));
+      }
+    }
+  }
   if (!para.runs.empty()) {
     out.push_back(std::move(para));
   }
@@ -301,6 +318,22 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
   }
   Bytes plc = table.subspan(fib.headers.offset, fib.headers.size);
   const size_t available = plc.size() / 4 - 1;
+  std::vector<std::pair<uint64_t, uint64_t>> story_ranges;
+  for (size_t section = 0; section < sections; ++section) {
+    for (size_t story = 0; story < kStoryCount; ++story) {
+      const size_t index = kStoryPreamble + section * kStoryCount + story;
+      if (index + 1 > available) {
+        return std::unexpected(
+            Error{"header story PLC is shorter than the section count"});
+      }
+      const uint32_t first = U32(plc, 4 * index);
+      const uint32_t last = U32(plc, 4 * (index + 1));
+      if (last < first || last > fib.ccp_hdd) {
+        return std::unexpected(Error{"header CP range outside story"});
+      }
+      story_ranges.emplace_back(base + first, base + last);
+    }
+  }
   // PlcfFldHdr CPs share the header region's CP space, so one map serves all
   // sections; each story read only looks up begins inside its own range.
   std::map<uint32_t, uint8_t> field_status;
@@ -311,8 +344,9 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     doc.warnings.push_back("skipped header field PLC: " +
                            status.error().message);
   }
-  // Standard bookmark PLCs use absolute document CPs. Keep only pairs
-  // entirely inside the header region; an invalid pair does not remove text.
+  // Standard bookmark PLCs use absolute document CPs. Keep only pairs whose
+  // starts are text CPs and whose ends are in the same story, including its
+  // guard CP. An invalid pair does not remove text or other valid bookmarks.
   BookmarkMarks header_bookmarks;
   std::map<int, uint32_t> starts;
   std::map<int, uint32_t> ends;
@@ -325,38 +359,40 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     }
   }
   bool invalid_bookmark = false;
+  std::set<int> valid_ids;
   for (const auto& [id, cp] : starts) {
     auto found = ends.find(id);
-    if (found == ends.end() || found->second < cp || found->second >= end) {
+    bool same_story = false;
+    if (found != ends.end() && found->second >= cp && found->second < end) {
+      for (const auto& [first, last] : story_ranges) {
+        if (last > first && cp >= first && cp < last - 1 &&
+            found->second <= last - 1) {
+          same_story = true;
+          break;
+        }
+      }
+    }
+    if (!same_story) {
       invalid_bookmark = true;
-      break;
+    } else {
+      valid_ids.insert(id);
     }
   }
-  if (invalid_bookmark) {
+  if (invalid_bookmark)
     doc.warnings.push_back("skipped header bookmark PLC: invalid range");
-  } else {
-    for (const auto& [cp, marks] : bookmarks.marks) {
-      if (cp < base || cp >= end)
-        continue;
-      for (const auto& mark : marks) {
-        if (starts.contains(mark.id))
-          header_bookmarks.marks[cp].push_back(mark);
-      }
+  for (const auto& [cp, marks] : bookmarks.marks) {
+    if (cp < base || cp >= end)
+      continue;
+    for (const auto& mark : marks) {
+      if (valid_ids.contains(mark.id))
+        header_bookmarks.marks[cp].push_back(mark);
     }
   }
   for (size_t section = 0; section < sections; section++) {
     for (size_t story = 0; story < kStoryCount; story++) {
       const size_t index = kStoryPreamble + section * kStoryCount + story;
-      if (index + 1 > available) {
-        return std::unexpected(
-            Error{"header story PLC is shorter than the "
-                  "section count"});
-      }
       const uint32_t first = U32(plc, 4 * index);
       const uint32_t last = U32(plc, 4 * (index + 1));
-      if (last < first || last > fib.ccp_hdd) {
-        return std::unexpected(Error{"header CP range outside story"});
-      }
       out[section][story] =
           ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base, first,
                               last, &field_status, &header_bookmarks);

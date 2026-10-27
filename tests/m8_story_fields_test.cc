@@ -246,6 +246,54 @@ TEST(M9HeaderBookmarks, InvalidHeaderRangeKeepsStoryWithWarning) {
   EXPECT_EQ(header.find("w:bookmarkStart"), std::string::npos);
 }
 
+TEST(M10HeaderBookmarks, WholeParagraphEndsAtStoryGuard) {
+  Synthetic s = Build("Body\r", "", "AB\r\r", "", "");
+  s.fib.headers = PutHeaderPlc(s, 1, s.fib.ccp_hdd);
+  PutBookmark(s, s.hdd_base, s.hdd_base + 3, "WholePara");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->warnings.empty());
+  ASSERT_EQ(parsed->section.headers[1].size(), 1u);
+  const auto& runs = parsed->section.headers[1][0].runs;
+  ASSERT_EQ(runs.size(), 3u);
+  EXPECT_TRUE(runs[0].bookmark_start);
+  EXPECT_EQ(runs[1].text, "AB");
+  EXPECT_EQ(runs[2].bookmark_id, 0);
+  EXPECT_FALSE(runs[2].bookmark_start);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string header = Part(*zip, "word/header1.xml");
+  EXPECT_EQ(Count(header, "<w:bookmarkStart w:id=\"0\""), 1u);
+  EXPECT_EQ(Count(header, "<w:bookmarkEnd w:id=\"0\"/>"), 1u);
+  EXPECT_LT(header.find("<w:bookmarkStart w:id=\"0\""),
+            header.find("<w:bookmarkEnd w:id=\"0\"/>"));
+}
+
+TEST(M10HeaderBookmarks, CrossStoryPairIsSkippedWithWarning) {
+  Synthetic s = Build("Body\r", "", "AB\rCD\r", "", "");
+  const size_t at = s.table.size();
+  s.table.resize(at + 52, 0);
+  Put32(s.table, at + 4 * 7, 3);  // Story 1 ends after AB\r.
+  for (size_t i = 8; i < 13; ++i)
+    Put32(s.table, at + 4 * i, s.fib.ccp_hdd);
+  s.fib.headers = {static_cast<uint32_t>(at), 52};
+  PutBookmark(s, s.hdd_base, s.hdd_base + 4, "Cross");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_NE(
+      parsed->warnings[0].find("skipped header bookmark PLC: invalid range"),
+      std::string::npos);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  for (const char* part : {"word/header1.xml", "word/header2.xml"}) {
+    const std::string header = Part(*zip, part);
+    EXPECT_FALSE(header.empty());
+    EXPECT_EQ(header.find("w:bookmarkStart"), std::string::npos);
+    EXPECT_EQ(header.find("w:bookmarkEnd"), std::string::npos);
+  }
+}
+
 TEST(M8StoryFields, FibExposesNonMainFieldPlcs) {
   std::vector<uint8_t> word(4096);
   Put16(word, 0, 0xA5EC);
