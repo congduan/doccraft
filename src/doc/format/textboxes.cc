@@ -62,12 +62,14 @@ std::expected<Plc, Error> ReadPlc(Bytes table, Fib::Range range, size_t stride,
 std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts, bool header) {
+    const std::vector<std::string>& fonts, bool header,
+    std::vector<std::string>* warnings) {
   std::vector<model::Textbox> boxes;
   const uint32_t count_chars = header ? fib.ccp_hdr_txbx : fib.ccp_txbx;
   const Fib::Range txt_range = header ? fib.hdr_txbx_txt : fib.txbx_txt;
   const Fib::Range bkd_range = header ? fib.hdr_txbx_bkd : fib.txbx_bkd;
   const Fib::Range spa_range = header ? fib.spa_hdr : fib.spa_main;
+  const Fib::Range field_range = header ? fib.fields_hdr_txbx : fib.fields_txbx;
   if (!count_chars) {
     if (txt_range.size || bkd_range.size)
       return std::unexpected(Error{"textbox PLC without textbox story"});
@@ -92,6 +94,15 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
                 static_cast<uint32_t>(base), &prcs);
   if (!chars)
     return std::unexpected(chars.error());
+  std::map<uint32_t, uint8_t> field_status;
+  if (auto status =
+          ReadStoryFieldStatus(table, field_range, base, count_chars)) {
+    field_status = std::move(*status);
+  } else {
+    warnings->push_back(std::string("skipped ") +
+                        (header ? "header textbox" : "textbox") +
+                        " field PLC: " + status.error().message);
+  }
   // The final FTXBXS and Tbkd entries are reusable guards. A linked chain
   // uses successive Tbkd ranges with the same FTXBXS index.
   std::map<size_t, size_t> by_ftxbxs;
@@ -124,7 +135,7 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     const uint32_t end =
         bkd->Cp(i + 1) == txt->Cp(f + 1) ? bkd->Cp(i + 1) : bkd->Cp(i + 1) + 1;
     auto paragraphs = ReadStoryParagraphs(*chars, chpx, papx, fonts, prcs, base,
-                                          bkd->Cp(i), end);
+                                          bkd->Cp(i), end, &field_status);
     auto& target = boxes[by_ftxbxs.at(f)].paragraphs;
     for (auto& paragraph : paragraphs)
       target.push_back(std::move(paragraph));
@@ -173,14 +184,14 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
 std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts) {
-  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, false);
+    const std::vector<std::string>& fonts, std::vector<std::string>* warnings) {
+  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, false, warnings);
 }
 
 std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts) {
-  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, true);
+    const std::vector<std::string>& fonts, std::vector<std::string>* warnings) {
+  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, true, warnings);
 }
 }  // namespace doccraft::doc::detail

@@ -151,8 +151,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   size_t next_picture = 0;
   doc.fonts = ReadFonts(table, fib.fonts);
   doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
-  auto textboxes =
-      detail::ReadTextboxes(word, table, fib, *chpx, *papx, doc.fonts);
+  auto textboxes = detail::ReadTextboxes(word, table, fib, *chpx, *papx,
+                                         doc.fonts, &doc.warnings);
   if (!textboxes)
     return std::unexpected(textboxes.error());
   doc.textboxes = std::move(*textboxes);
@@ -723,8 +723,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     doc.warnings.push_back("skipped header stories: " +
                            headers.error().message);
   } else {
-    auto header_boxes =
-        detail::ReadHeaderTextboxes(word, table, fib, *chpx, *papx, doc.fonts);
+    auto header_boxes = detail::ReadHeaderTextboxes(
+        word, table, fib, *chpx, *papx, doc.fonts, &doc.warnings);
     if (!header_boxes)
       return std::unexpected(header_boxes.error());
     for (auto& box : *header_boxes) {

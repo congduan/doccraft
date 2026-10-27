@@ -316,11 +316,11 @@ uint16_t Prm0Opcode(uint8_t isprm);
 std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts);
+    const std::vector<std::string>& fonts, std::vector<std::string>* warnings);
 std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts);
+    const std::vector<std::string>& fonts, std::vector<std::string>* warnings);
 
 // Standard bookmark markers keyed by absolute CP across document parts.
 struct BookmarkMark {

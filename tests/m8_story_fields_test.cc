@@ -314,6 +314,25 @@ TEST(M8StoryFields, FibExposesNonMainFieldPlcs) {
   EXPECT_EQ(fib->fields_edn, (doc::Fib::Range{103, 22}));
 }
 
+TEST(M11TextboxFields, FibExposesBodyAndHeaderTextboxFieldPlcs) {
+  std::vector<uint8_t> word(4096);
+  Put16(word, 0, 0xA5EC);
+  Put16(word, 2, 0x00C1);
+  Put16(word, 32, 14);
+  Put16(word, 62, 22);
+  Put16(word, 152, 93);
+  // With csw=14/cslw=22, fc/lcb pairs start at byte 154. Pairs 57/59
+  // occupy byte 610/614 and 626/630 respectively.
+  Put32(word, 610, 100);
+  Put32(word, 614, 22);
+  Put32(word, 626, 200);
+  Put32(word, 630, 22);
+  auto fib = doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  EXPECT_EQ(fib->fields_txbx, (doc::Fib::Range{100, 22}));
+  EXPECT_EQ(fib->fields_hdr_txbx, (doc::Fib::Range{200, 22}));
+}
+
 TEST(M8StoryFields, LockedHeaderFieldKeepsFldCharHierarchy) {
   const std::string header_text =
       "\x13 HYPERLINK \"https://example.com\" \x14site\x15\r\r";

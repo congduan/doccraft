@@ -108,6 +108,9 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.txbx_txt = pair(56);
   f.txbx_bkd = pair(75);
   f.hdr_txbx_txt = pair(58);
+  // FibRgFcLcb97 pairs 57/59 are PlcfFldTxbx/PlcffldHdrTxbx.
+  f.fields_txbx = pair(57);
+  f.fields_hdr_txbx = pair(59);
   f.hdr_txbx_bkd = pair(76);
   f.lists = pair(73);
   f.list_overrides = pair(74);

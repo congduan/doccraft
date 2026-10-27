@@ -37,7 +37,7 @@
 
 - RC4 回归样本由 `m6_fixture_gen` 从仓库明文样本反向加密，分别覆盖传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；verifier、错误口令、跨块解密和 `document.xml` 与明文逐字节一致已验证。40-bit CryptoAPI（含 KeySize=0 缺省）由 `M6Rc4.DecryptsCryptoApi40BitKeyVariants` 合成用例覆盖。尚未获得 Word 实际加密导出的 `.doc` 作外部互通验证。
 - 仅转换 WordDocument、Table、Data 主流。RC4 CryptoAPI 的独立加密属性流（按 [MS-DOC] 2.2.6.3 在 `fDocProps` 置位时出现；[MS-OFFCRYPTO] 2.3.5.1 措辞与其相悖，通行实现按 [MS-DOC] 极性）不迁移到 OOXML 元数据；嵌入对象在加密文档中的独立存储兼容性尚未验证。
-- 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉/脚注/尾注/批注故事的字段 PLC 自 M8 起接入（见「M8 当前范围」）；文本框故事的字段 PLC 仍未接入，故 §6.1 域项保持 ◐。
+- 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉/脚注/尾注/批注故事的字段 PLC 自 M8 起接入（见「M8 当前范围」），正文及页眉文本框的字段 PLC 自 M11 起接入。尚无真实 Word 文本框域 golden，故 §6.1 域项保持 ◐。
 
 ## M6 变异加固
 
@@ -63,7 +63,7 @@
 - SHD80 系列（`sprmCShd80`/`sprmPShd80`/`sprmTDefTableShd80`）走 16 色调色板，索引 0（自动色）不产生 `w:shd`；现代 SHD 操作数仍以 COLORREF 优先。
 - `sprmPIncLvl` 只在 `sprmPIlfo != 0` 时累加 `ilvl`，按规范应增量 `istd` 的段落样式分支未实现。
 - `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。
-- 域处理按「顶层特例 + 其余通用」分层：只有顶层未锁定、未标脏的 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。`PlcfFldMom`/`PlcfFldHdr`/`PlcfFldFtn`/`PlcfFldEdn`/`PlcfFldAtn` 结束记录的 `fLocked`/`fResultsDirty` 已映射为 `w:fldLock`/`w:dirty`；文本框故事的字段 PLC（`fcPlcfFldTxbx`/`fcPlcffldHdrTxbx`）尚未读取。
+- 域处理按「顶层特例 + 其余通用」分层：只有顶层未锁定、未标脏的 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。`PlcfFldMom`/`PlcfFldHdr`/`PlcfFldFtn`/`PlcfFldEdn`/`PlcfFldAtn` 及正文、页眉文本框故事字段 PLC 的结束记录 `fLocked`/`fResultsDirty` 已映射为 `w:fldLock`/`w:dirty`；真实 Word 文本框域 golden 尚缺。
 - 域结果里的图片、对象、脚注引用等仍是 M5 载荷；嵌套在超链接结果中的域会把外层链接降级为普通文本。
 - 嵌套表格按 `sprmPItap`（绝对深度）建立递归结构：`Cell::blocks` 与正文一样是 Block 序列，深度下降时把内层表格挂到外层单元格上。两条限制：其一，深度信息只来自 `sprmPItap`/`sprmPDtap`，若生产者不写这两个 sprm（缺失时按「在表格内 = 一层」推断），嵌套仍会被摊平；其二，LibreOffice 导出 `.doc` 时会把嵌套表格摊平成段落，所以本级只有合成位流样本（`tests/m3_nested_table_test.cc`），没有真实 Word 样本。
 - `sprmPFInnerTableCell` 仍未使用：结构与深度已由 `sprmPItap` 决定，该标记不参与判定。
@@ -94,7 +94,9 @@
 
 ## M8 当前范围
 
-- 非正文故事的字段接入：页眉/页脚（`PlcfFldHdr`，FIB pair 17 0 基）、脚注（`PlcfFldFtn`，pair 18）、尾注（`PlcfFldEdn`，pair 48）、批注（`PlcfFldAtn`，pair 19）各自读到「字段开始绝对 CP → grffldEnd 字节」映射，页眉用一张全区域映射按故事区间自动归属各节。各故事的域语义与正文同构：域层次永远来自文本中的 `0x13`/`0x14`/`0x15`，PLC 只补充 `fldLock`/`dirty` 标志——这同时是文本框故事的现状（`ReadStoryParagraphs` 无映射时照常解析层次，`fcPlcfFldTxbx`/`fcPlcffldHdrTxbx` 即 pair 57/59 未接）。`fcPlcfFldMcr`（pair 20）按规范「undefined and MUST be ignored」不读。宏/杂项（mcr）与 glsy 故事的字段因此不存在接入问题。
+> M11 后续：正文/页眉文本框字段 PLC 已接入；下文的 M8 规则同样用于这两个故事。`M11TextboxFields.InvalidPlcWarnsAndKeepsHierarchy` 断言损坏 PLC 整表跳过并警告，域层次保留而锁/脏标志丢失。
+
+- 非正文故事的字段接入：页眉/页脚（`PlcfFldHdr`，FIB pair 17 0 基）、脚注（`PlcfFldFtn`，pair 18）、尾注（`PlcfFldEdn`，pair 48）、批注（`PlcfFldAtn`，pair 19）各自读到「字段开始绝对 CP → grffldEnd 字节」映射，页眉用一张全区域映射按故事区间自动归属各节。M11 再接入正文文本框（`fcPlcfFldTxbx`，pair 57）与页眉内文本框（`fcPlcffldHdrTxbx`，pair 59），各自 PLC 的 CP 从各自文本框文档起点计。域层次来自文本中的 `0x13`/`0x14`/`0x15`，PLC 只补充 `fldLock`/`dirty` 标志。`fcPlcfFldMcr`（pair 20）按规范「undefined and MUST be ignored」不读。
 - 故事字段 PLC 的降级策略：条目 CP 非严格递增、越过本故事 ccp、fldch 种类非法或尺寸不满足 `(size-4) mod 6 == 0` 时，整张 PLC 跳过并输出警告（`skipped <故事> field PLC: …`），该故事退化为「有域层次、无锁/脏标志」，正文与故事正文不受影响；正文 `PlcfFldMom` 维持严格失败策略不变。
 - 锁定域的输出与正文逐字节同构：`w:fldLock` 写在 begin/separate/end 三个标记上；锁定 HYPERLINK 的结果 run 仍包在 `w:hyperlink` 里（沿用正文既有行为）。页眉/页脚/脚注/尾注/批注部件复用 `WriteParagraph`，无独立的域输出逻辑。
 - 仅含空结果域（例如 `\x13 PAGE \x14\x15`）的页眉没有文本 run；既有的 has-text 策略会丢弃该故事部件，若文档只靠此类页眉使用奇偶页设置，`settings.xml` 中的 `evenAndOddHeaders` 也不会输出。

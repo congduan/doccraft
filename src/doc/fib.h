@@ -51,6 +51,7 @@ struct Fib {
   // Field character PLCs ([MS-DOC] §2.5.10): main, header, footnote, comment
   // and endnote stories each carry their own Plcfld.
   Range fields_main, fields_hdr, fields_ftn, fields_atn, fields_edn;
+  Range fields_txbx, fields_hdr_txbx;
   std::string table_stream() const {
     return which_table ? "1Table" : "0Table";
   }
