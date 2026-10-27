@@ -19,9 +19,15 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
+
+#ifdef __linux__
+#include <sys/resource.h>
+#endif
 
 #include "cfb/cfb_reader.h"
 #include "cfb/cfb_writer.h"
@@ -33,6 +39,17 @@
 #include "model/document.h"
 
 namespace {
+#ifdef __linux__
+long PeakRssKb() {
+  rusage usage{};
+  return getrusage(RUSAGE_SELF, &usage) == 0 ? usage.ru_maxrss : 0;
+}
+#else
+long PeakRssKb() {
+  return 0;
+}
+#endif
+
 std::vector<uint8_t> ReadInput(std::ifstream& file) {
   file.seekg(0, std::ios::end);
   const auto end = file.tellg();
@@ -92,6 +109,7 @@ int main(int argc, char** argv) {
   if (cmd == "convert" && argc >= 3) {
     using Clock = std::chrono::steady_clock;
     const auto t_start = Clock::now();
+    const bool profile = std::getenv("DOCCRAFT_PROFILE") != nullptr;
     std::string output = std::string(argv[2]) + "x";
     std::string password;
     bool has_password = false;
@@ -124,16 +142,19 @@ int main(int argc, char** argv) {
 
     std::vector<uint8_t> bytes = ReadInput(file);
     const auto t_read = Clock::now();
+    const long rss_read = profile ? PeakRssKb() : 0;
     if (!file.eof() && file.fail()) {
       std::fprintf(stderr, "convert: input read failed\n");
       return 1;
     }
-    auto cfb = doccraft::cfb::CfbReader::Open(bytes);
+    auto opened = doccraft::cfb::CfbReader::Open(bytes);
     const auto t_cfb = Clock::now();
-    if (!cfb) {
-      std::fprintf(stderr, "convert: %s\n", cfb.error().message.c_str());
+    const long rss_cfb = profile ? PeakRssKb() : 0;
+    if (!opened) {
+      std::fprintf(stderr, "convert: %s\n", opened.error().message.c_str());
       return 1;
     }
+    std::optional<doccraft::cfb::CfbReader> cfb(std::move(*opened));
     auto word = cfb->ReadStream("WordDocument");
     if (!word) {
       std::fprintf(stderr, "convert: %s\n", word.error().message.c_str());
@@ -185,6 +206,24 @@ int main(int argc, char** argv) {
       }
     }
     const auto t_streams = Clock::now();
+    const long rss_streams = profile ? PeakRssKb() : 0;
+    bool has_object_pool = false;
+    auto visited = cfb->Visit([&](const doccraft::cfb::DirEntry&,
+                                  std::string_view path, bool storage) {
+      if (storage && path == "Root Entry/ObjectPool")
+        has_object_pool = true;
+      return true;
+    });
+    if (!visited) {
+      std::fprintf(stderr, "convert: %s\n", visited.error().message.c_str());
+      return 1;
+    }
+    if (!has_object_pool) {
+      // Stream copies no longer refer to the input container. Keep it only
+      // when an embedded OLE object may need repackaging after parsing.
+      cfb.reset();
+      std::vector<uint8_t>().swap(bytes);
+    }
     auto extracted =
         data ? doccraft::doc::ParseFormatted(*word, *table, *fib, *data)
              : doccraft::doc::ParseFormatted(*word, *table, *fib);
@@ -195,6 +234,11 @@ int main(int argc, char** argv) {
     for (const auto& warning : extracted->warnings)
       std::fprintf(stderr, "warning: %s\n", warning.c_str());
     for (auto& object : extracted->ole_objects) {
+      if (!cfb) {
+        std::fprintf(stderr, "convert: OLE %d: OLE storage has no streams\n",
+                     object.storage_id);
+        return 1;
+      }
       auto packaged = doccraft::cfb::RepackageStorage(
           *cfb, "Root Entry/ObjectPool/_" + std::to_string(object.storage_id));
       if (!packaged) {
@@ -205,27 +249,32 @@ int main(int argc, char** argv) {
       object.bytes = std::move(*packaged);
     }
     const auto t_format = Clock::now();
+    const long rss_format = profile ? PeakRssKb() : 0;
     auto archive = doccraft::docx::Write(*extracted);
     if (!archive) {
       std::fprintf(stderr, "convert: %s\n", archive.error().message.c_str());
       return 1;
     }
     const auto t_writer = Clock::now();
+    const long rss_writer = profile ? PeakRssKb() : 0;
 
     std::ofstream out(output, std::ios::binary);
     if (!out) {
       std::fprintf(stderr, "convert: cannot open output\n");
       return 1;
     }
-    if (std::getenv("DOCCRAFT_PROFILE")) {
+    if (profile) {
       auto ms = [](Clock::time_point a, Clock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
       };
       std::fprintf(stderr,
                    "PROFILE read_ms=%.3f cfb_ms=%.3f streams_ms=%.3f "
-                   "format_ms=%.3f writer_ms=%.3f\n",
+                   "format_ms=%.3f writer_ms=%.3f "
+                   "rss_read_kb=%ld rss_cfb_kb=%ld rss_streams_kb=%ld "
+                   "rss_format_kb=%ld rss_writer_kb=%ld\n",
                    ms(t_start, t_read), ms(t_read, t_cfb), ms(t_cfb, t_streams),
-                   ms(t_streams, t_format), ms(t_format, t_writer));
+                   ms(t_streams, t_format), ms(t_format, t_writer), rss_read,
+                   rss_cfb, rss_streams, rss_format, rss_writer);
     }
     out.write(reinterpret_cast<const char*>(archive->data()),
               static_cast<std::streamsize>(archive->size()));

@@ -1,27 +1,27 @@
 {
   "1": {
     "size_bytes": 1052160,
-    "wall_seconds": 0.036684,
-    "peak_rss_kb": 17016
+    "wall_seconds": 0.036011,
+    "peak_rss_kb": 14184
   },
   "5": {
     "size_bytes": 5244928,
-    "wall_seconds": 0.180115,
-    "peak_rss_kb": 69980
+    "wall_seconds": 0.169917,
+    "peak_rss_kb": 54824
   },
   "20": {
     "size_bytes": 20975104,
-    "wall_seconds": 0.905164,
-    "peak_rss_kb": 268052
+    "wall_seconds": 0.711161,
+    "peak_rss_kb": 207300
   },
   "50": {
     "size_bytes": 52679680,
-    "wall_seconds": 1.110839,
-    "peak_rss_kb": 329904
+    "wall_seconds": 0.795091,
+    "peak_rss_kb": 237984
   },
   "100": {
     "size_bytes": 104845312,
-    "wall_seconds": 3.990274,
-    "peak_rss_kb": 1318764
+    "wall_seconds": 3.912719,
+    "peak_rss_kb": 1014188
   }
 }

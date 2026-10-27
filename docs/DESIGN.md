@@ -202,9 +202,9 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ✅ 加密类型检测报告：XOR、传统 RC4、RC4 CryptoAPI 分别报告；缺口令与错误口令均明确报错（`m6_rc4_cli`）
 
 ### 6.9 健壮性
-- 性能实测基线见 [perf-baseline.md](perf-baseline.md)；当前 50 MiB 样本超过 5 s 目标，后续优化以分阶段计时为依据。
+- 性能实测基线见 [perf-baseline.md](perf-baseline.md)；100 MiB 结构化样本已低于 5 s，后续优化以分阶段计时和 RSS 打点为依据。
 - ◐ 损坏文档的优雅降级：正文可读时跳过局部坏 CHPX FKP 页/坏 sprm 序列或坏页眉故事，`convert` 向 stderr 输出警告且退出码为 0；CFB/CLX 截断和 PAPX 表格结构损坏仍拒绝，更多故事及格式路径待覆盖
-- ☐ 超大文档流式处理（分块、内存上限）
+- ◐ 超大文档内存控制：按需释放无 ObjectPool 文档的 CFB 原始输入，正文解码字符缩至 16 字节/字符；100 MiB 样本峰值低于 1000 MiB。分块流式处理与通用内存上限仍待实现。
 - ◐ 确定性变异套件（`tests/fuzz_test.cc`）：全管线种子变异（5 种子 × 2000 轮/种子，ASan 下 300 轮，受 8s 墙钟阀门保护，见 KNOWN-SIMPLIFICATIONS「M6 变异加固」）、sprm/FKP 与 CLX/piece 表定向变异、全 65536 opcode dispatch，断言零崩溃且结果只能是转换成功或 `std::expected` 错误；代表性损坏断言可区分的错误消息。首轮即发现并修复 sprmPItap 深度未钳制导致的 writer 栈溢出；`sprmPItap`/`sprmPDtap` 深度操作数现统一经 `ClampTableDepth` 在解析层与格式帧栈两层钳制到 `kMaxTableDepth=8`（超深嵌套压平为第 8 层，合法深度输出逐字节不变）。注意这是固定 seed 的合成变异，不等同于持续 fuzzing：真实语料库长期变异、覆盖率导引与 CI 常驻入口仍是缺口（libFuzzer 驱动已可经 `DOCCRAFT_ENABLE_LIBFUZZER` 选配构建，默认关闭且不入 ctest）
 
 ## 7. 里程碑
@@ -216,7 +216,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 | **M3** | ✅ | CHP/PAP/SEP sprm + 样式系统 | 适用 sprm 见覆盖表；部分高级优先级与真实样本限制见 §6 |
 | **M4** | ✅ | 表格 + 列表 + 域 + 脚注批注书签 | 主路径已交付；§6 标记 ◐ 的边界仍在迭代 |
 | **M5** | ✅ | 图片/Escher/文本框 + OLE 对象 | 主路径已交付；复杂形状与预览限制见 §6 |
-| **M6** | ◐ | RC4 解密 + 性能调优 + fuzz 加固 | 解密已交付（§6.8）；确定性变异套件已入 ctest（§6.9），持续 fuzzing、流式内存上限与 50 MiB 性能目标待完成 |
+| **M6** | ◐ | RC4 解密 + 性能调优 + fuzz 加固 | 解密已交付（§6.8）；确定性变异套件已入 ctest（§6.9），100 MiB 样本低于 5 s、峰值低于 1000 MiB；持续 fuzzing 与流式内存上限待完成 |
 | **M7** | ◐ | 发布工程：README/CI/示例画廊/发布元数据 | v0.9.0-rc1 准备中；公开发布与仓库元数据待确认 |
 
 ## 8. 竞品基线

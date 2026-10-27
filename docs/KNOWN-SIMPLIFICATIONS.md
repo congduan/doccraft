@@ -29,6 +29,10 @@
 
 - §2.1 原定「加密原语用成熟实现、密码学不自造」已反转为按 RFC 6229、RFC 1321、FIPS 180-4 自实现并以标准向量钉死：RC4/MD5/SHA-1 各 <150 行，引 OpenSSL 会破坏单二进制零运行时依赖的发布承诺。
 
+## M6 性能
+
+- 性能第四批把正文解码后的 `Char` 缓冲由 20 字节/字符缩至 16 字节/字符，并在没有 ObjectPool 的文档中于流提取后释放原始 CFB 输入。100 MiB 样本约 5170 万字符，仍需一次性保留约 789 MiB 解码缓冲直到格式解析结束；这不是通用内存上限，超大正文仍需分块流式解析。ANSI/iconv 若把单个字符展开成超过 4 字节 UTF-8，当前显式报错，未为这种罕见映射保存旁路字节。
+
 ## M6 加密
 
 - RC4 回归样本由 `m6_fixture_gen` 从仓库明文样本反向加密，分别覆盖传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；verifier、错误口令、跨块解密和 `document.xml` 与明文逐字节一致已验证。40-bit CryptoAPI（含 KeySize=0 缺省）由 `M6Rc4.DecryptsCryptoApi40BitKeyVariants` 合成用例覆盖。尚未获得 Word 实际加密导出的 `.doc` 作外部互通验证。

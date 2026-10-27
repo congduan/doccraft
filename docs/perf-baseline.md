@@ -1,4 +1,4 @@
-# Performance baseline (2026-10-26)
+# Performance baseline (2026-10-27)
 
 Release build, GCC C++23, 2 vCPU Intel Xeon Platinum 8255C at 2.50 GHz,
 1.9 GiB RAM and 6 GiB swap, Linux 6.8.0. Each input was converted five times
@@ -17,16 +17,24 @@ real text decoding and formatting at scale.
 
 | Input | Actual MiB | Median wall s | Peak RSS MiB |
 |---|---:|---:|---:|
-| 1 MiB | 1.00 | 0.037 | 16.6 |
-| 5 MiB | 5.00 | 0.180 | 68.3 |
-| 20 MiB | 20.00 | 0.905 | 261.8 |
-| 50 MiB | 50.24 | 1.111 | 322.2 |
-| 100 MiB | 99.99 | 3.990 | 1287.9 |
+| 1 MiB | 1.00 | 0.036 | 13.9 |
+| 5 MiB | 5.00 | 0.170 | 53.5 |
+| 20 MiB | 20.00 | 0.711 | 202.4 |
+| 50 MiB | 50.24 | 0.795 | 232.4 |
+| 100 MiB | 99.99 | 3.913 | 990.4 |
 
-The 100 MiB median meets the <5 s conversion goal on this machine. The
-previous single-run baseline at `fc712f2` was 14.71 s and about 1.49 GiB RSS;
-the current peak is about 1.26 GiB. The five fixtures do not establish a
-population p99, which needs a representative document distribution.
+The 100 MiB median meets the <5 s conversion goal and peak RSS is below
+1000 MiB. It remains above the stretch goal of <3 s. The previous baseline
+at `db951bc` was 3.990 s and 1287.9 MiB RSS. Compact decoded characters
+saved about 197 MiB; dropping the input CFB after stream extraction for
+documents without an ObjectPool saved another 101 MiB. At 100 MiB, the
+profiled run reached 233.4 MiB after stream extraction and 990.3 MiB after
+format parsing, so the decoded character array remains the main memory cost.
+Three independent five-run medians for the final 100 MiB binary were 3.646 s,
+3.913 s and 3.441 s; the table and `tests/perf/baseline.json` record the
+second complete five-size run.
+The five fixtures do not establish a population p99, which needs a
+representative document distribution.
 
 Reproduce with:
 
