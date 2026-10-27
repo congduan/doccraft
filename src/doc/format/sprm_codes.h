@@ -19,6 +19,30 @@
 
 namespace doccraft::doc::detail {
 
+// Word 6/95 grpprls use one-byte opcodes. The FKP translator maps this
+// supported subset to the Word 97+ sprms below.
+inline constexpr uint8_t kLegacySprmPJc = 0x05;
+inline constexpr uint8_t kLegacySprmPFKeep = 0x07;
+inline constexpr uint8_t kLegacySprmPFKeepFollow = 0x08;
+inline constexpr uint8_t kLegacySprmPFPageBreakBefore = 0x09;
+inline constexpr uint8_t kLegacySprmPChgTabsPapx = 0x0F;
+inline constexpr uint8_t kLegacySprmPDxaRight = 0x10;
+inline constexpr uint8_t kLegacySprmPDxaLeft = 0x11;
+inline constexpr uint8_t kLegacySprmPDxaLeft1 = 0x13;
+inline constexpr uint8_t kLegacySprmPDyaLine = 0x14;
+inline constexpr uint8_t kLegacySprmPDyaBefore = 0x15;
+inline constexpr uint8_t kLegacySprmPDyaAfter = 0x16;
+inline constexpr uint8_t kLegacySprmPFInTable = 0x18;
+inline constexpr uint8_t kLegacySprmPFTtp = 0x19;
+inline constexpr uint8_t kLegacySprmPFWidowControl = 0x33;
+inline constexpr uint8_t kLegacySprmCFBold = 0x55;
+inline constexpr uint8_t kLegacySprmCFItalic = 0x56;
+inline constexpr uint8_t kLegacySprmCFStrike = 0x57;
+inline constexpr uint8_t kLegacySprmCFtc = 0x5D;
+inline constexpr uint8_t kLegacySprmCKul = 0x5E;
+inline constexpr uint8_t kLegacySprmCIco = 0x62;
+inline constexpr uint8_t kLegacySprmCHps = 0x63;
+
 // sprm opcodes from [MS-DOC] v20260217 §2.6.1-2.6.4. Names match the
 // specification text, so searching the MS-DOC PDF for `sprmCFBold` also
 // finds this constant. Keep docs/SPRM-COVERAGE.md in sync when adding one.

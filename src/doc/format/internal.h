@@ -274,7 +274,7 @@ std::expected<std::vector<Char>, Error> ReadChars(
 
 std::expected<std::vector<FormatRange>, Error> ReadFkps(
     Bytes word, Bytes table, Fib::Range r, bool para,
-    std::vector<std::string>* warnings = nullptr);
+    std::vector<std::string>* warnings = nullptr, bool legacy = false);
 
 const FormatRange* Find(const std::vector<FormatRange>& a, uint32_t fc);
 

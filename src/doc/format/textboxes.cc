@@ -94,15 +94,6 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
                 static_cast<uint32_t>(base), &prcs);
   if (!chars)
     return std::unexpected(chars.error());
-  std::map<uint32_t, uint8_t> field_status;
-  if (auto status =
-          ReadStoryFieldStatus(table, field_range, base, count_chars)) {
-    field_status = std::move(*status);
-  } else {
-    warnings->push_back(std::string("skipped ") +
-                        (header ? "header textbox" : "textbox") +
-                        " field PLC: " + status.error().message);
-  }
   // The final FTXBXS and Tbkd entries are reusable guards. A linked chain
   // uses successive Tbkd ranges with the same FTXBXS index.
   std::map<size_t, size_t> by_ftxbxs;
@@ -120,6 +111,16 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     model::Textbox box;
     box.shape_id = shape;
     boxes.push_back(std::move(box));
+  }
+  // Validate the textbox story PLC before reading its independent field PLC.
+  std::map<uint32_t, uint8_t> field_status;
+  if (auto status =
+          ReadStoryFieldStatus(table, field_range, base, count_chars)) {
+    field_status = std::move(*status);
+  } else {
+    warnings->push_back(std::string("skipped ") +
+                        (header ? "header textbox" : "textbox") +
+                        " field PLC: " + status.error().message);
   }
   for (size_t i = 0; i + 1 < bkd->count; i++) {
     const int index = S16(bkd->Item(i), 0);

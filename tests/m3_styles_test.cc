@@ -220,6 +220,48 @@ TEST(M3Styles, TableStyleDefaultsAndConditionals) {
   EXPECT_NE(xml.find("<w:top w:val=\"double\""), std::string::npos);
 }
 
+TEST(M3Styles, TableConditionalPriorityIgnoresStshOrder) {
+  Std grid;
+  grid.type = 3;
+  grid.name = "Priority";
+  // The first-row rule arrives before the horizontal band rule. The top-left
+  // corner also matches first row; [MS-DOC] 2.4.6.6 applies the corner last.
+  grid.blocks.push_back(Sprms({
+      Prl(0xD66A,
+          Cnf(0x0001, Sprms({Prl(0xD680, {8, 0, 0, 255, 0, 8, 3, 2, 0})}))),
+      Prl(0xD66A,
+          Cnf(0x0040, Sprms({Prl(0xD680, {8, 0, 255, 0, 0, 8, 3, 2, 0})}))),
+  }));
+  grid.blocks.push_back({0, 0});
+  grid.blocks.push_back(Sprms({
+      Prl(0xCA85, Cnf(0x0001, Sprms({Prl(0x0835, {0})}))),
+      Prl(0xCA85, Cnf(0x0200, Sprms({Prl(0x0835, {1})}))),
+  }));
+  auto styles = Read(BuildStsh({grid}));
+  ASSERT_EQ(styles.size(), 1u);
+  ASSERT_EQ(styles[0].conditionals.size(), 3u);
+  EXPECT_EQ(styles[0].conditionals[0].type, 0x0040);
+  EXPECT_EQ(styles[0].conditionals[1].type, 0x0001);
+  EXPECT_EQ(styles[0].conditionals[2].type, 0x0200);
+  EXPECT_TRUE(styles[0].conditionals[1].run.bold_set);
+  EXPECT_FALSE(styles[0].conditionals[1].run.bold);
+  EXPECT_TRUE(styles[0].conditionals[2].run.bold);
+  model::Document d;
+  d.styles = styles;
+  const std::string xml = Part(d, "word/styles.xml");
+  const size_t band = xml.find("<w:tblStylePr w:type=\"band1Horz\">");
+  const size_t row = xml.find("<w:tblStylePr w:type=\"firstRow\">");
+  const size_t corner = xml.find("<w:tblStylePr w:type=\"nwCell\">");
+  ASSERT_NE(band, std::string::npos);
+  ASSERT_NE(row, std::string::npos);
+  ASSERT_NE(corner, std::string::npos);
+  EXPECT_LT(band, row);
+  EXPECT_LT(row, corner);
+  EXPECT_NE(xml.substr(row, corner - row).find("<w:b w:val=\"0\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.substr(corner).find("<w:b/>"), std::string::npos);
+}
+
 TEST(M3Styles, SelfReferencingBaseTerminates) {
   Std self;
   self.name = "Loop";

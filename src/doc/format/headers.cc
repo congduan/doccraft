@@ -366,8 +366,9 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     auto found = ends.find(id);
     bool same_story = false;
     if (found != ends.end() && found->second >= cp && found->second < end) {
-      // Story ranges are ordered and disjoint. The first range ending after
-      // cp is the only range that can contain this bookmark start.
+      // The ordered, disjoint ranges are checked while constructed above
+      // (last < first / last > fib.ccp_hdd). The first range ending after cp
+      // is the only range that can contain this bookmark start.
       auto range = std::lower_bound(story_ranges.begin(), story_ranges.end(),
                                     cp, [](const auto& story, uint32_t value) {
                                       return story.second <= value;

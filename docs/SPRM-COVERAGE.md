@@ -433,7 +433,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | 颜色 | `0x4A60` | RTL/复杂文种下 `<w:color>` 取 sprmCIcoBi |
 | 段落框 | `0x442C` `0x443A` `0x4439` | `w:framePr/@w:dropCap+@w:lines`、`@w:textFlow`、`<w:textAlignment>` |
 | 字符单位缩进 | `0x4455` `0x4456` `0x4457` `0x4458` `0x4459` | `w:ind/@w:leftChars/@w:rightChars/@w:firstLineChars`、`w:spacing/@w:beforeLines/@w:afterLines` |
-| 表样式条件格式 | `0xCA85` `0xC666` `0xD66A` `0x347C` `0x347D` `0xD47F` `0xD680`–`0xD687` `0xD63E` `0x3488` `0x3489` | `<w:tblStylePr w:type>` 内的 `w:pPr`/`w:rPr`/`w:tcPr`，以及 `w:tblPr` 的 `w:tblStyleRowBandSize`/`w:tblStyleColBandSize`/`w:tblCellMar` |
+| 表样式条件格式 | `0xCA85` `0xC666` `0xD66A` `0x347C` `0x347D` `0xD47F` `0xD680`–`0xD687` `0xD63E` `0x3488` `0x3489` | `<w:tblStylePr w:type>` 内的 `w:pPr`/`w:rPr`/`w:tcPr`，以及 `w:tblPr` 的 `w:tblStyleRowBandSize`/`w:tblStyleColBandSize`/`w:tblCellMar`；优先级 `M3Styles.TableConditionalPriorityIgnoresStshOrder` |
 | 浮动表格 | `0x360D` `0x740A` | `w:tblpPr/@w:horzAnchor+@w:vertAnchor`（sprmTPc）、`w:tblLook`（sprmTTlp） |
 | 行边框颜色 | `0xD61A`–`0xD61D` | 逐单元格 Brc 的 `w:color` |
 | 页面边框/保护 | `0x522F` `0x3006` `0x702C` `0x702D` `0xD235` `0xD236` | `w:pgBorders/@w:offsetFrom+@w:display`、`<w:formProt>`、左右页边框 |

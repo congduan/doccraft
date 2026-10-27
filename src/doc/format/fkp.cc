@@ -24,6 +24,7 @@
 #include "base/charset.h"
 #include "doc/format/internal.h"
 #include "doc/format/sprm.h"
+#include "doc/format/sprm_codes.h"
 
 namespace doccraft::doc::detail {
 
@@ -227,9 +228,184 @@ std::expected<std::vector<Char>, Error> ReadChars(
   return out;
 }
 
+namespace {
+void AppendLegacySprm(std::vector<uint8_t>& out, uint16_t op, Bytes value) {
+  out.push_back(static_cast<uint8_t>(op));
+  out.push_back(static_cast<uint8_t>(op >> 8));
+  out.insert(out.end(), value.begin(), value.end());
+}
+
+// Word 6/95 grpprls use one-byte opcodes. Translate the scalar properties
+// understood by this converter; stop at an unknown operand so its bytes can
+// never be mistaken for another modifier.
+bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
+  for (size_t p = 0; p < raw.size();) {
+    const uint8_t code = raw[p++];
+    if (code == 0)
+      continue;  // PAPX word alignment.
+    size_t size = 0;
+    uint16_t modern = 0;
+    switch (code) {
+      case kLegacySprmPJc:
+        modern = kSprmPJc80;
+        size = 1;
+        break;
+      case kLegacySprmPFKeep:
+        modern = kSprmPFKeep;
+        size = 1;
+        break;
+      case kLegacySprmPFKeepFollow:
+        modern = kSprmPFKeepFollow;
+        size = 1;
+        break;
+      case kLegacySprmPFPageBreakBefore:
+        modern = kSprmPFPageBreakBefore;
+        size = 1;
+        break;
+      case kLegacySprmPChgTabsPapx:
+        size = p < raw.size() ? static_cast<size_t>(raw[p]) + 1 : 0;
+        break;
+      case kLegacySprmPDxaRight:
+        modern = kSprmPDxaRight80;
+        size = 2;
+        break;
+      case kLegacySprmPDxaLeft:
+        modern = kSprmPDxaLeft80;
+        size = 2;
+        break;
+      case kLegacySprmPDxaLeft1:
+        modern = kSprmPDxaLeft180;
+        size = 2;
+        break;
+      case kLegacySprmPDyaLine:
+        modern = kSprmPDyaLine;
+        size = 4;
+        break;
+      case kLegacySprmPDyaBefore:
+        modern = kSprmPDyaBefore;
+        size = 2;
+        break;
+      case kLegacySprmPDyaAfter:
+        modern = kSprmPDyaAfter;
+        size = 2;
+        break;
+      case kLegacySprmPFInTable:
+        modern = kSprmPFInTable;
+        size = 1;
+        break;
+      case kLegacySprmPFTtp:
+        modern = kSprmPFTtp;
+        size = 1;
+        break;
+      case kLegacySprmPFWidowControl:
+        modern = kSprmPFWidowControl;
+        size = 1;
+        break;
+      case kLegacySprmCFBold:
+        modern = kSprmCFBold;
+        size = 1;
+        break;
+      case kLegacySprmCFItalic:
+        modern = kSprmCFItalic;
+        size = 1;
+        break;
+      case kLegacySprmCFStrike:
+        modern = kSprmCFStrike;
+        size = 1;
+        break;
+      case kLegacySprmCFtc:
+        size = 2;
+        break;  // Legacy font table is not yet decoded.
+      case kLegacySprmCKul:
+        modern = kSprmCKul;
+        size = 1;
+        break;
+      case kLegacySprmCIco:
+        modern = kSprmCIco;
+        size = 1;
+        break;
+      case kLegacySprmCHps:
+        modern = kSprmCHps;
+        size = 1;
+        break;
+      default:
+        return false;
+    }
+    if (!size || size > raw.size() - p)
+      return false;
+    if (modern) {
+      AppendLegacySprm(out, modern, raw.subspan(p, size));
+      if (code == kLegacySprmCHps)
+        out.push_back(0);  // Modern sprmCHps has a two-byte operand.
+    }
+    p += size;
+  }
+  return true;
+}
+
+std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
+    Bytes word, Fib::Range r, bool para, std::vector<std::string>* warnings) {
+  std::vector<FormatRange> out;
+  if (!r.size)
+    return out;
+  if (!Valid(word, r) || r.size < 10 || (r.size - 4) % 6)
+    return std::unexpected(Error{"invalid Word 6/95 BTE table"});
+  Bytes plc = word.subspan(r.offset, r.size);
+  const size_t pages = (r.size - 4) / 6;
+  if (pages > word.size() / 512)
+    return std::unexpected(Error{"Word 6/95 BTE page count exceeds stream"});
+  std::vector<uint8_t> seen(word.size() / 512);
+  bool warned = false;
+  for (size_t k = 0; k < pages; ++k) {
+    const size_t pn = U16(plc, 4 * (pages + 1) + 2 * k);
+    if (pn >= seen.size() || seen[pn]++)
+      return std::unexpected(Error{"invalid Word 6/95 FKP page"});
+    Bytes f = word.subspan(pn * 512, 512);
+    const size_t count = f[511], stride = para ? 7 : 1;
+    if (!count || 4 * (count + 1) + stride * count > 511)
+      return std::unexpected(Error{"invalid Word 6/95 FKP run count"});
+    for (size_t j = 0; j < count; ++j) {
+      const uint32_t first = U32(f, 4 * j), last = U32(f, 4 * (j + 1));
+      if (last <= first)
+        return std::unexpected(Error{"invalid Word 6/95 FKP FC order"});
+      FormatRange range{first, last, {}};
+      const size_t off = 2 * f[4 * (count + 1) + stride * j];
+      if (off) {
+        if (off >= 511)
+          return std::unexpected(Error{"invalid Word 6/95 FKP offset"});
+        const size_t length = para ? 2 * f[off] : f[off];
+        if (length > 511 - off - 1 || (para && length < 2))
+          return std::unexpected(Error{"invalid Word 6/95 FKP payload"});
+        size_t start = off + 1;
+        if (para) {
+          range.style = U16(f, start);
+          start += 2;
+        }
+        if (!NormalizeLegacySprms(f.subspan(start, length - (para ? 2 : 0)),
+                                  range.sprms) &&
+            !warned && warnings) {
+          warnings->push_back("Word 6/95 FKP contains unsupported sprms");
+          warned = true;
+        }
+      }
+      out.push_back(std::move(range));
+    }
+  }
+  std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+    return a.first < b.first;
+  });
+  for (size_t i = 1; i < out.size(); ++i)
+    if (out[i].first < out[i - 1].last)
+      return std::unexpected(Error{"overlapping Word 6/95 FKP ranges"});
+  return out;
+}
+}  // namespace
+
 std::expected<std::vector<FormatRange>, Error> ReadFkps(
     Bytes word, Bytes table, Fib::Range r, bool para,
-    std::vector<std::string>* warnings) {
+    std::vector<std::string>* warnings, bool legacy) {
+  if (legacy)
+    return ReadLegacyFkps(word, r, para, warnings);
   std::vector<FormatRange> out;
   if (!r.size)
     return out;

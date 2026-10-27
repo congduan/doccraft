@@ -135,11 +135,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (!chars)
     return std::unexpected(chars.error());
   model::Document doc;
-  auto chpx = ReadFkps(word, table, fib.chpx_bte, false, &doc.warnings);
+  auto chpx =
+      ReadFkps(word, table, fib.chpx_bte, false, &doc.warnings, fib.legacy);
   if (!chpx)
     return std::unexpected(chpx.error());
   // PAPX can carry table structure; losing it can change cell boundaries.
-  auto papx = ReadFkps(word, table, fib.papx_bte, true);
+  auto papx = ReadFkps(word, table, fib.papx_bte, true,
+                       fib.legacy ? &doc.warnings : nullptr, fib.legacy);
   if (!papx)
     return std::unexpected(papx.error());
   size_t total_image_size = 0;

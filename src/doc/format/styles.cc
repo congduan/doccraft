@@ -299,6 +299,22 @@ std::vector<model::Style> ReadStyleSheet(
 std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
                                      const std::vector<std::string>& fonts) {
   std::vector<model::Style> styles = ReadStyleSheet(table, r, fonts);
+  // [MS-DOC] 2.4.6.6: later matching conditions override earlier ones.
+  // These CNFC values are a precedence table, not their STSH appearance order.
+  constexpr int kCnfPrecedence[] = {0x0040, 0x0080, 0x0010, 0x0020,
+                                    0x0004, 0x0008, 0x0001, 0x0002,
+                                    0x0100, 0x0200, 0x0400, 0x0800};
+  auto priority = [&](int type) {
+    auto found =
+        std::find(std::begin(kCnfPrecedence), std::end(kCnfPrecedence), type);
+    return found - std::begin(kCnfPrecedence);
+  };
+  for (auto& style : styles) {
+    std::stable_sort(style.conditionals.begin(), style.conditionals.end(),
+                     [&](const auto& a, const auto& b) {
+                       return priority(a.type) < priority(b.type);
+                     });
+  }
   std::vector<uint8_t> state(styles.size());
   for (size_t i = 0; i < styles.size(); i++) {
     ResolveStyle(styles, state, i);

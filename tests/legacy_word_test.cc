@@ -59,6 +59,56 @@ TEST(LegacyWord, SimpleWord6TextAndSignatureGate) {
   EXPECT_FALSE(doccraft::doc::ParseFib(word));
 }
 
+TEST(LegacyWord, Word6FkpAppliesCharacterAndParagraphFormatting) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 772);
+  Put32(word, 52, 4);
+  word[768] = 'A';
+  word[769] = 'B';
+  word[770] = 'C';
+  word[771] = '\r';
+  // Word 6/95 BTEs are 4-byte FC bounds followed by a 2-byte page number.
+  Put32(word, 88 + 12 * 8, 2048);
+  Put32(word, 92 + 12 * 8, 10);
+  Put32(word, 2048, 768);
+  Put32(word, 2052, 772);
+  Put16(word, 2056, 2);
+  Put32(word, 88 + 13 * 8, 2060);
+  Put32(word, 92 + 13 * 8, 10);
+  Put32(word, 2060, 768);
+  Put32(word, 2064, 772);
+  Put16(word, 2068, 3);
+  // CHPX FKP: one run, 8-bit sprm 0x55 (bold).
+  Put32(word, 1024, 768);
+  Put32(word, 1028, 772);
+  word[1032] = 250;
+  word[1524] = 2;
+  word[1525] = 0x55;
+  word[1526] = 1;
+  word[1535] = 1;
+  // PAPX FKP: seven-byte BX and 8-bit sprm 0x05 (right align).
+  Put32(word, 1536, 768);
+  Put32(word, 1540, 772);
+  word[1544] = 252;
+  word[2040] = 3;
+  Put16(word, 2041, 0);
+  word[2043] = 5;
+  word[2044] = 2;
+  word[2047] = 1;
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(word, word, *fib);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].align, 2);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+}
+
 TEST(LegacyWord, ComplexWord95UsesDirectFcAndUtf16) {
   std::vector<uint8_t> word(1024);
   Put16(word, 0, 0xA699);

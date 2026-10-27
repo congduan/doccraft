@@ -28,7 +28,7 @@
 ## Word 6/95 读取边界
 
 - 实测 Apache POI 的 `Bug50955.doc`、`Bug51944.doc` 为 nFib `0x0068`，`Word6.doc`、`52117.doc` 为 `0x0065`；签名分别出现 `0xA5DC`、`0xA699`，并非先前推测的 `0x0052`。旧 FIB 的字符数在 `0x34`，38 个 fc/lcb 对从 `0x58` 起，CLX 及文本都位于 WordDocument。直接 FC 的 ANSI/UTF-16 PCD 与简单文档的 `fcMin` 已接入；损坏的范围、CLX 和 PCD 显式拒绝。
-- 旧版仅保证正文文本和基本段落切分。旧版 CHPX/PAPX、样式、表格、图片、页眉脚注等格式结构尚未映射，转换后的布局会退化。`52117.doc` 的 lid 为 en-US，但 FFN 字库携带俄文 charset，按 CP1251 解码；该修正只覆盖可在 FFN 中识别的俄文，其他 lid 与字符集冲突仍可能误解码。`Bug51944.doc` 的 lid 同为 en-US，CLI 从有界 `\005SummaryInformation` CodePage 属性读出 950 作为旧版 ANSI 回退代码页；提供的 LO 文本实际无汉字。CP950 繁体解码由 `LegacyWord.Word95AnsiPieceUsesTraditionalChineseCodepage` 的 Big5 字节合成断言验证，尚缺带真实繁体汉字的 Word 95 golden。
+- 四份旧版真实样本的 WordDocument 流均带 BTE/FKP：`Word6.doc`、`52117.doc` 为 nFib `0x0065`，`Bug50955.doc`、`Bug51944.doc` 为 `0x0068`；pair 12/13 均非空，页号为 2 字节。现读取旧版 CHPX/PAPX 页及常用标量 sprm（粗体、斜体、字号、下划线、段落对齐/缩进/间距、表内标记等）。已知但未映射的制表位和字体索引会跳过；遇其他未识别的旧版 1 字节 sprm 会发警告并跳过该组剩余修饰。旧版 STSH、字体表、完整表格属性、图片、页眉脚注仍未映射，转换版式会退化。`52117.doc` 的 lid 为 en-US，但 FFN 字库携带俄文 charset，按 CP1251 解码；该修正只覆盖可在 FFN 中识别的俄文，其他 lid 与字符集冲突仍可能误解码。`Bug51944.doc` 的 lid 同为 en-US，CLI 从有界 `\005SummaryInformation` CodePage 属性读出 950 作为旧版 ANSI 回退代码页；提供的 LO 文本实际无汉字。CP950 繁体解码由 `LegacyWord.Word95AnsiPieceUsesTraditionalChineseCodepage` 的 Big5 字节合成断言验证，尚缺带真实繁体汉字的 Word 95 golden。
 
 ## M6 设计取舍
 
@@ -60,7 +60,7 @@
 
 - CHP/PAP/SEP 的常用 sprm、STSH 样式链、LSTF/LVL 列表、首节页眉页脚和基础表格网格已读写。表格单元格合并、复杂边框底纹、浮雕/阴影等效果仍简化；复杂格式需要独立样本验证。
 - 多节文档逐节写出属性切换、行号与脚注位置，并为每节生成独立的页眉页脚部件（PlcfHdd 每节 6 个故事，首个故事前有 6 个保留 CP）。两条限制：其一，节内页眉里的图片与表格只保留文本与段落格式，不含 drawing 部件（域自 M8 起按正文语义输出）；其二，故事末段落是守卫标记，会被丢弃，因此「仅有一个空段落」的页眉在输出中不存在。
-- 样式表保留段落、字符、表格和编号样式的条目及继承链接；表格样式的条件格式（`sprmTCnf`/`sprmPCnf`/`sprmCCnf`）按 `cnfc` 聚合成 `w:tblStylePr`，但同一条件的 TAPX/PAPX/CHPX 三段只按出现顺序合并，尚未按 2.4.6 的属性优先级重排。
+- 样式表保留段落、字符、表格和编号样式的条目及继承链接；表格样式条件格式（`sprmTCnf`/`sprmPCnf`/`sprmCCnf`）按 `cnfc` 聚合并依 [MS-DOC] 2.4.6.6 的水平条带、垂直条带、首末列、首末行、角单元格顺序输出。同一条件的 TAPX/PAPX/CHPX 三段仍按出现顺序合并；段落/字符/编号链没有完整按 2.4.6.6 求值，保留 §6.7 的 ◐。
 - `sprmPHugePapx` 和 `sprmPTableProps` 会按 Data 流偏移读取嵌套 PrcData；超出流边界则忽略该引用。其复杂表格语义未全部映射。
 - 浮动段落框映射 `w:framePr` 的位置/尺寸/间距/锁定、首字下沉（`sprmPDcs`）与纵向文字流（`sprmPFrameTextFlow`，仅宽高非默认时才输出）；`w:drawing` 级锚点与绕排多边形仍缺。
 - 浮动表格用 `w:tblpPr` 表达，锚点由 `sprmTPc` 的 `pcVert`/`pcHorz` 映射为 `margin`/`page`/`text`（缺省为 `margin`）；表格文本环绕距离已映射。`sprmTWidthBefore`/`sprmTWidthAfter` 的行级前后缩进仍无对应属性。

@@ -94,6 +94,13 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
       return std::unexpected(Error{"Word 6/95 text exceeds fcMac"});
     f.fc_clx = U32(word, kLegacyPairStart + kLegacyClxPair * 8);
     f.lcb_clx = U32(word, kLegacyPairStart + kLegacyClxPair * 8 + 4);
+    // The Word 6/95 BTE PLCs use two-byte page numbers in WordDocument.
+    constexpr size_t kLegacyChpxPair = 12;
+    constexpr size_t kLegacyPapxPair = 13;
+    f.chpx_bte = {U32(word, kLegacyPairStart + kLegacyChpxPair * 8),
+                  U32(word, kLegacyPairStart + kLegacyChpxPair * 8 + 4)};
+    f.papx_bte = {U32(word, kLegacyPairStart + kLegacyPapxPair * 8),
+                  U32(word, kLegacyPairStart + kLegacyPapxPair * 8 + 4)};
     if (f.lcb_clx &&
         (f.fc_clx > word.size() || f.lcb_clx > word.size() - f.fc_clx))
       return std::unexpected(Error{"Word 6/95 CLX outside WordDocument"});
