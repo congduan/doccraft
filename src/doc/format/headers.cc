@@ -57,8 +57,10 @@ std::expected<std::map<uint32_t, uint8_t>, Error> ReadStoryFieldStatus(
   uint32_t previous = 0;
   for (size_t i = 0; i < count; ++i) {
     const uint32_t cp = U32(plc, 4 * i);
-    // Fld.fldch packs the 5-bit character code with three marker flags.
+    // Fld.fldch has a 5-bit character code; its high three bits are reserved.
     const uint8_t kind = plc[fld_offset + 2 * i] & 0x1F;
+    // A real entry at the story's ccp is invalid, even though a guard may
+    // point there.
     if ((i && cp <= previous) || cp >= story_length ||
         (kind != 0x13 && kind != 0x14 && kind != 0x15))
       return std::unexpected(Error{"invalid field PLC entry"});
@@ -70,6 +72,7 @@ std::expected<std::map<uint32_t, uint8_t>, Error> ReadStoryFieldStatus(
       starts.pop_back();
     }
   }
+  // The guard may equal the last real CP.
   if (U32(plc, 4 * count) < previous)
     return std::unexpected(Error{"invalid field PLC guard"});
   return status;

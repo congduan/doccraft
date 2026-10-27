@@ -96,5 +96,6 @@
 
 - 非正文故事的字段接入：页眉/页脚（`PlcfFldHdr`，FIB pair 17 0 基）、脚注（`PlcfFldFtn`，pair 18）、尾注（`PlcfFldEdn`，pair 48）、批注（`PlcfFldAtn`，pair 19）各自读到「字段开始绝对 CP → grffldEnd 字节」映射，页眉用一张全区域映射按故事区间自动归属各节。各故事的域语义与正文同构：域层次永远来自文本中的 `0x13`/`0x14`/`0x15`，PLC 只补充 `fldLock`/`dirty` 标志——这同时是文本框故事的现状（`ReadStoryParagraphs` 无映射时照常解析层次，`fcPlcfFldTxbx`/`fcPlcffldHdrTxbx` 即 pair 57/59 未接）。`fcPlcfFldMcr`（pair 20）按规范「undefined and MUST be ignored」不读。宏/杂项（mcr）与 glsy 故事的字段因此不存在接入问题。
 - 故事字段 PLC 的降级策略：条目 CP 非严格递增、越过本故事 ccp、fldch 种类非法或尺寸不满足 `(size-4) mod 6 == 0` 时，整张 PLC 跳过并输出警告（`skipped <故事> field PLC: …`），该故事退化为「有域层次、无锁/脏标志」，正文与故事正文不受影响；正文 `PlcfFldMom` 维持严格失败策略不变。
-- 锁定域的输出与正文逐字节同构：`w:fldLock` 写在 begin/separate/end 三个标记上；锁定 HYPERLINK 的结果 run 仍包在 `w:hyperlink` 里（沿用正文既有行为）。页眉/脚注/脚注/尾注/批注部件复用 `WriteParagraph`，无独立的域输出逻辑。
+- 锁定域的输出与正文逐字节同构：`w:fldLock` 写在 begin/separate/end 三个标记上；锁定 HYPERLINK 的结果 run 仍包在 `w:hyperlink` 里（沿用正文既有行为）。页眉/页脚/脚注/尾注/批注部件复用 `WriteParagraph`，无独立的域输出逻辑。
+- 仅含空结果域（例如 `\x13 PAGE \x14\x15`）的页眉没有文本 run；既有的 has-text 策略会丢弃该故事部件，若文档只靠此类页眉使用奇偶页设置，`settings.xml` 中的 `evenAndOddHeaders` 也不会输出。
 - 超链接关系（`w:hyperlink r:id`）在页眉/脚注等部件中仍指向 `word/_rels/document.xml.rels`：部件各自的关系文件尚未生成，这是 writer 全局的既有简化（页眉图片同样如此），非 M8 引入。
