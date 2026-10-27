@@ -44,6 +44,19 @@ bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
     auto root = part.append_child(is_header ? "w:hdr" : "w:ftr");
     Attr(root, "xmlns:w", kWordmlNamespace);
     Attr(root, "xmlns:r", kRelationshipsNamespace);
+    const bool header_has_vml =
+        std::any_of(section.headers[i].begin(), section.headers[i].end(),
+                    [](const model::Paragraph& paragraph) {
+                      return std::any_of(
+                          paragraph.runs.begin(), paragraph.runs.end(),
+                          [](const model::Run& run) {
+                            return run.textbox_index >= 0 ||
+                                   run.shape_index >= 0;
+                          });
+                    });
+    if (header_has_vml) {
+      Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
+    }
     for (const auto& paragraph : section.headers[i]) {
       WriteParagraph(root, paragraph, nullptr, ctx);
     }
