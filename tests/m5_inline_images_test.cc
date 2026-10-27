@@ -390,7 +390,9 @@ struct FloatingStream {
   std::vector<uint8_t> word, table;
   doc::Fib fib;
 };
-FloatingStream Floating(uint16_t flags, bool delayed = true, size_t count = 1) {
+FloatingStream Floating(uint16_t flags, bool delayed = true, size_t count = 1,
+                        uint16_t shape_type = 0x4B2, bool has_pib = true,
+                        const std::string& shape_text = "") {
   FloatingStream s;
   std::vector<uint8_t> raster(17);
   Append(raster, {0x89, 'P', 'N', 'G'});
@@ -408,8 +410,19 @@ FloatingStream Floating(uint16_t flags, bool delayed = true, size_t count = 1) {
   Put32(fsp, 0, 1026);
   Put16(props, 0, 0x4104);
   Put32(props, 2, 1);
-  auto children = Art(0xF00A, 0x4B2, fsp);
-  Append(children, Art(0xF00B, 0x13, props));
+  auto children = Art(0xF00A, (shape_type << 4) | 2, fsp);
+  if (has_pib)
+    Append(children, Art(0xF00B, 0x13, props));
+  if (!shape_text.empty()) {
+    std::vector<uint8_t> unicode((shape_text.size() + 1) * 2);
+    for (size_t i = 0; i < shape_text.size(); ++i)
+      Put16(unicode, 2 * i, static_cast<uint8_t>(shape_text[i]));
+    std::vector<uint8_t> property(6);
+    Put16(property, 0, 0x80C0);
+    Put32(property, 2, unicode.size());
+    Append(property, unicode);
+    Append(children, Art(0xF00B, 0x13, property));
+  }
   Append(s.table, Art(0xF002, 15, Art(0xF004, 15, children)));
   s.fib.drawing_group = {0, static_cast<uint32_t>(s.table.size())};
   std::vector<uint8_t> plc(4 + count * 30);
@@ -497,6 +510,102 @@ TEST(M5FloatingImages, SyntheticWrapOriginsSidesToIrAndXml) {
       }
     }
   }
+}
+
+TEST(M5FloatingImages, GeometryShapePlaceholderKeepsAnchor) {
+  auto s = Floating(0x54, true, 1, 1, false);
+  auto result = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+  ASSERT_TRUE(result) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  ASSERT_TRUE(result->front().shape);
+  EXPECT_EQ(result->front().shape->type, 1);
+  EXPECT_EQ(result->front().shape->width, 1440);
+  EXPECT_EQ(result->front().shape->height, 720);
+  model::Document document;
+  document.shapes.push_back(*result->front().shape);
+  document.paragraphs.push_back({});
+  model::Run run;
+  run.shape_index = 0;
+  document.paragraphs.back().runs.push_back(run);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const auto xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<v:rect"), std::string::npos);
+  EXPECT_NE(xml.find("shape: rectangle"), std::string::npos);
+  EXPECT_NE(xml.find("<w10:wrap type=\"square\""), std::string::npos);
+  EXPECT_NE(xml.find("width:72.000000pt"), std::string::npos);
+}
+
+TEST(M5FloatingImages, LibreOfficeBasicShapesKeepGeometry) {
+  auto parsed = ParseFixture("basic-shapes");
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->shapes.size(), 2U);
+  EXPECT_EQ(parsed->shapes[0].type, 1);
+  EXPECT_EQ(parsed->shapes[1].type, 3);
+  EXPECT_EQ(parsed->shapes[0].width, 1440);
+  EXPECT_EQ(parsed->shapes[0].height, 720);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const auto xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<v:rect"), std::string::npos);
+  EXPECT_NE(xml.find("<v:oval"), std::string::npos);
+}
+
+TEST(M5FloatingImages, LineAndWordArtTypesKeepIdentity) {
+  for (const uint16_t type : {uint16_t{20}, uint16_t{0x88}}) {
+    auto s = Floating(0x54, true, 1, type, false,
+                      type == 0x88 ? "WordArt words" : "");
+    auto result = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->size(), 1U);
+    ASSERT_TRUE(result->front().shape);
+    EXPECT_EQ(result->front().shape->type, type);
+    if (type == 0x88) {
+      EXPECT_EQ(result->front().shape->text, "WordArt words");
+    }
+    model::Document document;
+    document.shapes.push_back(*result->front().shape);
+    document.paragraphs.push_back({});
+    model::Run run;
+    run.shape_index = 0;
+    document.paragraphs.back().runs.push_back(run);
+    auto zip = docx::Write(document);
+    ASSERT_TRUE(zip) << zip.error().message;
+    const auto xml = Part(*zip, "word/document.xml");
+    EXPECT_NE(xml.find(type == 20 ? "<v:line" : "shape: WordArt"),
+              std::string::npos);
+    if (type == 0x88) {
+      EXPECT_NE(xml.find("WordArt words"), std::string::npos);
+    }
+    if (type == 0x88) {
+      for (size_t i = 0; i + 6 <= s.fib.drawing_group.size; ++i) {
+        if (s.table[i] == 0xC0 && s.table[i + 1] == 0x80) {
+          Put32(s.table, i + 2, 0xFFFFFFFF);
+          break;
+        }
+      }
+      EXPECT_FALSE(doc::ReadFloatingPictures(s.word, s.table, s.fib));
+    }
+  }
+  model::Document document;
+  model::Textbox box;
+  box.shape_type = 0x88;
+  box.width = 1440;
+  box.height = 720;
+  model::Run text;
+  text.text = "Original WordArt words";
+  box.paragraphs.push_back({});
+  box.paragraphs.back().runs.push_back(text);
+  document.textboxes.push_back(box);
+  document.paragraphs.push_back({});
+  model::Run anchor;
+  anchor.textbox_index = 0;
+  document.paragraphs.back().runs.push_back(anchor);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const auto xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("shape: WordArt"), std::string::npos);
+  EXPECT_NE(xml.find("Original WordArt words"), std::string::npos);
 }
 
 TEST(M5FloatingImages, RejectsMalformedRangesRecordsAndReferences) {

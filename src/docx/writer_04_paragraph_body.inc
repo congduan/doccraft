@@ -192,15 +192,13 @@ void WriteOle(pugi::xml_node run, int index, WriteContext& ctx) {
   const std::string shape_id = "ole_shape_" + std::to_string(index + 1);
   auto shape = container.append_child("v:shape");
   Attr(shape, "id", shape_id);
-  Attr(shape, "style", "width:" + std::to_string(width / 20.0) +
-                           "pt;height:" + std::to_string(height / 20.0) +
-                           "pt");
+  Attr(shape, "style",
+       "width:" + std::to_string(width / 20.0) +
+           "pt;height:" + std::to_string(height / 20.0) + "pt");
   if (object.preview_image_index >= 0 &&
-      static_cast<size_t>(object.preview_image_index) <
-          ctx.image_rids.size()) {
+      static_cast<size_t>(object.preview_image_index) < ctx.image_rids.size()) {
     Attr(shape.append_child("v:imagedata"), "r:id",
-         "rId" +
-             std::to_string(ctx.image_rids[object.preview_image_index]));
+         "rId" + std::to_string(ctx.image_rids[object.preview_image_index]));
   }
   auto ole = container.append_child("o:OLEObject");
   Attr(ole, "Type", "Embed");
@@ -218,17 +216,78 @@ void WriteTextbox(pugi::xml_node run, int index, WriteContext& ctx) {
   const auto& box = ctx.document->textboxes[index];
   auto rect = run.append_child("w:pict").append_child("v:rect");
   Attr(rect, "id", "Textbox" + std::to_string(index + 1));
+  if (box.shape_type >= model::kShapeWordArtFirst &&
+      box.shape_type <= model::kShapeWordArtLast)
+    Attr(rect, "alt", "shape: WordArt");
   Attr(rect, "stroked", "f");
   Attr(rect, "filled", "f");
-  auto points = [](int twips) { return std::to_string(twips / 20.0) + "pt"; };
-  Attr(rect, "style", "position:absolute;left:" + points(box.x) +
-                          ";top:" + points(box.y) + ";width:" +
-                          points(box.width) + ";height:" +
-                          points(box.height));
-  auto content =
-      rect.append_child("v:textbox").append_child("w:txbxContent");
+  auto points = [](int twips) {
+    return std::to_string(twips / 20.0) + "pt";
+  };
+  Attr(rect, "style",
+       "position:absolute;left:" + points(box.x) + ";top:" + points(box.y) +
+           ";width:" + points(box.width) + ";height:" + points(box.height));
+  auto content = rect.append_child("v:textbox").append_child("w:txbxContent");
   for (const auto& paragraph : box.paragraphs)
     WriteParagraph(content, paragraph, nullptr, ctx);
+}
+
+void WriteShape(pugi::xml_node run, int index, WriteContext& ctx) {
+  if (!ctx.document || index < 0 ||
+      static_cast<size_t>(index) >= ctx.document->shapes.size())
+    return;
+  const auto& shape = ctx.document->shapes[index];
+  const char* kind = shape.type == model::kShapeEllipse ? "v:oval"
+                     : shape.type == model::kShapeLine  ? "v:line"
+                                                        : "v:rect";
+  auto node = run.append_child("w:pict").append_child(kind);
+  Attr(node, "id", "Shape" + std::to_string(shape.id));
+  const char* name = shape.type == model::kShapeRectangle ? "rectangle"
+                     : shape.type == model::kShapeEllipse ? "ellipse"
+                     : shape.type == model::kShapeLine    ? "line"
+                     : shape.type >= model::kShapeWordArtFirst &&
+                             shape.type <= model::kShapeWordArtLast
+                         ? "WordArt"
+                         : "geometry";
+  Attr(node, "alt", std::string("shape: ") + name);
+  auto points = [](int twips) {
+    return std::to_string(twips / 20.0) + "pt";
+  };
+  Attr(node, "style",
+       "position:absolute;left:" + points(shape.anchor.x) +
+           ";top:" + points(shape.anchor.y) + ";width:" + points(shape.width) +
+           ";height:" + points(shape.height));
+  if (shape.type == model::kShapeLine) {
+    Attr(node, "from", "0pt,0pt");
+    Attr(node, "to", points(shape.width) + "," + points(shape.height));
+  }
+  Attr(node, "filled", "f");
+  const char* wrap = "square";
+  switch (shape.anchor.wrap) {
+    case model::ImageWrap::kNone:
+      wrap = "none";
+      break;
+    case model::ImageWrap::kTopAndBottom:
+      wrap = "topAndBottom";
+      break;
+    case model::ImageWrap::kTight:
+      wrap = "tight";
+      break;
+    case model::ImageWrap::kThrough:
+      wrap = "through";
+      break;
+    case model::ImageWrap::kSquare:
+      break;
+  }
+  Attr(node.append_child("w10:wrap"), "type", wrap);
+  if (!shape.text.empty()) {
+    auto content = node.append_child("v:textbox").append_child("w:txbxContent");
+    model::Paragraph paragraph;
+    model::Run text_run;
+    text_run.text = shape.text;
+    paragraph.runs.push_back(std::move(text_run));
+    WriteParagraph(content, paragraph, nullptr, ctx);
+  }
 }
 
 void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
@@ -283,6 +342,8 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       IntAttr(rn.append_child("w:commentReference"), "w:id", r.comment_ref);
     } else if (r.image_index >= 0) {
       WriteImage(rn, r.image_index, ctx);
+    } else if (r.shape_index >= 0) {
+      WriteShape(rn, r.shape_index, ctx);
     } else if (r.textbox_index >= 0) {
       WriteTextbox(rn, r.textbox_index, ctx);
     } else if (r.ole_index >= 0) {

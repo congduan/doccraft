@@ -288,9 +288,12 @@ std::expected<std::vector<uint8_t>, Error> Write(
   auto root = doc.append_child("w:document");
   Attr(root, "xmlns:w", kWordmlNamespace);
   Attr(root, "xmlns:r", kRelationshipsNamespace);
-  if (!document.textboxes.empty() || !document.ole_objects.empty()) {
+  if (!document.textboxes.empty() || !document.shapes.empty() ||
+      !document.ole_objects.empty()) {
     Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
   }
+  if (!document.shapes.empty())
+    Attr(root, "xmlns:w10", "urn:schemas-microsoft-com:office:word");
   if (!document.ole_objects.empty()) {
     Attr(root, "xmlns:o", "urn:schemas-microsoft-com:office:office");
   }

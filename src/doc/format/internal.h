@@ -96,6 +96,7 @@ inline constexpr uint16_t kTertiaryFopt = 0xF122;
 inline constexpr size_t kFopteSize = 6, kFbseDelayOffset = 28;
 inline constexpr uint16_t kPropertyIdMask = 0x3FFF;
 inline constexpr uint16_t kPropertyComplex = 0x8000, kPib = 0x0104;
+inline constexpr uint16_t kGtextUnicode = 192;
 inline constexpr size_t kFtxbxsSize = 22, kTbkdSize = 6;
 inline constexpr size_t kFtxbxsLidOffset = 14;
 inline constexpr int kWrapTopBottom = 1, kWrapNone = 3;

@@ -156,6 +156,14 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (!textboxes)
     return std::unexpected(textboxes.error());
   doc.textboxes = std::move(*textboxes);
+  for (const auto& item : *floating) {
+    if (!item.shape)
+      continue;
+    for (auto& box : doc.textboxes) {
+      if (box.shape_id == item.shape->id)
+        box.shape_type = item.shape->type;
+    }
+  }
   std::map<uint32_t, size_t> textbox_anchors;
   for (size_t i = 0; i < doc.textboxes.size(); i++) {
     if (!textbox_anchors.emplace(doc.textboxes[i].anchor_cp, i).second)
@@ -465,9 +473,22 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (next_picture < floating->size() &&
         (*floating)[next_picture].cp == ch.cp) {
       model::Run picture_run;
-      picture_run.image_index = static_cast<int>(doc.images.size());
-      doc.images.push_back(std::move((*floating)[next_picture++].image));
-      para.runs.push_back(std::move(picture_run));
+      auto& item = (*floating)[next_picture++];
+      if (item.shape) {
+        const bool textbox = std::any_of(
+            doc.textboxes.begin(), doc.textboxes.end(), [&](const auto& box) {
+              return box.shape_id == item.shape->id;
+            });
+        if (!textbox) {
+          picture_run.shape_index = static_cast<int>(doc.shapes.size());
+          doc.shapes.push_back(std::move(*item.shape));
+          para.runs.push_back(std::move(picture_run));
+        }
+      } else {
+        picture_run.image_index = static_cast<int>(doc.images.size());
+        doc.images.push_back(std::move(item.image));
+        para.runs.push_back(std::move(picture_run));
+      }
       last_run_count = 0;
     }
     if (auto box = textbox_anchors.find(ch.cp); box != textbox_anchors.end()) {
@@ -621,7 +642,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     cached_chp = chp;
     if (!text.empty() && control != '\x01' && last_run_count != 0 &&
         para.runs.size() == last_run_count &&
-        para.runs.back().image_index < 0 &&
+        para.runs.back().image_index < 0 && para.runs.back().shape_index < 0 &&
         para.runs.back().textbox_index < 0 && pap == last_pap &&
         chp == last_chp && ch.prm == last_prm && hyperlink == last_hyperlink &&
         page_field == last_page_field) {

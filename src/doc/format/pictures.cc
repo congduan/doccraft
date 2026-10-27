@@ -18,8 +18,10 @@
 #include <expected>
 #include <map>
 #include <optional>
+#include <string>
 #include <vector>
 
+#include "base/utf8.h"
 #include "doc/format.h"
 #include "doc/format/internal.h"
 #include "third_party/miniz/miniz.h"
@@ -212,6 +214,7 @@ std::expected<model::Image, Error> ReadInlinePicture(Bytes data,
                             1, static_cast<int>(detail::kMaxTwips));
   return image;
 }
+
 namespace {
 struct ArtRecord {
   uint16_t type = 0, instance = 0, version = 0;
@@ -237,6 +240,11 @@ std::expected<ArtRecord, Error> ArtNext(Bytes& bytes) {
 struct DrawingIndex {
   std::vector<Bytes> blips;
   std::map<uint32_t, uint32_t> pictures;
+  struct ShapeInfo {
+    uint16_t type = 0;
+    std::string text;
+  };
+  std::map<uint32_t, ShapeInfo> shapes;
   size_t records = 0;
 };
 
@@ -256,6 +264,8 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
       index.blips.push_back(r->body);
     } else if (r->type == detail::kSpContainer) {
       uint32_t id = 0, pib = 0;
+      uint16_t shape_type = 0;
+      std::string shape_text;
       Bytes children = r->body;
       while (!children.empty()) {
         if (++index.records > detail::kMaxDrawingRecords)
@@ -264,23 +274,63 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
         if (!child)
           return std::unexpected(child.error());
         if (child->type == detail::kFsp) {
-          if (child->body.size() != 8)
+          if (child->body.size() != 8 || child->version != 2)
             return std::unexpected(Error{"invalid drawing FSP"});
           id = U32(child->body, 0);
+          shape_type = child->instance;
         } else if (child->type == detail::kFopt ||
                    child->type == detail::kTertiaryFopt) {
           if (child->instance > child->body.size() / detail::kFopteSize)
             return std::unexpected(Error{"truncated drawing properties"});
+          size_t complex_at = child->instance * detail::kFopteSize;
           for (size_t i = 0; i < child->instance; ++i) {
             const size_t at = i * detail::kFopteSize;
             const uint16_t op = U16(child->body, at);
             if ((op & detail::kPropertyIdMask) == detail::kPib &&
                 !(op & detail::kPropertyComplex))
               pib = U32(child->body, at + 2);
+            if (op & detail::kPropertyComplex) {
+              const uint32_t length = U32(child->body, at + 2);
+              if (length > child->body.size() - complex_at)
+                return std::unexpected(
+                    Error{"drawing complex property exceeds record"});
+              if ((op & detail::kPropertyIdMask) == detail::kGtextUnicode) {
+                if (length % 2)
+                  return std::unexpected(Error{"invalid WordArt UTF-16"});
+                Bytes text = child->body.subspan(complex_at, length);
+                for (size_t j = 0; j < text.size(); j += 2) {
+                  const uint16_t code = U16(text, j);
+                  if (code == 0)
+                    break;
+                  if (code >= 0xD800 && code <= 0xDBFF) {
+                    if (j + 3 >= text.size())
+                      return std::unexpected(Error{"invalid WordArt UTF-16"});
+                    const uint16_t low = U16(text, j + 2);
+                    if (low < 0xDC00 || low > 0xDFFF)
+                      return std::unexpected(Error{"invalid WordArt UTF-16"});
+                    base::AppendUtf8(
+                        shape_text,
+                        0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00));
+                    j += 2;
+                  } else if (code >= 0xDC00 && code <= 0xDFFF) {
+                    return std::unexpected(Error{"invalid WordArt UTF-16"});
+                  } else {
+                    base::AppendUtf8(shape_text, code);
+                  }
+                }
+              }
+              complex_at += length;
+            }
           }
         }
       }
       if (pib && !index.pictures.emplace(id, pib).second)
+        return std::unexpected(Error{"duplicate drawing shape id"});
+      if (id &&
+          !index.shapes
+               .emplace(id, DrawingIndex::ShapeInfo{shape_type,
+                                                    std::move(shape_text)})
+               .second)
         return std::unexpected(Error{"duplicate drawing shape id"});
     } else if (r->version == detail::kEscherContainerVersion) {
       auto nested = IndexArt(r->body, index, depth + 1,
@@ -349,42 +399,48 @@ std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
     Bytes entry =
         spa->subspan((count + 1) * sizeof(uint32_t) + i * detail::kSpaSize,
                      detail::kSpaSize);
-    const auto picture = index.pictures.find(U32(entry, 0));
-    // Non-picture shapes/text boxes are deferred (KNOWN-SIMPLIFICATIONS).
-    if (picture == index.pictures.end())
+    const uint32_t id = U32(entry, 0);
+    const auto picture = index.pictures.find(id);
+    const auto shape = index.shapes.find(id);
+    if (picture == index.pictures.end() && shape == index.shapes.end())
       continue;
-    if (picture->second == 0 || picture->second > index.blips.size())
-      return std::unexpected(Error{"drawing picture index outside BStore"});
-    Bytes fbse = index.blips[picture->second - 1];
-    const size_t prefix =
-        detail::kFbseFixedSize + fbse[detail::kFbseNameLengthOffset];
-    if (prefix > fbse.size())
-      return std::unexpected(Error{"invalid FBSE name length"});
-    Bytes blip = fbse.subspan(prefix);
-    if (blip.empty()) {
-      const auto delay = U32(fbse, detail::kFbseDelayOffset);
-      if (delay > word.size())
-        return std::unexpected(Error{"delayed BLIP outside WordDocument"});
-      blip = word.subspan(delay);
+    FloatingPicture item;
+    item.cp = cp;
+    if (picture != index.pictures.end()) {
+      if (picture->second == 0 || picture->second > index.blips.size())
+        return std::unexpected(Error{"drawing picture index outside BStore"});
+      Bytes fbse = index.blips[picture->second - 1];
+      const size_t prefix =
+          detail::kFbseFixedSize + fbse[detail::kFbseNameLengthOffset];
+      if (prefix > fbse.size())
+        return std::unexpected(Error{"invalid FBSE name length"});
+      Bytes blip = fbse.subspan(prefix);
+      if (blip.empty()) {
+        const auto delay = U32(fbse, detail::kFbseDelayOffset);
+        if (delay > word.size())
+          return std::unexpected(Error{"delayed BLIP outside WordDocument"});
+        blip = word.subspan(delay);
+      }
+      auto record = ArtNext(blip);
+      if (!record)
+        return std::unexpected(record.error());
+      if (record->version != 0)
+        return std::unexpected(Error{"invalid BLIP record version"});
+      auto image =
+          DecodeBlip(record->body, record->type, record->instance, budget);
+      if (!image)
+        return std::unexpected(image.error());
+      budget -= image->bytes.size();
+      item.image = std::move(*image);
     }
-    auto record = ArtNext(blip);
-    if (!record)
-      return std::unexpected(record.error());
-    if (record->version != 0)
-      return std::unexpected(Error{"invalid BLIP record version"});
-    auto image =
-        DecodeBlip(record->body, record->type, record->instance, budget);
-    if (!image)
-      return std::unexpected(image.error());
-    budget -= image->bytes.size();
     const int64_t left = base::S32(entry, 4), top = base::S32(entry, 8);
     const int64_t width = int64_t{base::S32(entry, 12)} - left;
     const int64_t height = int64_t{base::S32(entry, 16)} - top;
     if (width <= 0 || height <= 0 || width > detail::kMaxTwips ||
         height > detail::kMaxTwips)
       return std::unexpected(Error{"invalid floating picture dimensions"});
-    image->width = static_cast<int>(width);
-    image->height = static_cast<int>(height);
+    item.image.width = static_cast<int>(width);
+    item.image.height = static_cast<int>(height);
     const auto flags = U16(entry, detail::kSpaFlagsOffset);
     model::ImageAnchor anchor;
     anchor.x = static_cast<int>(left);
@@ -421,8 +477,17 @@ std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
     anchor.behind_text =
         wrap == detail::kWrapNone && (flags & detail::kSpaBehind);
     anchor.locked = flags & detail::kSpaLocked;
-    image->anchor = anchor;
-    result.push_back({cp, std::move(*image)});
+    if (picture != index.pictures.end()) {
+      item.image.anchor = anchor;
+    } else {
+      item.shape = model::Shape{id,
+                                shape->second.type,
+                                static_cast<int>(width),
+                                static_cast<int>(height),
+                                anchor,
+                                shape->second.text};
+    }
+    result.push_back(std::move(item));
   }
   return result;
 }

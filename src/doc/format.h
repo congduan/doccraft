@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <expected>
 #include <limits>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -35,6 +36,7 @@ std::expected<model::Image, Error> ReadInlinePicture(
 struct FloatingPicture {
   uint32_t cp = 0;
   model::Image image;
+  std::optional<model::Shape> shape;
 };
 std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
     std::span<const uint8_t> word, std::span<const uint8_t> table,

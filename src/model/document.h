@@ -26,6 +26,8 @@ namespace doccraft::model {
 enum class ImageFormat { kPng, kJpeg, kWmf, kEmf };
 
 enum class ImageWrap { kNone, kSquare, kTight, kThrough, kTopAndBottom };
+inline constexpr int kShapeRectangle = 1, kShapeEllipse = 3, kShapeLine = 20;
+inline constexpr int kShapeWordArtFirst = 0x88, kShapeWordArtLast = 0xAF;
 // Same margin/page/text origin semantics as floating tables. Text means the
 // column horizontally and the anchor paragraph vertically.
 struct ImageAnchor {
@@ -41,6 +43,13 @@ struct Image {
   std::vector<uint8_t> bytes;
   int width = 0, height = 0;  // Display size in twips.
   std::optional<ImageAnchor> anchor;
+};
+
+struct Shape {
+  uint32_t id = 0;
+  int type = 0, width = 0, height = 0;
+  ImageAnchor anchor;
+  std::string text;
 };
 
 struct OleObject {
@@ -116,7 +125,8 @@ struct Run {
   // Field instruction text, written as w:instrText between begin and separator.
   std::string instr_text;
   int object_offset = -1;
-  int image_index = -1;    // Index into Document::images for U+0001.
+  int image_index = -1;  // Index into Document::images for U+0001.
+  int shape_index = -1;
   int textbox_index = -1;  // Index into Document::textboxes at shape anchor.
   int ole_index = -1;  // Index into Document::ole_objects at field separator.
   bool binary_data = false, ole_object = false, embedded_object = false;
@@ -208,6 +218,7 @@ struct Paragraph {
 struct Textbox {
   std::vector<Paragraph> paragraphs;
   uint32_t shape_id = 0;
+  int shape_type = 0;
   uint32_t anchor_cp = 0;
   int x = 0, y = 0, width = 0, height = 0;
   bool floating = true;
@@ -350,6 +361,7 @@ struct Table {
 struct Document {
   std::vector<std::string> warnings;
   std::vector<Image> images;
+  std::vector<Shape> shapes;
   std::vector<OleObject> ole_objects;
   std::vector<Textbox> textboxes;
   std::vector<Paragraph> paragraphs;
