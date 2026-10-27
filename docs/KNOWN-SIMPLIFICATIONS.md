@@ -35,6 +35,11 @@
 - 仅转换 WordDocument、Table、Data 主流。RC4 CryptoAPI 的独立加密属性流（按 [MS-DOC] 2.2.6.3 在 `fDocProps` 置位时出现；[MS-OFFCRYPTO] 2.3.5.1 措辞与其相悖，通行实现按 [MS-DOC] 极性）不迁移到 OOXML 元数据；嵌入对象在加密文档中的独立存储兼容性尚未验证。
 - 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉、脚注等其他故事的字段 PLC 尚未接入，故 §6.1 域项保持 ◐。
 
+## M6 变异加固
+
+- 已交付 `tests/fuzz_test.cc`（入 ctest，双构建全绿；Release 全套 ~2.7s，ASan ~13s）。覆盖：全管线种子变异（plain-text、complex-table、fast-saved、inline-image、RC4 加密 5 种子 × 2000 轮/种子，ASan 下 300 轮/种子）、sprm/FKP 定向变异（PAPX/CHPX 字节、opcode 高位轰炸、`sprmPHugePapx`/`sprmPTableProps` 嵌套 grpprl + Data 流）、CLX/piece 表变异（fc/lcbClx 极值、CP 倒序、compressed 位、ccpText 不一致）、全 65536 opcode 的 dispatch 直调，以及代表性损坏的确定性错误断言。首轮运行即发现 `sprmPItap` 深度未钳制导致的 writer 递归栈溢出（已在格式帧栈按 `kMaxTableDepth=8` 钳制，附回归测试）。
+- 残余缺口（合成变异 ≠ 持续 fuzzing）：固定 seed 有限轮次，无覆盖率导引；种子池未含 legacy RC4/MD5 加密样本与 >7 MiB DIFAT 扩展语料；libFuzzer 驱动（`fuzz_driver.cc`）需 clang + `DOCCRAFT_ENABLE_LIBFUZZER=ON` 选配构建，默认关闭、不入 ctest，CI 无常驻 fuzz 入口；页眉/脚注/文本框等故事内 sprm 变异与 OLE/Escher 字节变异未单列策略（当前仅经全管线种子变异间接触达）。
+
 ## M3 当前范围
 
 - 大于约 7 MiB 的 LibreOffice 导出 `.doc` 使用 DIFAT 扩展，最后一个 DIFAT 扇区的 next 字段写 `FREESECT`；[MS-CFB] §2.5 要求 `ENDOFCHAIN`。读取器仅在声明的 DIFAT 扇区数已走完且 FAT 扇区数匹配时兼容这个终止符。合成测试 `CfbReaderTest.ReadsLibreOfficeFreeTerminatedDifat` 与 20/50 MiB 语料覆盖此兼容路径。
