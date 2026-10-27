@@ -59,31 +59,36 @@ std::expected<Plc, Error> ReadPlc(Bytes table, Fib::Range range, size_t stride,
 }
 }  // namespace
 
-std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
+std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts) {
+    const std::vector<std::string>& fonts, bool header) {
   std::vector<model::Textbox> boxes;
-  if (!fib.ccp_txbx) {
-    if (fib.txbx_txt.size || fib.txbx_bkd.size)
+  const uint32_t count_chars = header ? fib.ccp_hdr_txbx : fib.ccp_txbx;
+  const Fib::Range txt_range = header ? fib.hdr_txbx_txt : fib.txbx_txt;
+  const Fib::Range bkd_range = header ? fib.hdr_txbx_bkd : fib.txbx_bkd;
+  const Fib::Range spa_range = header ? fib.spa_hdr : fib.spa_main;
+  if (!count_chars) {
+    if (txt_range.size || bkd_range.size)
       return std::unexpected(Error{"textbox PLC without textbox story"});
     return boxes;
   }
-  if (!fib.txbx_txt.size || !fib.txbx_bkd.size)
+  if (!txt_range.size || !bkd_range.size)
     return std::unexpected(Error{"missing textbox PLC"});
-  auto txt = ReadPlc(table, fib.txbx_txt, kFtxbxsSize, fib.ccp_txbx);
+  auto txt = ReadPlc(table, txt_range, kFtxbxsSize, count_chars);
   if (!txt)
     return std::unexpected(txt.error());
-  auto bkd = ReadPlc(table, fib.txbx_bkd, kTbkdSize, fib.ccp_txbx);
+  auto bkd = ReadPlc(table, bkd_range, kTbkdSize, count_chars);
   if (!bkd)
     return std::unexpected(bkd.error());
   const uint64_t base = static_cast<uint64_t>(fib.ccp_text) + fib.ccp_ftn +
-                        fib.ccp_hdd + fib.ccp_atn + fib.ccp_edn;
-  if (base + fib.ccp_txbx > UINT32_MAX)
+                        fib.ccp_hdd + fib.ccp_atn + fib.ccp_edn +
+                        (header ? fib.ccp_txbx : 0);
+  if (base + count_chars > UINT32_MAX)
     return std::unexpected(Error{"textbox story CP range too large"});
   std::vector<std::vector<uint8_t>> prcs;
   auto chars =
-      ReadChars(word, table, fib, static_cast<uint32_t>(base + fib.ccp_txbx),
+      ReadChars(word, table, fib, static_cast<uint32_t>(base + count_chars),
                 static_cast<uint32_t>(base), &prcs);
   if (!chars)
     return std::unexpected(chars.error());
@@ -124,12 +129,12 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
     for (auto& paragraph : paragraphs)
       target.push_back(std::move(paragraph));
   }
-  if (!fib.spa_main.size)
+  if (!spa_range.size)
     return std::unexpected(Error{"textbox without shape anchors"});
-  if (!Valid(table, fib.spa_main) || fib.spa_main.size < sizeof(uint32_t) ||
-      (fib.spa_main.size - sizeof(uint32_t)) % (kSpaSize + sizeof(uint32_t)))
+  if (!Valid(table, spa_range) || spa_range.size < sizeof(uint32_t) ||
+      (spa_range.size - sizeof(uint32_t)) % (kSpaSize + sizeof(uint32_t)))
     return std::unexpected(Error{"invalid textbox shape anchor PLC"});
-  Bytes spa = table.subspan(fib.spa_main.offset, fib.spa_main.size);
+  Bytes spa = table.subspan(spa_range.offset, spa_range.size);
   const size_t count =
       (spa.size() - sizeof(uint32_t)) / (kSpaSize + sizeof(uint32_t));
   if (count > kMaxDrawingRecords)
@@ -151,8 +156,8 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
           y < -kMaxTwips || y > kMaxTwips)
         return std::unexpected(Error{"invalid textbox shape dimensions"});
       box.anchor_cp = U32(spa, i * sizeof(uint32_t));
-      if (box.anchor_cp >= fib.ccp_text)
-        return std::unexpected(Error{"textbox anchor outside main story"});
+      if (box.anchor_cp >= (header ? fib.ccp_hdd : fib.ccp_text))
+        return std::unexpected(Error{"textbox anchor outside story"});
       box.x = static_cast<int>(x);
       box.y = static_cast<int>(y);
       box.width = static_cast<int>(width);
@@ -163,5 +168,19 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
       return std::unexpected(Error{"textbox shape anchor not found"});
   }
   return boxes;
+}
+
+std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
+    Bytes word, Bytes table, const Fib& fib,
+    const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
+    const std::vector<std::string>& fonts) {
+  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, false);
+}
+
+std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
+    Bytes word, Bytes table, const Fib& fib,
+    const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
+    const std::vector<std::string>& fonts) {
+  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, true);
 }
 }  // namespace doccraft::doc::detail

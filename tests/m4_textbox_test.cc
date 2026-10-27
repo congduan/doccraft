@@ -114,4 +114,34 @@ TEST(M4Textbox, SyntheticFlowBreaksStayInStoryOrder) {
   ASSERT_FALSE(invalid);
   EXPECT_EQ(invalid.error().message, "invalid textbox PLC CP order");
 }
+
+TEST(M4Textbox, HeaderTextboxAppearsInHeaderPart) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/header-textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb) << cfb.error().message;
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word) << word.error().message;
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table) << table.error().message;
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->textboxes.size(), 1U);
+  EXPECT_EQ(parsed->textboxes[0].paragraphs[0].runs[0].text, "Header box text");
+  auto written = docx::Write(*parsed);
+  ASSERT_TRUE(written) << written.error().message;
+  bool found = false;
+  for (int i = 1; i <= 6; ++i) {
+    const auto xml =
+        Part(*written, ("word/header" + std::to_string(i) + ".xml").c_str());
+    found |= xml.find("Header box text") != std::string::npos &&
+             xml.find("<w:txbxContent>") != std::string::npos;
+  }
+  EXPECT_TRUE(found);
+}
 }  // namespace

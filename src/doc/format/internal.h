@@ -301,6 +301,10 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
     const std::vector<std::string>& fonts);
+std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
+    Bytes word, Bytes table, const Fib& fib,
+    const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
+    const std::vector<std::string>& fonts);
 
 // Bookmark markers keyed by their CP in the main story.
 struct BookmarkMark {

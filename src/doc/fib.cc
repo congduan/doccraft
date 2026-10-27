@@ -95,10 +95,13 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   // [MS-DOC] FibRgFcLcb97: PlcfSpaMom and OfficeArtContent.
   constexpr size_t kSpaMainPair = 40, kDrawingGroupPair = 50;
   f.spa_main = pair(kSpaMainPair);
+  f.spa_hdr = pair(41);
   f.drawing_group = pair(kDrawingGroupPair);
   // [MS-DOC] FibRgFcLcb97: textbox story ranges and flow break descriptors.
   f.txbx_txt = pair(56);
   f.txbx_bkd = pair(75);
+  f.hdr_txbx_txt = pair(58);
+  f.hdr_txbx_bkd = pair(76);
   f.lists = pair(73);
   f.list_overrides = pair(74);
   const size_t new_pos = pair_start + static_cast<size_t>(pairs) * 8;

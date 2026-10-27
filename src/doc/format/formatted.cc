@@ -742,6 +742,36 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     doc.warnings.push_back("skipped header stories: " +
                            headers.error().message);
   } else {
+    auto header_boxes =
+        detail::ReadHeaderTextboxes(word, table, fib, *chpx, *papx, doc.fonts);
+    if (!header_boxes)
+      return std::unexpected(header_boxes.error());
+    for (auto& box : *header_boxes) {
+      bool attached = false;
+      for (size_t k = 0; k < section_count && !attached; ++k) {
+        for (size_t story = 0; story < 6; ++story) {
+          const size_t index = 6 + k * 6 + story;
+          const auto plc = table.subspan(fib.headers.offset, fib.headers.size);
+          if ((index + 1) * 4 >= plc.size())
+            return std::unexpected(Error{"header textbox story PLC too short"});
+          const uint32_t first = detail::U32(plc, index * 4);
+          const uint32_t last = detail::U32(plc, (index + 1) * 4);
+          if (box.anchor_cp < first || box.anchor_cp >= last)
+            continue;
+          auto& paragraphs = (*headers)[k][story];
+          if (paragraphs.empty())
+            paragraphs.push_back({});
+          model::Run run;
+          run.textbox_index = static_cast<int>(doc.textboxes.size());
+          paragraphs.front().runs.insert(paragraphs.front().runs.begin(), run);
+          doc.textboxes.push_back(std::move(box));
+          attached = true;
+          break;
+        }
+      }
+      if (!attached)
+        return std::unexpected(Error{"header textbox anchor outside headers"});
+    }
     for (size_t k = 0; k < section_count; k++) {
       detail::SectionHeaders& stories = (*headers)[k];
       model::Section* target = nullptr;
