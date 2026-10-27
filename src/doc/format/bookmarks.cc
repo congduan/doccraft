@@ -60,7 +60,8 @@ std::expected<BookmarkMarks, Error> ReadBookmarks(Bytes table, const Fib& fib) {
   if (!fib.bkf.size) {
     return out;
   }
-  // PlcfBkf: (n + 1) CPs then n BKF records of 4 bytes (ibkl).
+  // PlcfBkf: (n + 1) CPs then n four-byte FBKF records; ibkl is the
+  // first two bytes, followed by a two-byte BKC.
   if (!Valid(table, fib.bkf) || fib.bkf.size < 8 || (fib.bkf.size - 4) % 8) {
     return std::unexpected(Error{"invalid bookmark start PLC"});
   }
@@ -79,7 +80,7 @@ std::expected<BookmarkMarks, Error> ReadBookmarks(Bytes table, const Fib& fib) {
       ReadBookmarkNames(table, fib.sttb_bkmk);
   for (size_t i = 0; i < count; i++) {
     const size_t bkf_at = 4 * (count + 1) + 4 * i;
-    const uint32_t ibkl = U32(start, bkf_at);
+    const uint16_t ibkl = U16(start, bkf_at);
     if (ibkl >= end_count) {
       continue;
     }

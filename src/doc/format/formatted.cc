@@ -717,8 +717,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   // document order, so section k reads entries 6k..6k+5.
   const size_t section_count =
       doc.section_breaks.empty() ? 1 : doc.section_breaks.size() + 1;
-  auto headers =
-      ReadHeaders(doc, word, table, fib, *chpx, *papx, section_count);
+  auto headers = ReadHeaders(doc, word, table, fib, *chpx, *papx, section_count,
+                             *bookmarks);
   if (!headers) {
     doc.warnings.push_back("skipped header stories: " +
                            headers.error().message);

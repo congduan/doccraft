@@ -165,7 +165,86 @@ size_t Count(const std::string& text, const std::string& needle) {
   }
   return hits;
 }
+
+// Standard bookmark PLC CPs are absolute across document parts. A single
+// SttbfBkmk entry and matching FBKF/Plcfbkl entry select the header text.
+void PutBookmark(Synthetic& s, uint32_t begin, uint32_t end,
+                 const std::string& name) {
+  size_t at = s.table.size();
+  s.fib.sttb_bkmk = {static_cast<uint32_t>(at),
+                     static_cast<uint32_t>(8 + name.size() * 2)};
+  s.table.resize(at + s.fib.sttb_bkmk.size);
+  Put16(s.table, at, 0xffff);
+  Put16(s.table, at + 2, 1);
+  Put16(s.table, at + 4, 0);
+  Put16(s.table, at + 6, static_cast<uint16_t>(name.size()));
+  for (size_t i = 0; i < name.size(); ++i)
+    Put16(s.table, at + 8 + 2 * i, static_cast<uint8_t>(name[i]));
+  at = s.table.size();
+  s.fib.bkf = {static_cast<uint32_t>(at), 12};
+  s.table.resize(at + 12);
+  Put32(s.table, at, begin);
+  Put32(s.table, at + 4, end + 1);
+  Put16(s.table, at + 8, 0);   // FBKF.ibkl
+  Put16(s.table, at + 10, 1);  // FBKF.bkc, not part of ibkl
+  at = s.table.size();
+  s.fib.bkl = {static_cast<uint32_t>(at), 8};
+  s.table.resize(at + 8);
+  Put32(s.table, at, end);
+  Put32(s.table, at + 4, end + 1);
+}
 }  // namespace
+
+TEST(M9HeaderBookmarks, StandardBookmarkAppearsInHeaderPart) {
+  Synthetic s = Build("Body\r", "", "ABCD\r\r", "", "");
+  s.fib.headers = PutHeaderPlc(s, 1, s.fib.ccp_hdd);
+  PutBookmark(s, s.hdd_base + 1, s.hdd_base + 3, "HeaderMark");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->section.headers[1].size(), 1u);
+  const auto& runs = parsed->section.headers[1][0].runs;
+  ASSERT_EQ(runs.size(), 5u);
+  EXPECT_EQ(runs[0].text, "A");
+  EXPECT_TRUE(runs[1].bookmark_start);
+  EXPECT_EQ(runs[1].bookmark_id, 0);
+  EXPECT_EQ(runs[1].bookmark_name, "HeaderMark");
+  EXPECT_EQ(runs[2].text, "BC");
+  EXPECT_EQ(runs[3].bookmark_id, 0);
+  EXPECT_FALSE(runs[3].bookmark_start);
+  EXPECT_EQ(runs[4].text, "D");
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string header = Part(*zip, "word/header1.xml");
+  const size_t start = header.find(
+      "<w:bookmarkStart w:id=\"0\" "
+      "w:name=\"HeaderMark\"/>");
+  const size_t end = header.find("<w:bookmarkEnd w:id=\"0\"/>");
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  EXPECT_LT(header.find(">A</w:t>"), start);
+  EXPECT_LT(start, header.find(">BC</w:t>"));
+  EXPECT_LT(header.find(">BC</w:t>"), end);
+  EXPECT_LT(end, header.find(">D</w:t>"));
+}
+
+TEST(M9HeaderBookmarks, InvalidHeaderRangeKeepsStoryWithWarning) {
+  Synthetic s = Build("Body\r", "", "ABCD\r\r", "", "");
+  s.fib.headers = PutHeaderPlc(s, 1, s.fib.ccp_hdd);
+  PutBookmark(s, s.hdd_base + 1, s.hdd_base + s.fib.ccp_hdd + 1,
+              "BadHeaderMark");
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->section.headers[1].size(), 1u);
+  EXPECT_EQ(parsed->section.headers[1][0].runs[0].text, "ABCD");
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_NE(parsed->warnings[0].find("skipped header bookmark PLC:"),
+            std::string::npos);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string header = Part(*zip, "word/header1.xml");
+  EXPECT_NE(header.find(">ABCD</w:t>"), std::string::npos);
+  EXPECT_EQ(header.find("w:bookmarkStart"), std::string::npos);
+}
 
 TEST(M8StoryFields, FibExposesNonMainFieldPlcs) {
   std::vector<uint8_t> word(4096);

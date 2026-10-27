@@ -302,12 +302,14 @@ std::expected<std::map<uint32_t, uint8_t>, Error> ReadStoryFieldStatus(
 // `field_status` (may be null) carries the story's Plcfld flags keyed by the
 // absolute begin CP; the field hierarchy itself always comes from the 0x13/
 // 0x14/0x15 characters, so a null map only drops fldLock/dirty.
+struct BookmarkMarks;
 std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
     const std::vector<std::vector<uint8_t>>& prcs, uint64_t base,
     uint32_t first, uint32_t last,
-    const std::map<uint32_t, uint8_t>* field_status = nullptr);
+    const std::map<uint32_t, uint8_t>* field_status = nullptr,
+    const BookmarkMarks* bookmarks = nullptr);
 
 uint16_t Prm0Opcode(uint8_t isprm);
 
@@ -320,7 +322,7 @@ std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
     const std::vector<std::string>& fonts);
 
-// Bookmark markers keyed by their CP in the main story.
+// Standard bookmark markers keyed by absolute CP across document parts.
 struct BookmarkMark {
   int id = 0;
   std::string name;
@@ -367,7 +369,7 @@ using SectionHeaders = std::array<std::vector<model::Paragraph>, 6>;
 std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     model::Document& doc, Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    size_t sections);
+    size_t sections, const BookmarkMarks& bookmarks);
 }  // namespace doccraft::doc::detail
 
 namespace doccraft::doc {

@@ -82,7 +82,8 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
     const std::vector<std::vector<uint8_t>>& prcs, uint64_t base,
     uint32_t first, uint32_t last,
-    const std::map<uint32_t, uint8_t>* field_status) {
+    const std::map<uint32_t, uint8_t>* field_status,
+    const BookmarkMarks* bookmarks) {
   std::vector<model::Paragraph> out;
   if (last <= first) {
     return out;
@@ -143,6 +144,18 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
                                 });
   for (auto it = start; it != chars.end() && it->cp < base + last - 1; ++it) {
     const Char& ch = *it;
+    if (bookmarks) {
+      if (auto found = bookmarks->marks.find(ch.cp);
+          found != bookmarks->marks.end()) {
+        for (const auto& mark : found->second) {
+          model::Run marker;
+          marker.bookmark_id = mark.id;
+          marker.bookmark_name = mark.name;
+          marker.bookmark_start = mark.start;
+          para.runs.push_back(std::move(marker));
+        }
+      }
+    }
     const std::string_view text = ch.text();
     const char control = text.size() == 1 ? text[0] : '\0';
     if (control == '\x13') {
@@ -264,7 +277,7 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
 std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     model::Document& doc, Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    size_t sections) {
+    size_t sections, const BookmarkMarks& bookmarks) {
   std::vector<SectionHeaders> out(sections);
   if (sections == 0 || !fib.ccp_hdd || !fib.headers.size) {
     return out;
@@ -295,6 +308,39 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     doc.warnings.push_back("skipped header field PLC: " +
                            status.error().message);
   }
+  // Standard bookmark PLCs use absolute document CPs. Keep only pairs
+  // entirely inside the header region; an invalid pair does not remove text.
+  BookmarkMarks header_bookmarks;
+  std::map<int, uint32_t> starts;
+  std::map<int, uint32_t> ends;
+  for (const auto& [cp, marks] : bookmarks.marks) {
+    for (const auto& mark : marks) {
+      if (mark.start && cp >= base && cp < end)
+        starts.emplace(mark.id, cp);
+      if (!mark.start)
+        ends.emplace(mark.id, cp);
+    }
+  }
+  bool invalid_bookmark = false;
+  for (const auto& [id, cp] : starts) {
+    auto found = ends.find(id);
+    if (found == ends.end() || found->second < cp || found->second >= end) {
+      invalid_bookmark = true;
+      break;
+    }
+  }
+  if (invalid_bookmark) {
+    doc.warnings.push_back("skipped header bookmark PLC: invalid range");
+  } else {
+    for (const auto& [cp, marks] : bookmarks.marks) {
+      if (cp < base || cp >= end)
+        continue;
+      for (const auto& mark : marks) {
+        if (starts.contains(mark.id))
+          header_bookmarks.marks[cp].push_back(mark);
+      }
+    }
+  }
   for (size_t section = 0; section < sections; section++) {
     for (size_t story = 0; story < kStoryCount; story++) {
       const size_t index = kStoryPreamble + section * kStoryCount + story;
@@ -310,7 +356,7 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
       }
       out[section][story] =
           ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base, first,
-                              last, &field_status);
+                              last, &field_status, &header_bookmarks);
     }
   }
   return out;
