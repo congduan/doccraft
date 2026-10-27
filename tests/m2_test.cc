@@ -74,7 +74,8 @@ TEST(FibTest, RejectsEncryption) {
             "RC4-encrypted document must be decrypted with a password first");
   auto xor_fib = doccraft::doc::ParseFib(Fib(0x8100));
   ASSERT_FALSE(xor_fib.has_value());
-  EXPECT_EQ(xor_fib.error().message, "XOR obfuscation unsupported");
+  EXPECT_EQ(xor_fib.error().message,
+            "XOR-obfuscated document must be decrypted with a password first");
 }
 
 TEST(PieceTableTest, ReadsFastSavedPiecesAndPrc) {

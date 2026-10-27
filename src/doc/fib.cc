@@ -146,7 +146,8 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.which_table = flags & 0x0200;
   if (f.encrypted)
     return std::unexpected(Error{flags & 0x8000
-                                     ? "XOR obfuscation unsupported"
+                                     ? "XOR-obfuscated document must be "
+                                       "decrypted with a password first"
                                      : "RC4-encrypted document must be "
                                        "decrypted with a password first"});
   const size_t lw_count_pos = 34u + static_cast<size_t>(U16(word, 32)) * 2;
