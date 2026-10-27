@@ -25,13 +25,104 @@ namespace doccraft::doc {
 using base::U16;
 using base::U32;
 
+uint32_t ReadSummaryCodepage(std::span<const uint8_t> summary) {
+  // [MS-OLEPS] SummaryInformation: one property set, with PID 1 as VT_I2.
+  constexpr size_t kSectionOffsetPosition = 44;
+  constexpr size_t kPropertyEntrySize = 8;
+  constexpr uint32_t kCodepageProperty = 1;
+  constexpr uint16_t kSignedInt16Type = 2;
+  if (summary.size() < 48 || U16(summary, 0) != 0xFFFE || U32(summary, 24) != 1)
+    return 0;
+  size_t section = U32(summary, kSectionOffsetPosition);
+  if (section > summary.size() || summary.size() - section < 8)
+    return 0;
+  const size_t size = U32(summary, section);
+  const size_t count = U32(summary, section + 4);
+  if (size < 8 || size > summary.size() - section ||
+      count > (size - 8) / kPropertyEntrySize)
+    return 0;
+  for (size_t i = 0; i < count; ++i) {
+    size_t entry = section + 8 + kPropertyEntrySize * i;
+    if (U32(summary, entry) != kCodepageProperty)
+      continue;
+    const size_t offset = U32(summary, entry + 4);
+    if (offset > size || size - offset < 8)
+      return 0;
+    const size_t typed = section + offset;
+    return U16(summary, typed) == kSignedInt16Type ? U16(summary, typed + 4)
+                                                   : 0;
+  }
+  return 0;
+}
+
 std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   if (word.size() < 34)
     return std::unexpected(Error{"truncated FIB base"});
-  if (U16(word, 0) != 0xA5EC)
+  const uint16_t ident = U16(word, 0);
+  const uint16_t version = U16(word, 2);
+  constexpr uint16_t kWord6Ident = 0xA5DC;
+  constexpr uint16_t kWord95Ident = 0xA699;
+  constexpr uint16_t kWord97Ident = 0xA5EC;
+  if (ident != kWord97Ident && ident != kWord6Ident && ident != kWord95Ident)
     return std::unexpected(Error{"invalid WordDocument signature"});
   Fib f;
-  f.n_fib = U16(word, 2);
+  f.n_fib = version;
+  if (ident != kWord97Ident) {
+    constexpr size_t kLegacyHeaderSize = 88;
+    constexpr size_t kLegacyPairCount = 38;
+    constexpr size_t kLegacyPairStart = 88;
+    constexpr size_t kLegacyClxPair = 33;
+    if ((ident == kWord6Ident && version != 0x0065 && version != 0x0068) ||
+        (ident == kWord95Ident && version != 0x0068))
+      return std::unexpected(Error{"unsupported legacy nFib version"});
+    if (word.size() < kLegacyHeaderSize + kLegacyPairCount * 8)
+      return std::unexpected(Error{"truncated Word 6/95 FIB"});
+    f.legacy = true;
+    f.lid = U16(word, 6);
+    f.codepage = base::CodepageForLid(f.lid);
+    f.complex = (U16(word, 10) & 0x0004) != 0;
+    f.encrypted = (U16(word, 10) & 0x0100) != 0;
+    if (f.encrypted)
+      return std::unexpected(Error{"encrypted Word 6/95 unsupported"});
+    f.fc_min = U32(word, 24);
+    const uint32_t fc_max = U32(word, 28);
+    f.ccp_text = U32(word, 52);
+    if (f.fc_min < kLegacyHeaderSize + kLegacyPairCount * 8 ||
+        f.fc_min > fc_max || fc_max > word.size() || f.ccp_text > word.size())
+      return std::unexpected(Error{"invalid Word 6/95 text range"});
+    if (!f.complex && f.ccp_text > fc_max - f.fc_min)
+      return std::unexpected(Error{"Word 6/95 text exceeds fcMac"});
+    f.fc_clx = U32(word, kLegacyPairStart + kLegacyClxPair * 8);
+    f.lcb_clx = U32(word, kLegacyPairStart + kLegacyClxPair * 8 + 4);
+    if (f.lcb_clx &&
+        (f.fc_clx > word.size() || f.lcb_clx > word.size() - f.fc_clx))
+      return std::unexpected(Error{"Word 6/95 CLX outside WordDocument"});
+    if (f.complex && !f.lcb_clx)
+      return std::unexpected(Error{"missing Word 6/95 CLX"});
+    // Some Word 6 writers leave lid=en-US even for Cyrillic ANSI text. The
+    // FFN character set identifies the actual code page in those files.
+    constexpr size_t kLegacyFontPair = 15;
+    constexpr uint8_t kRussianCharset = 0xCC;
+    const size_t font_fc = U32(word, kLegacyPairStart + kLegacyFontPair * 8);
+    const size_t font_size =
+        U32(word, kLegacyPairStart + kLegacyFontPair * 8 + 4);
+    if (f.codepage == base::kDefaultCodepage && font_size >= 7 &&
+        font_fc <= word.size() && font_size <= word.size() - font_fc) {
+      size_t pos = font_fc + 2;
+      const size_t end = font_fc + font_size;
+      while (pos + 5 <= end) {
+        const size_t next = pos + static_cast<size_t>(word[pos]) + 1;
+        if (next > end || next <= pos + 4)
+          break;
+        if (word[pos + 4] == kRussianCharset) {
+          f.codepage = 1251;
+          break;
+        }
+        pos = next;
+      }
+    }
+    return f;
+  }
   if (f.n_fib < 0x00C1 || f.n_fib > 0x011A)
     return std::unexpected(Error{"unsupported nFib version"});
   f.lid = U16(word, 6);

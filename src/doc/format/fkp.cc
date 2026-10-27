@@ -32,6 +32,70 @@ using base::DecodeAnsiChar;
 std::expected<std::vector<Char>, Error> ReadChars(
     Bytes word, Bytes table, const Fib& fib, uint32_t limit, uint32_t begin,
     std::vector<std::vector<uint8_t>>* prcs) {
+  if (fib.legacy) {
+    // Word 6/95 stores its fc/lcb tables and CLX in WordDocument. Its PCD
+    // stores a direct file offset; bit 0x10 of its first byte selects ANSI.
+    // Normalize only the validated text descriptors into the Word 97 PCD
+    // representation so both format families share the character decoder.
+    constexpr uint8_t kLegacyAnsiPiece = 0x10;
+    constexpr uint32_t kModernAnsiPiece = 0x40000000;
+    constexpr size_t kLegacyPcdSize = 8;
+    std::vector<uint32_t> cps;
+    std::vector<uint32_t> fcs;
+    std::vector<bool> ansi;
+    if (fib.lcb_clx) {
+      if (!Valid(word, {fib.fc_clx, fib.lcb_clx}))
+        return std::unexpected(Error{"Word 6/95 CLX outside WordDocument"});
+      Bytes clx = word.subspan(fib.fc_clx, fib.lcb_clx);
+      if (clx.size() < 5 || clx[0] != 2)
+        return std::unexpected(Error{"unsupported Word 6/95 CLX"});
+      const size_t bytes = U32(clx, 1);
+      if (bytes < 16 || bytes != clx.size() - 5 || (bytes - 4) % 12 != 0)
+        return std::unexpected(Error{"invalid Word 6/95 PlcPcd size"});
+      const size_t count = (bytes - 4) / 12;
+      const size_t descriptor = 5 + 4 * (count + 1);
+      for (size_t i = 0; i <= count; ++i)
+        cps.push_back(U32(clx, 5 + 4 * i));
+      for (size_t i = 0; i < count; ++i) {
+        Bytes pcd =
+            clx.subspan(descriptor + kLegacyPcdSize * i, kLegacyPcdSize);
+        fcs.push_back(U32(pcd, 2));
+        ansi.push_back((pcd[0] & kLegacyAnsiPiece) != 0);
+      }
+    } else {
+      cps = {0, fib.ccp_text};
+      fcs = {fib.fc_min};
+      ansi = {true};
+    }
+    if (cps.empty() || cps.front() != 0 || cps.back() < limit)
+      return std::unexpected(Error{"invalid Word 6/95 piece coverage"});
+    const size_t count = fcs.size();
+    const size_t bytes = 4 + 12 * count;
+    std::vector<uint8_t> normalized(5 + bytes);
+    auto put32 = [&](size_t at, uint32_t value) {
+      for (size_t j = 0; j < 4; ++j)
+        normalized[at + j] = static_cast<uint8_t>(value >> (8 * j));
+    };
+    normalized[0] = 2;
+    put32(1, static_cast<uint32_t>(bytes));
+    for (size_t i = 0; i <= count; ++i)
+      put32(5 + 4 * i, cps[i]);
+    const size_t descriptor = 5 + 4 * (count + 1);
+    for (size_t i = 0; i < count; ++i) {
+      uint32_t fc = fcs[i];
+      if (ansi[i]) {
+        if (fc > (0x3FFFFFFFu / 2))
+          return std::unexpected(Error{"Word 6/95 piece FC overflow"});
+        fc = kModernAnsiPiece | (fc * 2);
+      }
+      put32(descriptor + 8 * i + 2, fc);
+    }
+    Fib modern = fib;
+    modern.legacy = false;
+    modern.fc_clx = 0;
+    modern.lcb_clx = static_cast<uint32_t>(normalized.size());
+    return ReadChars(word, normalized, modern, limit, begin, prcs);
+  }
   if (!Valid(table, {fib.fc_clx, fib.lcb_clx}))
     return std::unexpected(Error{"CLX outside table stream"});
   Bytes b = table.subspan(fib.fc_clx, fib.lcb_clx);

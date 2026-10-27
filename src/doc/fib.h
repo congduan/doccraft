@@ -25,6 +25,8 @@ struct Error {
 
 struct Fib {
   uint16_t n_fib = 0;
+  bool legacy = false;
+  uint32_t fc_min = 0;
   // FibBase.lid selects the ANSI code page of compressed ("8-bit") pieces.
   uint16_t lid = 0;
   uint32_t codepage = 1252;
@@ -58,6 +60,7 @@ struct Fib {
 };
 
 std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word);
+uint32_t ReadSummaryCodepage(std::span<const uint8_t> summary);
 }  // namespace doccraft::doc
 
 #endif  // SRC_DOC_FIB_H_

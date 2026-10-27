@@ -29,6 +29,7 @@
 #include <sys/resource.h>
 #endif
 
+#include "base/charset.h"
 #include "cfb/cfb_reader.h"
 #include "cfb/cfb_writer.h"
 #include "doc/encryption.h"
@@ -166,6 +167,17 @@ int main(int argc, char** argv) {
                    "warning: --password ignored: document is not encrypted\n");
     }
     auto fib = doccraft::doc::ParseFib(*word);
+    if (fib && fib->legacy &&
+        fib->codepage == doccraft::base::kDefaultCodepage) {
+      auto summary = cfb->ReadStream("\005SummaryInformation");
+      if (summary) {
+        const uint32_t codepage = doccraft::doc::ReadSummaryCodepage(*summary);
+        if (((codepage >= 1250 && codepage <= 1258) || codepage == 932 ||
+             codepage == 936 || codepage == 949 || codepage == 950) &&
+            doccraft::base::SupportsCodepage(codepage))
+          fib->codepage = codepage;
+      }
+    }
     if (encrypted && !has_password && !((*word)[11] & 0x80)) {
       const std::string table_name = ((*word)[11] & 0x02) ? "1Table" : "0Table";
       auto encrypted_table = cfb->ReadStream(table_name);
@@ -191,6 +203,8 @@ int main(int argc, char** argv) {
                                    : ((*word)[11] & 0x02) ? "1Table"
                                                           : "0Table";
     auto table = cfb->ReadStream(table_name);
+    if (!table && fib && fib->legacy)
+      table = *word;
     if (!table) {
       std::fprintf(stderr, "convert: %s\n", table.error().message.c_str());
       return 1;
