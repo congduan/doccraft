@@ -19,6 +19,7 @@
 
 #include "crypto/rc4.h"
 #include "crypto/derivation.h"
+#include "crypto/md5.h"
 #include "crypto/sha1.h"
 #include "gtest/gtest.h"
 
@@ -64,4 +65,20 @@ TEST(Crypto, CryptoApiKeyDerivation) {
   EXPECT_EQ(Hex(doccraft::crypto::DeriveRc4Key(*hash, 1, 40)),
             "a614652b010000000000000000000000");
   EXPECT_FALSE(doccraft::crypto::HashPassword("\xc0\xaf", salt));
+}
+
+TEST(Crypto, Md5Rfc1321AndLegacyRc4Derivation) {
+  const std::string_view abc = "abc";
+  EXPECT_EQ(Hex(doccraft::crypto::Md5({
+                reinterpret_cast<const uint8_t*>(abc.data()), abc.size()})),
+            "900150983cd24fb0d6963f7d28e17f72");
+  std::array<uint8_t, 16> salt{};
+  for (size_t n = 0; n < salt.size(); ++n) salt[n] = n;
+  const auto encoded = doccraft::crypto::EncodePassword("password");
+  ASSERT_TRUE(encoded);
+  const auto hash = doccraft::crypto::LegacyPasswordHash(*encoded, salt);
+  EXPECT_EQ(Hex(doccraft::crypto::DeriveLegacyRc4Key(hash, 0)),
+            "d17084ef80dfaade760e9be2fe9b8d19");
+  EXPECT_EQ(Hex(doccraft::crypto::DeriveLegacyRc4Key(hash, 1)),
+            "0d3ec553cde81b8881f25b9ef8b1bb61");
 }

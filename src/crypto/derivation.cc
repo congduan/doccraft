@@ -17,12 +17,13 @@
 #include <cstddef>
 
 #include "crypto/sha1.h"
+#include "crypto/md5.h"
 
 namespace doccraft::crypto {
 
-std::expected<std::array<uint8_t, 20>, std::string_view> HashPassword(
-    std::string_view password, std::span<const uint8_t, 16> salt) {
-  std::vector<uint8_t> bytes(salt.begin(), salt.end());
+std::expected<std::vector<uint8_t>, std::string_view> EncodePassword(
+    std::string_view password) {
+  std::vector<uint8_t> bytes;
   size_t units = 0;
   for (size_t i = 0; i < password.size();) {
     const uint8_t first = static_cast<uint8_t>(password[i]);
@@ -70,7 +71,42 @@ std::expected<std::array<uint8_t, 20>, std::string_view> HashPassword(
     if (units > 255) return std::unexpected("password exceeds 255 UTF-16 units");
     i += count;
   }
+  return bytes;
+}
+
+std::expected<std::array<uint8_t, 20>, std::string_view> HashPassword(
+    std::string_view password, std::span<const uint8_t, 16> salt) {
+  auto encoded = EncodePassword(password);
+  if (!encoded) return std::unexpected(encoded.error());
+  std::vector<uint8_t> bytes(salt.begin(), salt.end());
+  bytes.insert(bytes.end(), encoded->begin(), encoded->end());
   return Sha1(bytes);
+}
+
+std::array<uint8_t, 5> LegacyPasswordHash(
+    std::span<const uint8_t> utf16_password,
+    std::span<const uint8_t, 16> salt) {
+  const auto initial = Md5(utf16_password);
+  std::array<uint8_t, 336> intermediate{};
+  for (size_t repeat = 0; repeat < 16; ++repeat) {
+    const size_t pos = repeat * 21;
+    for (size_t n = 0; n < 5; ++n) intermediate[pos + n] = initial[n];
+    for (size_t n = 0; n < 16; ++n)
+      intermediate[pos + 5 + n] = salt[n];
+  }
+  const auto final = Md5(intermediate);
+  std::array<uint8_t, 5> result{};
+  for (size_t n = 0; n < 5; ++n) result[n] = final[n];
+  return result;
+}
+
+std::array<uint8_t, 16> DeriveLegacyRc4Key(
+    std::span<const uint8_t, 5> password_hash, uint32_t block) {
+  std::array<uint8_t, 9> input{};
+  for (size_t n = 0; n < 5; ++n) input[n] = password_hash[n];
+  for (size_t n = 0; n < 4; ++n)
+    input[n + 5] = static_cast<uint8_t>(block >> (n * 8));
+  return Md5(input);
 }
 
 std::vector<uint8_t> DeriveRc4Key(
