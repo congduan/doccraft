@@ -38,6 +38,81 @@ void Put32(std::vector<uint8_t>& bytes, size_t pos, uint32_t value) {
   for (size_t n = 0; n < 4; ++n)
     bytes[pos + n] = static_cast<uint8_t>(value >> (8 * n));
 }
+uint16_t Rotate16(uint16_t value) {
+  return static_cast<uint16_t>((value << 1) | (value >> 15));
+}
+void XorTransform(std::vector<uint8_t>& bytes, size_t skip,
+                  const std::array<uint8_t, 16>& key) {
+  for (size_t i = skip; i < bytes.size(); ++i) {
+    const uint8_t changed = bytes[i] ^ key[i % key.size()];
+    if (bytes[i] && changed)
+      bytes[i] = changed;
+  }
+}
+int MakeXor(const char* input_path, const char* output_path) {
+  std::ifstream input(input_path, std::ios::binary);
+  std::vector<uint8_t> source{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = doccraft::cfb::CfbReader::Open(source);
+  if (!cfb)
+    return 1;
+  auto word = cfb->ReadStream("WordDocument");
+  auto table = cfb->ReadStream("1Table");
+  auto data = cfb->ReadStream("Data");
+  if (!word || !table)
+    return 1;
+  constexpr std::string_view password = "doccraft-m6";
+  uint16_t base = 0x8000, end = 0xFFFF, key = 0;
+  for (auto it = password.rbegin(); it != password.rend(); ++it) {
+    uint8_t ch = static_cast<uint8_t>(*it) & 0x7F;
+    for (int bit = 0; bit < 8; ++bit) {
+      base = Rotate16(base);
+      if (base & 1)
+        base ^= 0x1020;
+      if (ch & 1)
+        key ^= base;
+      ch >>= 1;
+      end = Rotate16(end);
+      if (end & 1)
+        end ^= 0x1020;
+    }
+  }
+  key ^= end;
+  uint16_t verifier = 0;
+  for (auto it = password.rbegin(); it != password.rend(); ++it)
+    verifier = static_cast<uint16_t>(
+        (((verifier << 1) & 0x7FFF) | ((verifier >> 14) & 1)) ^
+        static_cast<uint8_t>(*it));
+  verifier = static_cast<uint16_t>(
+      (((verifier << 1) & 0x7FFF) | ((verifier >> 14) & 1)) ^ password.size() ^
+      0xCE4B);
+  std::array<uint8_t, 16> mask{};
+  constexpr std::array<uint8_t, 16> pad = {0xBB, 0xFF, 0xFF, 0xBA, 0xFF, 0xFF,
+                                           0xB9, 0x80, 0x00, 0xBE, 0x0F, 0x00,
+                                           0xBF, 0x0F, 0x00, 0x00};
+  for (size_t i = 0; i < mask.size(); ++i) {
+    const uint8_t ch = i < password.size() ? static_cast<uint8_t>(password[i])
+                                           : pad[i - password.size()];
+    const uint8_t half = static_cast<uint8_t>(i % 2 ? key >> 8 : key);
+    const uint8_t x = ch ^ half;
+    mask[i] = static_cast<uint8_t>((x >> 1) | (x << 7));
+  }
+  (*word)[11] |= 0x81;
+  Put32(*word, 14, (static_cast<uint32_t>(key) << 16) | verifier);
+  XorTransform(*word, 68, mask);
+  XorTransform(*table, 0, mask);
+  if (data)
+    XorTransform(*data, 0, mask);
+  auto builder = doccraft::cfb::test::CfbBuilder()
+                     .AddStream("WordDocument", *word)
+                     .AddStream("1Table", *table);
+  if (data)
+    builder.AddStream("Data", *data);
+  auto output_bytes = builder.Build();
+  std::ofstream output(output_path, std::ios::binary);
+  output.write(reinterpret_cast<const char*>(output_bytes.data()),
+               static_cast<std::streamsize>(output_bytes.size()));
+  return output ? 0 : 1;
+}
 template <typename KeyForBlock>
 void Crypt(std::vector<uint8_t>& bytes, size_t skip,
            KeyForBlock key_for_block) {
@@ -56,6 +131,8 @@ void Crypt(std::vector<uint8_t>& bytes, size_t skip,
 int main(int argc, char** argv) {
   if (argc != 4)
     return 2;
+  if (std::string_view(argv[3]) == "xor")
+    return MakeXor(argv[1], argv[2]);
   const bool legacy = std::string_view(argv[3]) == "legacy";
   if (!legacy && std::string_view(argv[3]) != "cryptoapi")
     return 2;

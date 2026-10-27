@@ -44,6 +44,11 @@ add_test(NAME m6_rc4_cli COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/fixtures/encrypted/plain-text-rc4-cryptoapi.doc
   ${CMAKE_SOURCE_DIR}/tests/fixtures/encrypted/plain-text-rc4-legacy.doc)
 
+add_test(NAME m16_xor_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/m16_xor_cli.py $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/encrypted/plain-text-xor.doc)
+
 add_executable(base_test base_test.cc)
 target_link_libraries(base_test PRIVATE doccraft_base gtest_main)
 target_compile_features(base_test PUBLIC cxx_std_23)

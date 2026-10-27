@@ -21,6 +21,7 @@
 #include "crypto/md5.h"
 #include "crypto/rc4.h"
 #include "crypto/sha1.h"
+#include "crypto/xor.h"
 #include "gtest/gtest.h"
 
 namespace {
@@ -83,4 +84,24 @@ TEST(Crypto, Md5Rfc1321AndLegacyRc4Derivation) {
             "d17084ef80dfaade760e9be2fe9b8d19");
   EXPECT_EQ(Hex(doccraft::crypto::DeriveLegacyRc4Key(hash, 1)),
             "0d3ec553cde81b8881f25b9ef8b1bb61");
+}
+
+TEST(Crypto, XorMethod2PreservesZeroAndAdvancesMask) {
+  const auto key = doccraft::crypto::DeriveXorKey("doccraft-m6");
+  ASSERT_TRUE(key);
+  std::array<uint8_t, 19> bytes{};
+  bytes[0] = 0xAB;
+  bytes[1] = 0xCD;
+  bytes[2] = key->mask[2];
+  bytes[3] = 0;
+  bytes[4] = 0x5A;
+  const auto original = bytes;
+  doccraft::crypto::XorTransform(bytes, 2, key->mask);
+  EXPECT_EQ(bytes[0], original[0]);
+  EXPECT_EQ(bytes[1], original[1]);
+  EXPECT_EQ(bytes[2], original[2]);
+  EXPECT_EQ(bytes[3], 0);
+  EXPECT_EQ(bytes[4], static_cast<uint8_t>(0x5A ^ key->mask[4]));
+  doccraft::crypto::XorTransform(bytes, 2, key->mask);
+  EXPECT_EQ(bytes, original);
 }
