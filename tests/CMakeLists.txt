@@ -1,6 +1,10 @@
 include_directories(${CMAKE_SOURCE_DIR})
 include(GoogleTest)
 
+add_executable(crypto_test crypto_test.cc)
+target_link_libraries(crypto_test PRIVATE doccraft_crypto gtest_main)
+gtest_discover_tests(crypto_test)
+
 add_executable(base_test base_test.cc)
 target_link_libraries(base_test PRIVATE doccraft_base gtest_main)
 target_compile_features(base_test PUBLIC cxx_std_23)
