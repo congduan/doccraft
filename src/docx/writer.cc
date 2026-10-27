@@ -275,6 +275,9 @@ std::expected<std::vector<uint8_t>, Error> Write(
   auto root = doc.append_child("w:document");
   Attr(root, "xmlns:w", kWordmlNamespace);
   Attr(root, "xmlns:r", kRelationshipsNamespace);
+  if (!document.textboxes.empty()) {
+    Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
+  }
   Attr(
       root, "xmlns:wp",
       "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing");

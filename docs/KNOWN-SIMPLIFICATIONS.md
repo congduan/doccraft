@@ -60,6 +60,7 @@
 - 正文内联图片解码后保存到 IR 的字节总量上限为 256MiB（`kMaxTotalImageSize`）；重复引用也累计，恰好达到上限允许，超限以 `total image size exceeds limit` 使整篇转换失败，不降级或丢图。检查发生在当前图片解码后，因此该上限不是进程峰值内存上限；元文件仍受单图 64MiB 限制。
 
 - 正文内联 `U+0001` 图片按 `sprmCPicLocation` 从 Data 流读取 PICF，扫描嵌入 Escher BLIP 并输出 DrawingML 与原格式媒体部件。PNG/JPEG 有 LibreOffice golden 媒体字节对比及像素对拍；WMF/EMF 的压缩和非压缩 BLIP 有合成位流断言，但尚无 LibreOffice 导出的真实元文件 golden。非嵌入或延迟 BLIP、ObjectPool/OLE、裁剪/边框/旋转，以及页眉、脚注等其他故事中的图片留待后续；遇到正文内联图片的缺失或不支持载荷会显式返回错误。
+- 正文浮动文本框通过 FTXBXS.lid 连接 PlcfSpaMom，并以 VML `w:pict/w:txbxContent` 输出。多个 Tbkd 分段按故事顺序放入首个锚点；尚未按链中每个形状的容量分别排版。内联文本框、页眉文本框、形状填充与边框仍未映射。LibreOffice 的透明无边框样本 `textbox.doc` 对拍通过（bad_ratio 0.093%），不代表有填充/边框样本的版式已通过。
 - 浮动图片按 PlcfSpa→FSPA（anchor 定位 bx/by 复用浮动表格 margin/page/text 语义）+ BStore BLIP 输出 `wp:anchor` 与 `wp:wrap*`。环绕映射：wr=1→TopAndBottom、wr=2→Square、wr=3→None、wr=4→Tight（输出为 wrapTight 而非 wrapThrough）。限制：其一，LibreOffice 导出不区分轮廓 Tight 与 Through（两者同为 wr=4），真实 Word 样本获取前该区分以合成流覆盖；其二，绕排多边形（wrapTight 的 msoWrapPolygon）未还原，LibreOffice 基线亦不含；其三，floating-image/floating-tight 的像素对拍与 LibreOffice 自身 `.doc`/`.docx` 双路径基线下限完全一致（rms=18.59/bad_px=27724），该差异为 LO 导入不对称，非 doccraft 缺陷。
 - 字符单位缩进（`sprmPDxc*`/`sprmPDyl*`）只写 `w:ind/@*Chars` 与 `w:spacing/@*Lines`，不重复写 twips 绝对值；阅读器若忽略 *Chars 会退回样式默认缩进。
 - `sprmSPgbProp` 的枚举按 0=页面边缘/1=文字、0=全部页/1=首页/2=非首页解释；`reserved` 字节非 0 时整条 sprm 视为损坏。

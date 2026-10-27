@@ -109,7 +109,8 @@ struct Run {
   // Field instruction text, written as w:instrText between begin and separator.
   std::string instr_text;
   int object_offset = -1;
-  int image_index = -1;  // Index into Document::images for U+0001.
+  int image_index = -1;    // Index into Document::images for U+0001.
+  int textbox_index = -1;  // Index into Document::textboxes at shape anchor.
   bool binary_data = false, ole_object = false, embedded_object = false;
   bool revision_insert = false, revision_delete = false,
        property_revision = false;
@@ -194,6 +195,14 @@ struct Paragraph {
   std::array<Border, 3> extra_borders;
   int shade = -1;
   int shade_fore = -1, shade_pattern = 0;
+};
+
+struct Textbox {
+  std::vector<Paragraph> paragraphs;
+  uint32_t shape_id = 0;
+  uint32_t anchor_cp = 0;
+  int x = 0, y = 0, width = 0, height = 0;
+  bool floating = true;
 };
 
 // Conditional formatting of a table style (sprmTCnf/sprmPCnf/sprmCCnf), emitted
@@ -332,6 +341,7 @@ struct Table {
 
 struct Document {
   std::vector<Image> images;
+  std::vector<Textbox> textboxes;
   std::vector<Paragraph> paragraphs;
   std::vector<Style> styles;
   Section section;

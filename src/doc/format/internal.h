@@ -96,6 +96,8 @@ inline constexpr uint16_t kTertiaryFopt = 0xF122;
 inline constexpr size_t kFopteSize = 6, kFbseDelayOffset = 28;
 inline constexpr uint16_t kPropertyIdMask = 0x3FFF;
 inline constexpr uint16_t kPropertyComplex = 0x8000, kPib = 0x0104;
+inline constexpr size_t kFtxbxsSize = 22, kTbkdSize = 6;
+inline constexpr size_t kFtxbxsLidOffset = 14;
 inline constexpr int kWrapTopBottom = 1, kWrapNone = 3;
 inline constexpr int kWrapTight = 4, kWrapThrough = 5;
 
@@ -265,6 +267,11 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
     uint64_t base, uint32_t first, uint32_t last);
+
+std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
+    Bytes word, Bytes table, const Fib& fib,
+    const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
+    const std::vector<std::string>& fonts);
 
 // Bookmark markers keyed by their CP in the main story.
 struct BookmarkMark {

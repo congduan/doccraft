@@ -45,7 +45,7 @@ struct Fib {
   Range and_ref, and_txt, atn_owners;
   // Bookmark name table (SttbfBkmk) and the start/end PLCs (PlcfBkf/PlcfBkl).
   Range sttb_bkmk, bkf, bkl;
-  Range spa_main, drawing_group;
+  Range spa_main, drawing_group, txbx_txt, txbx_bkd;
   Range fields_main;
   std::string table_stream() const {
     return which_table ? "1Table" : "0Table";

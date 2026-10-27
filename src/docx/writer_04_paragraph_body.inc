@@ -156,6 +156,26 @@ void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
   Attr(sp_pr.append_child("a:prstGeom"), "prst", "rect");
 }
 
+void WriteTextbox(pugi::xml_node run, int index, WriteContext& ctx) {
+  if (!ctx.document || index < 0 ||
+      static_cast<size_t>(index) >= ctx.document->textboxes.size())
+    return;
+  const auto& box = ctx.document->textboxes[index];
+  auto rect = run.append_child("w:pict").append_child("v:rect");
+  Attr(rect, "id", "Textbox" + std::to_string(index + 1));
+  Attr(rect, "stroked", "f");
+  Attr(rect, "filled", "f");
+  auto points = [](int twips) { return std::to_string(twips / 20.0) + "pt"; };
+  Attr(rect, "style", "position:absolute;left:" + points(box.x) +
+                          ";top:" + points(box.y) + ";width:" +
+                          points(box.width) + ";height:" +
+                          points(box.height));
+  auto content =
+      rect.append_child("v:textbox").append_child("w:txbxContent");
+  for (const auto& paragraph : box.paragraphs)
+    WriteParagraph(content, paragraph, nullptr, ctx);
+}
+
 void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
                     const model::Section* break_section, WriteContext& ctx) {
   auto pn = parent.append_child("w:p");
@@ -208,6 +228,8 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       IntAttr(rn.append_child("w:commentReference"), "w:id", r.comment_ref);
     } else if (r.image_index >= 0) {
       WriteImage(rn, r.image_index, ctx);
+    } else if (r.textbox_index >= 0) {
+      WriteTextbox(rn, r.textbox_index, ctx);
     } else if (r.note_ref >= 0) {
       // A note reference is an empty run carrying the reference element.
       IntAttr(rn.append_child(r.note_endnote ? "w:endnoteReference"

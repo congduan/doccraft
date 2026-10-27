@@ -147,6 +147,16 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   size_t next_picture = 0;
   doc.fonts = ReadFonts(table, fib.fonts);
   doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
+  auto textboxes =
+      detail::ReadTextboxes(word, table, fib, *chpx, *papx, doc.fonts);
+  if (!textboxes)
+    return std::unexpected(textboxes.error());
+  doc.textboxes = std::move(*textboxes);
+  std::map<uint32_t, size_t> textbox_anchors;
+  for (size_t i = 0; i < doc.textboxes.size(); i++) {
+    if (!textbox_anchors.emplace(doc.textboxes[i].anchor_cp, i).second)
+      return std::unexpected(Error{"duplicate textbox anchor CP"});
+  }
   auto walk_piece_prm = [&](uint16_t prm, auto fn) {
     if (!prm)
       return;
@@ -412,6 +422,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       para.runs.push_back(std::move(picture_run));
       last_run_count = 0;
     }
+    if (auto box = textbox_anchors.find(ch.cp); box != textbox_anchors.end()) {
+      model::Run textbox_run;
+      textbox_run.textbox_index = static_cast<int>(box->second);
+      para.runs.push_back(std::move(textbox_run));
+      last_run_count = 0;
+    }
     if (control == '\x08')
       continue;
     const auto* pap =
@@ -531,7 +547,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     cached_chp = chp;
     if (!text.empty() && control != '\x01' && last_run_count != 0 &&
         para.runs.size() == last_run_count &&
-        para.runs.back().image_index < 0 && pap == last_pap &&
+        para.runs.back().image_index < 0 &&
+        para.runs.back().textbox_index < 0 && pap == last_pap &&
         chp == last_chp && ch.prm == last_prm && hyperlink == last_hyperlink &&
         page_field == last_page_field) {
       para.runs.back().text += text;
