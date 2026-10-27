@@ -204,7 +204,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 
 ### 6.9 健壮性
 - 性能实测基线见 [perf-baseline.md](perf-baseline.md)；100 MiB 结构化样本已低于 5 s，后续优化以分阶段计时和 RSS 打点为依据。
-- ◐ 损坏文档的优雅降级：正文可读时跳过局部坏 CHPX FKP 页/坏 sprm 序列或坏页眉故事，`convert` 向 stderr 输出警告且退出码为 0；CFB/CLX 截断和 PAPX 表格结构损坏仍拒绝，更多故事及格式路径待覆盖
+- ◐ 损坏文档的优雅降级：正文可读时跳过局部坏 CHPX FKP 页/坏 sprm 序列，或坏页眉、脚注、尾注、批注故事 PLC（批注作者表同故事处理），`convert` 向 stderr 输出警告且退出码为 0；CFB/CLX 截断和 PAPX 表格结构损坏仍拒绝，文本框等故事及更多格式路径待覆盖
 - ◐ 超大文档内存控制：按需释放无 ObjectPool 文档的 CFB 原始输入，正文解码字符缩至 16 字节/字符；100 MiB 样本峰值低于 1000 MiB。分块流式处理与通用内存上限仍待实现。
 - ◐ 确定性变异套件（`tests/fuzz_test.cc`）：全管线种子变异（5 种子 × 2000 轮/种子，ASan 下 300 轮，受 8s 墙钟阀门保护，见 KNOWN-SIMPLIFICATIONS「M6 变异加固」）、sprm/FKP 与 CLX/piece 表定向变异、全 65536 opcode dispatch，断言零崩溃且结果只能是转换成功或 `std::expected` 错误；代表性损坏断言可区分的错误消息。首轮即发现并修复 sprmPItap 深度未钳制导致的 writer 栈溢出；`sprmPItap`/`sprmPDtap` 深度操作数现统一经 `ClampTableDepth` 在解析层与格式帧栈两层钳制到 `kMaxTableDepth=8`（超深嵌套压平为第 8 层，合法深度输出逐字节不变）。注意这是固定 seed 的合成变异，不等同于持续 fuzzing：真实语料库长期变异、覆盖率导引与 CI 常驻入口仍是缺口（libFuzzer 驱动已可经 `DOCCRAFT_ENABLE_LIBFUZZER` 选配构建，默认关闭且不入 ctest）
 
