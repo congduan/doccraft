@@ -248,6 +248,29 @@ struct Tally {
 // 1. Whole-pipeline seed mutation: representative corpus/fixture documents,
 //    deterministic multi-byte mutations, the full convert pipeline per round.
 // ---------------------------------------------------------------------------
+#if defined(__SANITIZE_ADDRESS__)
+#define DOCRAFT_TEST_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define DOCRAFT_TEST_ASAN 1
+#endif
+#endif
+
+// Knobs of the seed-mutation wall-clock valve (registered in
+// KNOWN-SIMPLIFICATIONS.md "M6 变异加固"): once the budget elapses, each seed
+// stops at the next 16-round checkpoint instead of running to its full round
+// count, so a slow machine finishes fewer rounds rather than hitting the
+// ctest timeout. Every seed still runs its first kSeedMutationMinRounds
+// rounds. ASan slows the pipeline ~8x, so its budget is scaled down instead
+// of the coverage. To re-balance on slow CI, lower kSeedMutationRoundsAsan
+// or raise kSeedMutationBudget.
+#ifdef DOCRAFT_TEST_ASAN
+constexpr size_t kSeedMutationRoundsAsan = 300;
+#endif
+constexpr size_t kSeedMutationRounds = 2000;
+constexpr size_t kSeedMutationMinRounds = 64;
+constexpr auto kSeedMutationBudget = std::chrono::seconds(8);
+
 TEST(Fuzz, FullPipelineSeedMutationNeverCrashes) {
   const struct Seed {
     const char* path;
@@ -259,24 +282,12 @@ TEST(Fuzz, FullPipelineSeedMutationNeverCrashes) {
       {"tests/fixtures/inline-image.doc", ""},
       {"tests/fixtures/encrypted/plain-text-rc4-cryptoapi.doc", "doccraft-m6"},
   };
-#if defined(__SANITIZE_ADDRESS__)
-#define DOCRAFT_TEST_ASAN 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define DOCRAFT_TEST_ASAN 1
-#endif
-#endif
-
 #ifdef DOCRAFT_TEST_ASAN
-  // ASan slows the pipeline ~8x; scale the rounds instead of the coverage.
-  constexpr size_t kRoundsPerSeed = 300;
+  constexpr size_t kRoundsPerSeed = kSeedMutationRoundsAsan;
 #else
-  constexpr size_t kRoundsPerSeed = 2000;
+  constexpr size_t kRoundsPerSeed = kSeedMutationRounds;
 #endif
-  // Wall-clock valve so slower machines finish fewer rounds instead of
-  // timing out; every seed still runs its first kMinRoundsPerSeed rounds.
-  constexpr size_t kMinRoundsPerSeed = 64;
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+  const auto deadline = std::chrono::steady_clock::now() + kSeedMutationBudget;
   std::mt19937 rng(0x5EED1);
   for (const Seed& seed : seeds) {
     SCOPED_TRACE(seed.path);
@@ -288,7 +299,7 @@ TEST(Fuzz, FullPipelineSeedMutationNeverCrashes) {
 
     Tally tally;
     for (; tally.rounds < kRoundsPerSeed; ++tally.rounds) {
-      if (tally.rounds >= kMinRoundsPerSeed && (tally.rounds & 15) == 0 &&
+      if (tally.rounds >= kSeedMutationMinRounds && (tally.rounds & 15) == 0 &&
           std::chrono::steady_clock::now() > deadline)
         break;
       std::vector<uint8_t> bytes = base;
