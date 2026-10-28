@@ -38,7 +38,9 @@ std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
          : i == 1 || i == 3 ? "default"
                             : "first");
     Attr(ref, "r:id", "rId" + std::to_string(rid));
-    ctx.relations.emplace_back(rid, name);
+    ctx.relations.push_back({ctx.source, rid, name});
+    const std::string previous_source = ctx.source;
+    ctx.SetSource(name);
     pugi::xml_document part;
     auto root = part.append_child(is_header ? "w:hdr" : "w:ftr");
     Attr(root, "xmlns:w", kWordmlNamespace);
@@ -55,6 +57,23 @@ std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
     if (header_has_vml) {
       Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
     }
+    const bool header_has_image = std::any_of(
+        section.headers[i].begin(), section.headers[i].end(),
+        [](const model::Paragraph& paragraph) {
+          return std::any_of(paragraph.runs.begin(), paragraph.runs.end(),
+                             [](const model::Run& run) {
+                               return run.image_index >= 0;
+                             });
+        });
+    if (header_has_image) {
+      Attr(root, "xmlns:wp",
+           "http://schemas.openxmlformats.org/drawingml/2006/"
+           "wordprocessingDrawing");
+      Attr(root, "xmlns:a",
+           "http://schemas.openxmlformats.org/drawingml/2006/main");
+      Attr(root, "xmlns:pic",
+           "http://schemas.openxmlformats.org/drawingml/2006/picture");
+    }
     for (const auto& paragraph : section.headers[i]) {
       auto result = WriteParagraph(root, paragraph, nullptr, ctx);
       if (!result)
@@ -63,6 +82,7 @@ std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
     auto result = ctx.AddPart("word/" + name, Save(part));
     if (!result)
       return std::unexpected(result.error());
+    ctx.SetSource(previous_source);
   }
   // w:titlePg sits after w:vAlign in CT_SectPr, so SectionPr() emits it;
   // only the part/relationship bookkeeping stays here.
@@ -112,6 +132,8 @@ std::expected<void, Error> WriteNoteParts(const model::Document& document,
     auto root = doc.append_child(root_name);
     Attr(root, "xmlns:w", kWordmlNamespace);
     Attr(root, "xmlns:r", kRelationshipsNamespace);
+    const std::string previous_source = ctx.source;
+    ctx.SetSource(part);
     // Word requires the two separator notes; they carry negative ids.
     struct Separator {
       const char* name;
@@ -166,8 +188,10 @@ std::expected<void, Error> WriteNoteParts(const model::Document& document,
       }
     }
     const int rid = ctx.next_rid++;
-    ctx.relations.emplace_back(rid, part);
-    return ctx.AddPart("word/" + std::string(part), Save(doc));
+    ctx.relations.push_back({previous_source, rid, part});
+    auto result = ctx.AddPart("word/" + std::string(part), Save(doc));
+    ctx.SetSource(previous_source);
+    return result;
   };
   if (has_footnotes) {
     auto result = write_class(false);
@@ -191,6 +215,8 @@ std::expected<void, Error> WriteCommentPart(const model::Document& document,
   auto root = doc.append_child("w:comments");
   Attr(root, "xmlns:w", kWordmlNamespace);
   Attr(root, "xmlns:r", kRelationshipsNamespace);
+  const std::string previous_source = ctx.source;
+  ctx.SetSource("comments.xml");
   int id = 0;
   for (const auto& comment : document.comments) {
     id++;
@@ -211,6 +237,8 @@ std::expected<void, Error> WriteCommentPart(const model::Document& document,
     }
   }
   const int rid = ctx.next_rid++;
-  ctx.relations.emplace_back(rid, "comments.xml");
-  return ctx.AddPart("word/comments.xml", Save(doc));
+  ctx.relations.push_back({previous_source, rid, "comments.xml"});
+  auto result = ctx.AddPart("word/comments.xml", Save(doc));
+  ctx.SetSource(previous_source);
+  return result;
 }

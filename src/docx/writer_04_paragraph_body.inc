@@ -33,16 +33,20 @@ std::expected<void, Error> RegisterImage(int index, WriteContext& ctx) {
       static_cast<size_t>(index) >= ctx.document->images.size())
     return {};
   const model::Image& image = ctx.document->images[index];
-  if (ctx.image_rids[index] == 0) {
+  int& image_rid = ctx.image_rids[ctx.source][index];
+  if (image_rid == 0) {
     const int number = index + 1;
     std::string name = "media/image" + std::to_string(number) + "." +
                        ImageExtension(image.format);
-    ctx.image_rids[index] = ctx.next_rid++;
-    ctx.relations.emplace_back(ctx.image_rids[index], name);
-    auto result = ctx.AddPart(
-        "word/" + name, std::string(image.bytes.begin(), image.bytes.end()));
-    if (!result)
-      return std::unexpected(result.error());
+    image_rid = ctx.NextRid();
+    ctx.relations.push_back({ctx.source, image_rid, name});
+    if (!ctx.image_parts_added[index]) {
+      auto result = ctx.AddPart(
+          "word/" + name, std::string(image.bytes.begin(), image.bytes.end()));
+      if (!result)
+        return std::unexpected(result.error());
+      ctx.image_parts_added[index] = true;
+    }
   }
   return {};
 }
@@ -158,7 +162,7 @@ std::expected<void, Error> WriteImage(pugi::xml_node run, int index,
   nv.append_child("pic:cNvPicPr");
   auto fill = pic.append_child("pic:blipFill");
   Attr(fill.append_child("a:blip"), "r:embed",
-       "rId" + std::to_string(ctx.image_rids[index]));
+       "rId" + std::to_string(ctx.image_rids[ctx.source][index]));
   auto stretch = fill.append_child("a:stretch");
   stretch.append_child("a:fillRect");
   auto sp_pr = pic.append_child("pic:spPr");
@@ -183,15 +187,19 @@ std::expected<void, Error> WriteOle(pugi::xml_node run, int index,
     run.append_child("w:t").text().set("[Embedded object]");
     return {};
   }
-  if (ctx.ole_rids[index] == 0) {
+  int& ole_rid = ctx.ole_rids[ctx.source][index];
+  if (ole_rid == 0) {
     const std::string name =
         "embeddings/oleObject" + std::to_string(index + 1) + ".bin";
-    ctx.ole_rids[index] = ctx.next_rid++;
-    ctx.relations.emplace_back(ctx.ole_rids[index], name);
-    auto result = ctx.AddPart(
-        "word/" + name, std::string(object.bytes.begin(), object.bytes.end()));
-    if (!result)
-      return std::unexpected(result.error());
+    ole_rid = ctx.NextRid();
+    ctx.relations.push_back({ctx.source, ole_rid, name});
+    if (!ctx.ole_parts_added[index]) {
+      auto result = ctx.AddPart(
+          "word/" + name, std::string(object.bytes.begin(), object.bytes.end()));
+      if (!result)
+        return std::unexpected(result.error());
+      ctx.ole_parts_added[index] = true;
+    }
   }
   int width = 1440, height = 1440;
   if (object.preview_image_index >= 0 &&
@@ -214,9 +222,11 @@ std::expected<void, Error> WriteOle(pugi::xml_node run, int index,
        "width:" + std::to_string(width / 20.0) +
            "pt;height:" + std::to_string(height / 20.0) + "pt");
   if (object.preview_image_index >= 0 &&
-      static_cast<size_t>(object.preview_image_index) < ctx.image_rids.size()) {
+      static_cast<size_t>(object.preview_image_index) <
+          ctx.image_rids[ctx.source].size()) {
     Attr(shape.append_child("v:imagedata"), "r:id",
-         "rId" + std::to_string(ctx.image_rids[object.preview_image_index]));
+         "rId" + std::to_string(
+                     ctx.image_rids[ctx.source][object.preview_image_index]));
   }
   auto ole = container.append_child("o:OLEObject");
   Attr(ole, "Type", "Embed");
@@ -224,7 +234,7 @@ std::expected<void, Error> WriteOle(pugi::xml_node run, int index,
   Attr(ole, "ShapeID", shape_id);
   Attr(ole, "DrawAspect", "Content");
   Attr(ole, "ObjectID", "_" + std::to_string(object.storage_id));
-  Attr(ole, "r:id", "rId" + std::to_string(ctx.ole_rids[index]));
+  Attr(ole, "r:id", "rId" + std::to_string(ctx.ole_rids[ctx.source][index]));
   return {};
 }
 
@@ -356,8 +366,8 @@ std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
   for (const auto& r : p.runs) {
     pugi::xml_node owner = pn;
     if (!r.hyperlink.empty()) {
-      auto [it, inserted] =
-          ctx.hyperlinks.try_emplace(r.hyperlink, ctx.next_rid++);
+      auto [it, inserted] = ctx.hyperlinks[ctx.source].try_emplace(
+          r.hyperlink, ctx.NextRid());
       (void)inserted;
       owner = pn.append_child("w:hyperlink");
       Attr(owner, "r:id", "rId" + std::to_string(it->second));

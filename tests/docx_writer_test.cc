@@ -170,4 +170,117 @@ TEST(M6WriterBuffer, DoubleLimitReportsNamedPartFirst) {
                 std::to_string(actual_bytes) + " bytes)");
 }
 
+TEST(DocxWriterRelations, HeaderImageAndLinkUseOwnRelationships) {
+  model::Document document;
+  model::Image image;
+  image.bytes = {'p', 'n', 'g'};
+  image.width = 96;
+  image.height = 96;
+  document.images.push_back(image);
+  model::Paragraph header;
+  model::Run picture;
+  picture.image_index = 0;
+  header.runs.push_back(picture);
+  model::Run link;
+  link.text = "site";
+  link.hyperlink = "https://example.com/header";
+  header.runs.push_back(link);
+  document.section.headers[1].push_back(header);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/header1.xml");
+  const std::string rels = Part(*zip, "word/_rels/header1.xml.rels");
+  const std::string docrels = Part(*zip, "word/_rels/document.xml.rels");
+  EXPECT_NE(xml.find("xmlns:wp="), std::string::npos);
+  EXPECT_NE(xml.find("xmlns:a="), std::string::npos);
+  EXPECT_NE(xml.find("xmlns:pic="), std::string::npos);
+  EXPECT_NE(xml.find("r:embed=\"rId1\""), std::string::npos);
+  EXPECT_NE(xml.find("<w:hyperlink r:id=\"rId2\""), std::string::npos);
+  EXPECT_NE(rels.find("Id=\"rId1\" Type=\"http://schemas."
+                      "openxmlformats.org/officeDocument/2006/relationships/"
+                      "image\" Target=\"media/image1.png\""),
+            std::string::npos);
+  EXPECT_NE(rels.find("Id=\"rId2\" Type=\"http://schemas."
+                      "openxmlformats.org/officeDocument/2006/relationships/"
+                      "hyperlink\" Target=\"https://example.com/header\" "
+                      "TargetMode=\"External\""),
+            std::string::npos);
+  EXPECT_EQ(docrels.find("media/image1.png"), std::string::npos);
+  EXPECT_EQ(docrels.find("https://example.com/header"), std::string::npos);
+}
+
+TEST(DocxWriterRelations, PlainHeaderHasNoRelationshipsPart) {
+  model::Document document;
+  model::Paragraph header;
+  model::Run text;
+  text.text = "header";
+  header.runs.push_back(text);
+  document.section.headers[1].push_back(header);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_TRUE(Part(*zip, "word/_rels/header1.xml.rels").empty());
+}
+
+TEST(DocxWriterRelations, BodyAndFooterCanShareImage) {
+  model::Document document;
+  model::Image image;
+  image.bytes = {'p', 'n', 'g'};
+  image.width = 96;
+  image.height = 96;
+  document.images.push_back(image);
+  model::Paragraph paragraph;
+  model::Run picture;
+  picture.image_index = 0;
+  paragraph.runs.push_back(picture);
+  document.paragraphs.push_back(paragraph);
+  document.section.headers[3].push_back(paragraph);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/document.xml").find("r:embed=\"rId3\""),
+            std::string::npos);
+  EXPECT_NE(Part(*zip, "word/footer1.xml").find("r:embed=\"rId1\""),
+            std::string::npos);
+  EXPECT_NE(Part(*zip, "word/_rels/document.xml.rels")
+                .find("Id=\"rId3\" Type=\"http://schemas.openxmlformats."
+                      "org/officeDocument/2006/relationships/image\" "
+                      "Target=\"media/image1.png\""),
+            std::string::npos);
+  EXPECT_NE(Part(*zip, "word/_rels/footer1.xml.rels")
+                .find("Id=\"rId1\" Type=\"http://schemas.openxmlformats."
+                      "org/officeDocument/2006/relationships/image\" "
+                      "Target=\"media/image1.png\""),
+            std::string::npos);
+}
+
+TEST(DocxWriterRelations, NotesAndCommentsOwnTheirLinks) {
+  model::Document document;
+  model::Paragraph paragraph;
+  model::Run link;
+  link.text = "site";
+  link.hyperlink = "https://example.com/note";
+  paragraph.runs.push_back(link);
+  model::Note note;
+  note.paragraphs.push_back(paragraph);
+  document.notes.push_back(note);
+  model::Comment comment;
+  comment.paragraphs.push_back(paragraph);
+  document.comments.push_back(comment);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  for (const char* part : {"footnotes.xml", "comments.xml"}) {
+    const std::string xml = Part(*zip, ("word/" + std::string(part)).c_str());
+    const std::string rels =
+        Part(*zip, ("word/_rels/" + std::string(part) + ".rels").c_str());
+    EXPECT_NE(xml.find("<w:hyperlink r:id=\"rId1\""), std::string::npos);
+    EXPECT_NE(rels.find("Id=\"rId1\" Type=\"http://schemas."
+                        "openxmlformats.org/officeDocument/2006/relationships/"
+                        "hyperlink\" Target=\"https://example.com/note\" "
+                        "TargetMode=\"External\""),
+              std::string::npos);
+  }
+  EXPECT_EQ(Part(*zip, "word/_rels/document.xml.rels")
+                .find("https://example.com/note"),
+            std::string::npos);
+}
+
 }  // namespace

@@ -99,23 +99,45 @@ struct Part {
   std::string data;
 };
 
-// State shared by the whole writer pass: hyperlink targets, revision ids and
-// the header/footer parts discovered while walking the sections. rId1/rId2 are
-// reserved for the styles and numbering parts.
+struct Relationship {
+  std::string source;
+  int id;
+  std::string target;
+};
+
+// State shared by the writer pass. Relationship ids belong to each source
+// part; document.xml reserves rId1/rId2 for styles and numbering.
 struct WriteContext {
   const model::Document* document = nullptr;
-  std::vector<int> image_rids;
-  std::vector<int> ole_rids;
-  std::map<std::string, int> hyperlinks;
+  std::map<std::string, std::vector<int>> image_rids;
+  std::map<std::string, std::vector<int>> ole_rids;
+  std::map<std::string, std::map<std::string, int>> hyperlinks;
+  std::string source = "document.xml";
+  std::map<std::string, int> part_next_rid;
+  std::vector<bool> image_parts_added;
+  std::vector<bool> ole_parts_added;
   int revision_id = 0;
   int next_rid = 3;
   int next_part = 1;
   bool odd_even = false;
-  std::vector<std::pair<int, std::string>> relations;  // rId -> part name
+  std::vector<Relationship> relations;
   std::vector<Part> parts;
   size_t max_part_bytes = detail::kMaxWriterPartBytes;
   size_t max_buffer_bytes = detail::kMaxWriterBufferBytes;
   size_t buffered = 0;
+  int NextRid() {
+    if (source == "document.xml")
+      return next_rid++;
+    int& next = part_next_rid[source];
+    if (next == 0)
+      next = 1;
+    return next++;
+  }
+  void SetSource(std::string name) {
+    source = std::move(name);
+    image_rids[source].resize(document->images.size());
+    ole_rids[source].resize(document->ole_objects.size());
+  }
   std::expected<void, Error> AddPart(std::string name, std::string data,
                                      std::vector<Part>* destination = nullptr) {
     if (data.size() > max_part_bytes) {
@@ -207,23 +229,31 @@ std::string BuildContentTypes(const WriteContext& ctx) {
   return out;
 }
 
-pugi::xml_document BuildRelationships(const WriteContext& ctx) {
+pugi::xml_document BuildRelationships(const WriteContext& ctx,
+                                      std::string_view source) {
   constexpr const char* kRelBase =
       "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
   pugi::xml_document docrels;
   auto relations = docrels.append_child("Relationships");
   Attr(relations, "xmlns",
        "http://schemas.openxmlformats.org/package/2006/relationships");
-  auto style_rel = relations.append_child("Relationship");
-  Attr(style_rel, "Id", "rId1");
-  Attr(style_rel, "Type", std::string(kRelBase) + "styles");
-  Attr(style_rel, "Target", "styles.xml");
-  auto number_rel = relations.append_child("Relationship");
-  Attr(number_rel, "Id", "rId2");
-  Attr(number_rel, "Type", std::string(kRelBase) + "numbering");
-  Attr(number_rel, "Target", "numbering.xml");
-  const int settings_id = ctx.odd_even ? ctx.next_rid : 0;
-  for (const auto& [rid, target] : ctx.relations) {
+  if (source == "document.xml") {
+    auto style_rel = relations.append_child("Relationship");
+    Attr(style_rel, "Id", "rId1");
+    Attr(style_rel, "Type", std::string(kRelBase) + "styles");
+    Attr(style_rel, "Target", "styles.xml");
+    auto number_rel = relations.append_child("Relationship");
+    Attr(number_rel, "Id", "rId2");
+    Attr(number_rel, "Type", std::string(kRelBase) + "numbering");
+    Attr(number_rel, "Target", "numbering.xml");
+  }
+  const int settings_id =
+      source == "document.xml" && ctx.odd_even ? ctx.next_rid : 0;
+  for (const auto& relation : ctx.relations) {
+    if (relation.source != source)
+      continue;
+    const int rid = relation.id;
+    const std::string& target = relation.target;
     const char* type = "footer";
     if (target.starts_with("header")) {
       type = "header";
@@ -249,7 +279,10 @@ pugi::xml_document BuildRelationships(const WriteContext& ctx) {
     Attr(rel, "Type", std::string(kRelBase) + "settings");
     Attr(rel, "Target", "settings.xml");
   }
-  for (const auto& [url, id] : ctx.hyperlinks) {
+  const auto links = ctx.hyperlinks.find(std::string(source));
+  if (links == ctx.hyperlinks.end())
+    return docrels;
+  for (const auto& [url, id] : links->second) {
     auto link = relations.append_child("Relationship");
     Attr(link, "Id", "rId" + std::to_string(id));
     Attr(link, "Type", std::string(kRelBase) + "hyperlink");
@@ -311,8 +344,9 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   ctx.document = &document;
   ctx.max_part_bytes = max_part_bytes;
   ctx.max_buffer_bytes = max_buffer_bytes;
-  ctx.image_rids.resize(document.images.size());
-  ctx.ole_rids.resize(document.ole_objects.size());
+  ctx.SetSource("document.xml");
+  ctx.image_parts_added.resize(document.images.size());
+  ctx.ole_parts_added.resize(document.ole_objects.size());
   pugi::xml_document doc;
   auto root = doc.append_child("w:document");
   Attr(root, "xmlns:w", kWordmlNamespace);
@@ -350,7 +384,7 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
 
   pugi::xml_document styles = WriteStyles(document);
   pugi::xml_document numbering = WriteNumbering(document);
-  pugi::xml_document docrels = BuildRelationships(ctx);
+  pugi::xml_document docrels = BuildRelationships(ctx, "document.xml");
 
   std::vector<Part> core_parts;
   auto result =
@@ -364,6 +398,24 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
       ctx.AddPart("word/_rels/document.xml.rels", Save(docrels), &core_parts);
   if (!result)
     return std::unexpected(result.error());
+  for (const auto& part : ctx.parts) {
+    if (!part.name.ends_with(".xml"))
+      continue;
+    const std::string source = part.name.substr(5);
+    const bool has_relation =
+        std::any_of(ctx.relations.begin(), ctx.relations.end(),
+                    [&](const Relationship& relation) {
+                      return relation.source == source;
+                    });
+    const auto links = ctx.hyperlinks.find(source);
+    if (!has_relation &&
+        (links == ctx.hyperlinks.end() || links->second.empty()))
+      continue;
+    result = ctx.AddPart("word/_rels/" + source + ".rels",
+                         Save(BuildRelationships(ctx, source)), &core_parts);
+    if (!result)
+      return std::unexpected(result.error());
+  }
   result = ctx.AddPart("word/document.xml", Save(doc), &core_parts);
   if (!result)
     return std::unexpected(result.error());
