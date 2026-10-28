@@ -176,6 +176,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 ### 6.3 段落格式（PAP）
 - ✅ 对齐（左/中/右/两端/分散）/缩进（左右/首行/悬挂，twips 与字符单位）/行距/段距（twips 与行单位）
 - ✅ 段落边框与底纹/项目符号与多级列表（LSTF/LVL/override）
+- ◐ `sprmPIncLvl` 的样式级别增量：istd 1–9 已增量并夹紧；未显式轮廓级别的样式继承仍待完整求值
 - ✅ 制表位（自定义/toc 风格）/keepNext/keepLines/pageBreakBefore/东亚排版开关
 - ✅ 大纲级别/段落阴影/首字下沉（`w:framePr` dropCap）/纵向文字流
 
@@ -194,7 +195,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ◐ 浮动图片与文字环绕（Escher anchor + 环绕类型映射）：FSPA anchor 定位（bx/by → margin/page/text，复用浮动表格语义）与主流环绕（topAndBottom/around=Square/none/rough=Tight→Through 合成覆盖）已通，LibreOffice golden 对拍达其内部基线下限；轮廓级 Tight/Through 区分需真实 Word 样本（LibreOffice 导出两者同为 wr=4），已知限制登记 KNOWN-SIMPLIFICATIONS
 - ◐ 浮动文本框：正文与页眉专用 FTXBXS/Tbkd 故事范围按 shape id 连接各自的 PlcfSpa 锚点，写出 `w:pict/w:txbxContent`；PICF 内联 OfficeArtClientTextbox 指针可连接文本框故事并输出内联 `w:txbxContent`，缺失范围保留空框并警告；链中每个 Tbkd 分段分别按 OfficeArtClientTextbox 链位置连接自己的 FSPA 锚点并写出独立文本框。无指针的旧形状依 FSPA 顺序推断，真实 Word 链式布局 golden 仍待验证
 - ✅ 基本形状/艺术字占位：OfficeArtFSP 形状类型、FSPA 几何和 GeoText 原文进入 IR；矩形/椭圆/线条输出带形状类型注释的 VML 浮动占位，带 BLIP 的形状仍走图片路径。`M5FloatingImages.GeometryShapePlaceholderKeepsAnchor`、`LibreOfficeBasicShapesKeepGeometry`、`LineAndWordArtTypesKeepIdentity`；外观和环绕限制见 KNOWN-SIMPLIFICATIONS
-- ◐ OLE 嵌入对象：字段分隔符上的 `sprmCPicLocation` 定位 ObjectPool 子存储，完整流族重新封装为 CFB 嵌入部件；字段结果图片优先作预览，缺失时解码 `\1OlePres000`/`\2OlePres000` 的 EMF/WMF 元文件并输出 `w:object/o:OLEObject`。链接语义和其他预览格式仍待补齐
+- ◐ OLE 嵌入对象：字段分隔符上的 `sprmCPicLocation` 定位 ObjectPool 子存储，完整流族重新封装为 CFB 嵌入部件；字段结果图片优先作预览，缺失时解码 `\1OlePres000`/`\2OlePres000` 的 EMF/WMF 元文件并输出 `w:object/o:OLEObject`。`sprmCFObj` 缺 OLE 标记或 ObjectPool 子存储时警告并输出 `[Embedded object]`；链接语义和其他预览格式仍待补齐
 - ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（脚注、尾注、批注按各自 PLC 输出部件；标准书签的 `SttbfBkmk`/`PlcfBkf`/`PlcfBkl` 覆盖正文、页眉页脚、脚注、尾注、批注及正文/页眉文本框故事，并输出 `w:bookmarkStart`/`w:bookmarkEnd`；正文整域书签在 `ccpText` 闭合；非正文书签仅在起止位于同一故事时输出，结束位于故事守卫 CP 时仍会闭合，跨故事配对跳过并警告；文本框链的内部 Tbkd 断点 CP 标记由下一分段输出，仅故事末 CP 按守卫附着；各分段的精确书签排版尚未对拍；交叉引用与目录域的指令与结果文本按通用复杂域输出）
 
 ### 6.7 样式系统

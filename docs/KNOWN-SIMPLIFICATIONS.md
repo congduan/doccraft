@@ -16,7 +16,7 @@
 - 8-bit（compressed）piece 按 `FibBase.lid` 推导出的 ANSI 代码页解码（`src/base/charset.cc`）。两条残留限制：其一，解码依赖 iconv（glibc 内置 / libiconv），编译期未找到时退化为 CP1252，仅 cp1252 能正确解码；其二，LID 表中未列出的语言一律按 1252 处理（例如 cp1253 之外的希腊文变体、OEM 代码页）。DBCS 文本按规范总是存为 UTF-16 piece，所以压缩 piece 只需要代码页的单字节映射；若遇到违规的 DBCS 双字节序列，能解出时按两字节消费，否则该字节记为 U+FFFD。
 - 语料已加入 `cjk-text`（中/日）与 `cyrillic-text`（俄文）两份真实 `.doc`，但它们的正文按规范存为 UTF-16 piece，验证的是 Unicode 文本链路而不是代码页路径；8-bit 代码页路径仍只有单测（`CharsetTest.*`、`PieceTableTest.DecodesCompressedPiecesInDocumentCodepage`）覆盖。
 - `0x0C`（分页符）及其他未列于已处理集合的 <0x20 控制符被静默丢弃（分页边界信息不保留）。
-- 非 complex 文档若 piece 覆盖不足 `ccpText`，静默截断、无覆盖数校验。
+- 非 complex 文档若 CLX piece 末 CP 小于 `ccpText`，保留已覆盖正文并向 CLI stderr 警告期望与实际 CP 数；尚未校验 piece 内部空洞。现有 35 份 corpus/fixtures `.doc` 均未触发此警告。
 - U+FFFE/U+FFFF 不在 XML 1.0 Char 产生式内，替换为 U+FFFD 而非报错（防止损坏文件产出 not-well-formed 的 document.xml）。
 - 孤立 UTF-16 代理项（未配对的 high/low surrogate）同样替换为 U+FFFD 而不报错。文本抽取路径原先是报错，现在与格式化路径共用唯一的 CLX 读取器 `doc::detail::ReadChars`，因此单字符损坏不再使整篇转换失败。
 
@@ -68,7 +68,8 @@
 - 浮动表格用 `w:tblpPr` 表达，锚点由 `sprmTPc` 的 `pcVert`/`pcHorz` 映射为 `margin`/`page`/`text`（缺省为 `margin`）；表格文本环绕距离已映射。`sprmTWidthBefore`/`sprmTWidthAfter` 的行级前后缩进仍无对应属性。
 - 非等宽分栏（`sprmSFEvenlySpaced` + `sprmSDxaColWidth`/`sprmSDxaColSpacing`）：[MS-DOC] §2.6.4 要求非等宽节的每列 MUST 带 `sprmSDxaColWidth`。违反该约束的列不再丢弃——`w:cols` 为每列输出 `w:col`，缺宽度的列（含仅指定间距的列）按 LibreOffice `.doc` 导入的兜底值 1440 twips 补宽（`sw/source/filter/ww8/ww8par6.cxx` 中缺失宽度 sprm 时取 1440），仅间距列保留 `w:space`（`M19Columns.SpacingOnlyColumnKeepsWColWithFallbackWidth`）。等宽节（未写 `sprmSFEvenlySpaced=0`）仍忽略列宽度/间距 sprm：规范规定两者仅在非等宽时生效。剩余限制：兜底宽度为常量，不按页面剩余空间均分，Word 对该违规输入的行为未验证；仅缺间距（宽度齐全）的列在 LibreOffice `.doc` 导入路径会因其 `rgdxaColumnWidthSpacing` 数组压缩而错位（LO 自身缺陷），doccraft 的 docx 路径按无 `w:space`（间距 0）输出，两条路径在该畸形输入下不对拍。
 - SHD80 系列（`sprmCShd80`/`sprmPShd80`/`sprmTDefTableShd80`）走 16 色调色板，索引 0（自动色）不产生 `w:shd`；现代 SHD 操作数仍以 COLORREF 优先。
-- `sprmPIncLvl` 只在 `sprmPIlfo != 0` 时累加 `ilvl`，按规范应增量 `istd` 的段落样式分支未实现。
+- `sprmPIncLvl` 对 `istd` 1–9 按有符号操作数增量并夹到 1–9；生成的段落样式 ID 可在 XML 中观察，目标样式的编号仍由现有样式表路径决定。`istd` 不在该范围时，只有显式 `sprmPOutLvl` 已设置的段落会增量轮廓级别；未显式设置时从样式继承的轮廓级别尚未完整求值。既有直接编号 `ilfo` 路径继续累加 `ilvl`。LibreOffice WW8 导入分派表对该 sprm 设空处理器，无法用其导入结果作此分支的行为基准。
+- `sprmCFObj` 对缺 `sprmCFOle2` 的对象标记输出 `[Embedded object]` 并警告；OLE 字段的 ObjectPool 子存储缺失时也降级为同一占位。对象外观和缺失载荷无法恢复；图片标记缺载荷仍沿用显式错误路径。
 - `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。
 - 域处理按「顶层特例 + 其余通用」分层：只有顶层未锁定、未标脏的 `HYPERLINK` 改写为 `w:hyperlink`、含 `PAGE` 的顶层域改写为 `w:fldSimple`；其余（含全部嵌套域）输出 `w:fldChar` begin/separate/end 与 `w:instrText`。`\x13` 后未见 `\x14` 就遇到 `\x15` 的畸形域按 begin + instrText + end 输出，指令不再被静默丢弃。`PlcfFldMom`/`PlcfFldHdr`/`PlcfFldFtn`/`PlcfFldEdn`/`PlcfFldAtn` 及正文、页眉文本框故事字段 PLC 的结束记录 `fLocked`/`fResultsDirty` 已映射为 `w:fldLock`/`w:dirty`；真实 Word 文本框域 golden 尚缺。
 - 域结果里的图片、对象、脚注引用等仍是 M5 载荷；嵌套在超链接结果中的域会把外层链接降级为普通文本。
