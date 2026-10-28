@@ -229,7 +229,37 @@ TEST(DocxWriterRelations, HeaderImageAndLinkUseOwnRelationships) {
   EXPECT_EQ(docrels.find("https://example.com/header"), std::string::npos);
 }
 
-
+TEST(DocxWriterRelations, DuplicateBodyUrlReusesRidWithoutGap) {
+  model::Document document;
+  model::Paragraph paragraph;
+  model::Run link;
+  link.text = "first";
+  link.hyperlink = "https://example.com/shared";
+  paragraph.runs.push_back(link);
+  link.text = "second";
+  paragraph.runs.push_back(link);
+  model::Run picture;
+  picture.image_index = 0;
+  paragraph.runs.push_back(picture);
+  document.paragraphs.push_back(paragraph);
+  model::Image image;
+  image.bytes = {'p', 'n', 'g'};
+  image.width = 96;
+  image.height = 96;
+  document.images.push_back(image);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const std::string rels = Part(*zip, "word/_rels/document.xml.rels");
+  const std::string link_id = "<w:hyperlink r:id=\"rId3\"";
+  ASSERT_NE(xml.find(link_id), std::string::npos);
+  EXPECT_NE(xml.find(link_id, xml.find(link_id) + 1), std::string::npos);
+  EXPECT_NE(xml.find("r:embed=\"rId4\""), std::string::npos);
+  EXPECT_NE(rels.find("Id=\"rId3\""), std::string::npos);
+  EXPECT_NE(rels.find("Id=\"rId4\""), std::string::npos);
+  EXPECT_EQ(rels.find("Id=\"rId5\""), std::string::npos);
+  EXPECT_EQ(rels.find("shared", rels.find("shared") + 1), std::string::npos);
+}
 
 TEST(DocxWriterRelations, PlainHeaderHasNoRelationshipsPart) {
   model::Document document;
