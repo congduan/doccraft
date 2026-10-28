@@ -370,7 +370,7 @@
 
 M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们不对应 sprm opcode，因此不改变本表的覆盖计数。
 
-批注区间由 `PlcfAtnBkf`/`PlcfAtnBkl` 与 ATRDPre10 书签 tag 还原，属于结构 PLC 而非 sprm；`M3Comments.RangeBookmarkSurroundsAnnotatedText` 和 `M15StoryPlc.AdjacentCommentRangesCrossRunsAndControl` 验证此路径，不改变本表的覆盖计数。
+批注区间由 `PlcfAtnBkf`/`PlcfAtnBkl` 与 ATRDPre10 书签 tag 还原，属于结构 PLC 而非 sprm；`M3Comments.RangeBookmarkSurroundsAnnotatedText`、`M15StoryPlc.AdjacentCommentRangesCrossRunsAndControl`、`M15StoryPlc.CommentRangeMayExtendPastReference`、`M15StoryPlc.InvalidCommentRangeKeepsOtherRange` 验证范围与局部降级；`M15StoryPlc.CommentInitialsUseByteCountAndUtf16Payload`、`M15StoryPlc.OversizedCommentInitialsWarnAndKeepComment` 验证 ATRDPre10 initials 解码与越界警告，不改变本表的覆盖计数。
 
 基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现；M19 把修订作者三个 sprm（0x4804/0x4863/0xCA89）从 N/A 拉回实现。M20 按行级状态重算，并将当时尚缺继承轮廓级别求值的 sprmPIncLvl 记为 ◐（269 / 270 适用项）；M21 补齐该分支后为 270 / 270。
 

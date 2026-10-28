@@ -955,10 +955,8 @@ TEST(M15StoryPlc, CommentRangeMayExtendPastReference) {
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
-  const size_t range_end =
-      xml.find("<w:commentRangeEnd w:id=\"1\"/>");
-  const size_t reference =
-      xml.find("<w:commentReference w:id=\"1\"/>");
+  const size_t range_end = xml.find("<w:commentRangeEnd w:id=\"1\"/>");
+  const size_t reference = xml.find("<w:commentReference w:id=\"1\"/>");
   ASSERT_NE(range_end, std::string::npos);
   ASSERT_NE(reference, std::string::npos);
   EXPECT_LT(reference, range_end);
@@ -975,15 +973,11 @@ TEST(M15StoryPlc, InvalidCommentRangeKeepsOtherRange) {
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
-  const size_t b_start =
-      xml.find("<w:commentRangeStart w:id=\"2\"/>");
+  const size_t b_start = xml.find("<w:commentRangeStart w:id=\"2\"/>");
   const size_t b_end = xml.find("<w:commentRangeEnd w:id=\"2\"/>");
-  const size_t b_ref =
-      xml.find("<w:commentReference w:id=\"2\"/>");
-  const size_t a_start =
-      xml.find("<w:commentRangeStart w:id=\"1\"/>");
-  const size_t a_ref =
-      xml.find("<w:commentReference w:id=\"1\"/>");
+  const size_t b_ref = xml.find("<w:commentReference w:id=\"2\"/>");
+  const size_t a_start = xml.find("<w:commentRangeStart w:id=\"1\"/>");
+  const size_t a_ref = xml.find("<w:commentReference w:id=\"1\"/>");
   const size_t a_end = xml.find("<w:commentRangeEnd w:id=\"1\"/>");
   ASSERT_NE(b_start, std::string::npos);
   ASSERT_NE(b_end, std::string::npos);

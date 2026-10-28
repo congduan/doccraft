@@ -67,9 +67,8 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(
                             std::to_string(i + 1));
     } else {
       for (size_t k = 0; k < cch; ++k) {
-        AppendUtf8(anchor.initials,
-                   U16(plc, atrd + kInitialsLengthSize +
-                                k * kUtf16CodeUnitSize));
+        AppendUtf8(anchor.initials, U16(plc, atrd + kInitialsLengthSize +
+                                                 k * kUtf16CodeUnitSize));
       }
     }
     const uint16_t author = U16(plc, atrd + kAuthorIndexOffset);
