@@ -40,6 +40,21 @@ std::string Part(const std::vector<uint8_t>& archive, const char* name) {
   return content;
 }
 
+size_t PartCount(const std::vector<uint8_t>& archive, const char* name) {
+  mz_zip_archive zip = {};
+  if (!mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
+    return 0;
+  size_t count = 0;
+  for (mz_uint i = 0; i < mz_zip_reader_get_num_files(&zip); ++i) {
+    mz_zip_archive_file_stat stat = {};
+    if (mz_zip_reader_file_stat(&zip, i, &stat) &&
+        std::string(stat.m_filename) == name)
+      ++count;
+  }
+  mz_zip_reader_end(&zip);
+  return count;
+}
+
 TEST(M6WriterBuffer, SerializedPartsLimitReturnsError) {
   model::Document document;
   constexpr size_t kTestLimit = 8192;
@@ -218,7 +233,7 @@ TEST(DocxWriterRelations, PlainHeaderHasNoRelationshipsPart) {
   document.section.headers[1].push_back(header);
   auto zip = docx::Write(document);
   ASSERT_TRUE(zip) << zip.error().message;
-  EXPECT_TRUE(Part(*zip, "word/_rels/header1.xml.rels").empty());
+  EXPECT_EQ(PartCount(*zip, "word/_rels/header1.xml.rels"), 0);
 }
 
 TEST(DocxWriterRelations, BodyAndFooterCanShareImage) {
@@ -250,6 +265,7 @@ TEST(DocxWriterRelations, BodyAndFooterCanShareImage) {
                       "org/officeDocument/2006/relationships/image\" "
                       "Target=\"media/image1.png\""),
             std::string::npos);
+  EXPECT_EQ(PartCount(*zip, "word/media/image1.png"), 1);
 }
 
 TEST(DocxWriterRelations, NotesAndCommentsOwnTheirLinks) {
@@ -262,12 +278,14 @@ TEST(DocxWriterRelations, NotesAndCommentsOwnTheirLinks) {
   model::Note note;
   note.paragraphs.push_back(paragraph);
   document.notes.push_back(note);
+  note.endnote = true;
+  document.notes.push_back(note);
   model::Comment comment;
   comment.paragraphs.push_back(paragraph);
   document.comments.push_back(comment);
   auto zip = docx::Write(document);
   ASSERT_TRUE(zip) << zip.error().message;
-  for (const char* part : {"footnotes.xml", "comments.xml"}) {
+  for (const char* part : {"footnotes.xml", "endnotes.xml", "comments.xml"}) {
     const std::string xml = Part(*zip, ("word/" + std::string(part)).c_str());
     const std::string rels =
         Part(*zip, ("word/_rels/" + std::string(part) + ".rels").c_str());
@@ -280,6 +298,88 @@ TEST(DocxWriterRelations, NotesAndCommentsOwnTheirLinks) {
   }
   EXPECT_EQ(Part(*zip, "word/_rels/document.xml.rels")
                 .find("https://example.com/note"),
+            std::string::npos);
+}
+
+TEST(DocxWriterRelations, StoryImagesDeclareDrawingNamespaces) {
+  model::Document document;
+  model::Image image;
+  image.bytes = {'p', 'n', 'g'};
+  image.width = 96;
+  image.height = 96;
+  document.images.push_back(image);
+  model::Paragraph paragraph;
+  model::Run picture;
+  picture.image_index = 0;
+  paragraph.runs.push_back(picture);
+  model::Note note;
+  note.paragraphs.push_back(paragraph);
+  document.notes.push_back(note);
+  note.endnote = true;
+  document.notes.push_back(note);
+  model::Comment comment;
+  comment.paragraphs.push_back(paragraph);
+  document.comments.push_back(comment);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  for (const char* part : {"footnotes.xml", "endnotes.xml", "comments.xml"}) {
+    const std::string xml = Part(*zip, ("word/" + std::string(part)).c_str());
+    const std::string rels =
+        Part(*zip, ("word/_rels/" + std::string(part) + ".rels").c_str());
+    EXPECT_NE(xml.find("xmlns:wp="), std::string::npos) << part;
+    EXPECT_NE(xml.find("xmlns:a="), std::string::npos) << part;
+    EXPECT_NE(xml.find("xmlns:pic="), std::string::npos) << part;
+    EXPECT_NE(xml.find("r:embed=\"rId1\""), std::string::npos) << part;
+    EXPECT_NE(rels.find("Target=\"media/image1.png\""), std::string::npos)
+        << part;
+  }
+}
+
+TEST(DocxWriterRelations, HeaderNestedImageOleAndShapeDeclareNamespaces) {
+  model::Document document;
+  model::Image image;
+  image.bytes = {'p', 'n', 'g'};
+  image.width = 96;
+  image.height = 96;
+  document.images.push_back(image);
+  model::Textbox box;
+  box.paragraphs.push_back({});
+  model::Run picture;
+  picture.image_index = 0;
+  box.paragraphs.back().runs.push_back(picture);
+  document.textboxes.push_back(box);
+  model::OleObject object;
+  object.bytes = {'o', 'l', 'e'};
+  object.program_id = "Package";
+  document.ole_objects.push_back(object);
+  model::Shape shape;
+  shape.type = model::kShapeRectangle;
+  shape.width = 1440;
+  shape.height = 720;
+  document.shapes.push_back(shape);
+  model::Paragraph header;
+  model::Run anchor;
+  anchor.textbox_index = 0;
+  header.runs.push_back(anchor);
+  model::Run ole;
+  ole.ole_index = 0;
+  header.runs.push_back(ole);
+  model::Run drawing;
+  drawing.shape_index = 0;
+  header.runs.push_back(drawing);
+  document.section.headers[1].push_back(header);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/header1.xml");
+  const std::string rels = Part(*zip, "word/_rels/header1.xml.rels");
+  for (const char* prefix : {"wp", "a", "pic", "v", "o", "w10"})
+    EXPECT_NE(xml.find("xmlns:" + std::string(prefix) + "="), std::string::npos)
+        << prefix;
+  EXPECT_NE(xml.find("<w:txbxContent>"), std::string::npos);
+  EXPECT_NE(xml.find("<o:OLEObject"), std::string::npos);
+  EXPECT_NE(xml.find("<w10:wrap"), std::string::npos);
+  EXPECT_NE(rels.find("Target=\"media/image1.png\""), std::string::npos);
+  EXPECT_NE(rels.find("Target=\"embeddings/oleObject1.bin\""),
             std::string::npos);
 }
 
