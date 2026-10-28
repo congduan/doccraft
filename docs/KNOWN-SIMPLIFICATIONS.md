@@ -115,7 +115,7 @@
 - 故事字段 PLC 的降级策略：条目 CP 非严格递增、越过本故事 ccp、fldch 种类非法或尺寸不满足 `(size-4) mod 6 == 0` 时，整张 PLC 跳过并输出警告（`skipped <故事> field PLC: …`），该故事退化为「有域层次、无锁/脏标志」，正文与故事正文不受影响；正文 `PlcfFldMom` 维持严格失败策略不变。
 - 锁定域的输出与正文逐字节同构：`w:fldLock` 写在 begin/separate/end 三个标记上；锁定 HYPERLINK 的结果 run 仍包在 `w:hyperlink` 里（沿用正文既有行为）。页眉/页脚/脚注/尾注/批注部件复用 `WriteParagraph`，无独立的域输出逻辑。
 - 仅含空结果域（例如 `\x13 PAGE \x14\x15`）的页眉没有文本 run；既有的 has-text 策略会丢弃该故事部件，若文档只靠此类页眉使用奇偶页设置，`settings.xml` 中的 `evenAndOddHeaders` 也不会输出。
-- 超链接关系（`w:hyperlink r:id`）在页眉/脚注等部件中仍指向 `word/_rels/document.xml.rels`：部件各自的关系文件尚未生成，这是 writer 全局的既有简化（页眉图片同样如此），非 M8 引入。
+- 页眉/页脚、脚注/尾注和批注中的图片、OLE 对象及超链接关系现按源部件写入各自的 `_rels/<部件名>.rels`，各部件的 rId 独立编号。没有这些关系的部件不生成空关系文件。
 
 ## OOXML schema 校验器（`src/ooxml/`）
 

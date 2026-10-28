@@ -80,6 +80,7 @@ Style { based-on chain, 直接格式叠加解析在加载时完成 flatten }
 - ZIP 容器：自研 minimal zip writer（store + deflate，zlib 依赖可选拨插）
 - 部件生成：document.xml / styles.xml / numbering.xml / footnotes.xml /
   endnotes.xml / comments.xml / headers&footers / media/* / rels / [Content_Types]
+- 关系按源部件写入 `word/_rels/<源部件名>.rels`；页眉、页脚、脚注、尾注和批注各自拥有独立的 rId 空间，无关系时省略该文件。
 - 命名空间、rsid 可选；样式表 from STSH 映射 + 直接格式内联
 - 属性映射表 `docs/SPRM-TO-OOXML.md`（逐 sprm → w:xxx 元素对照，随实现增长）
 
