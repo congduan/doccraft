@@ -3,8 +3,8 @@
 以下是 M1 CFB review 建议项中未纳入本轮修复的部分。
 
 1. 测试仍以结构化回归用例和 1000 次确定性单字节变异为主；尚无真实语料变异或持续运行的 libFuzzer 入口。三项已知崩溃输入均已加入结构化测试。
-2. Header 偏移 40 的目录扇区数尚未核验：v3 应为 0，v4 应等于实际目录链长度。
-3. `ReadStream` 的 `/` 路径分隔符与流名本身含 `/` 时存在匹配歧义；当前仍允许按完整路径、相对路径或 entry 名称查找。`ReadChain` 要求最后一个扇区的 FAT 项恰为 `ENDOFCHAIN`，尚未兼容多余链尾扇区。这两点是当前读取策略，后续需结合真实文件确定是否放宽。
+
+> M19 更新：原第 2、3 项已解决（a93c95e）——Header 偏移 40 目录扇区数已按 [MS-CFB] §2.2 核验（v3 必须为 0，v4 必须等于目录链实际长度）；`ReadStream` 的 `/` 歧义改为确定性优先级（完整路径 > 相对路径 > entry 名）；`ReadChain` 容忍声明尺寸之后一个正确以 `ENDOFCHAIN` 收尾的多余链尾扇区。各附回归测试（`CfbReaderTest.RejectsV3HeaderWithDirectorySectorCount` 等 4 项）。
 
 ## M2
 
