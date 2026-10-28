@@ -970,6 +970,46 @@ TEST(M15StoryPlc, UnmatchedCommentTagFallsBackToPointAnchor) {
   EXPECT_LT(a_end, b_end);
 }
 
+TEST(M15StoryPlc, MissingTagTableWithUnequalCountsWarnsAndUsesPointAnchors) {
+  Synthetic s = TaggedComments();
+  Put32(s.word, 86 + 8 * 37, 0);  // No SttbfAtnBkmk.
+  size_t at = s.table.size();
+  s.table.resize(at + 12, 0);
+  Put32(s.table, at, 3);
+  Put32(s.table, at + 4, 12);
+  Put32(s.word, 82 + 8 * 42, static_cast<uint32_t>(at));
+  Put32(s.word, 86 + 8 * 42, 12);
+  at = s.table.size();
+  s.table.resize(at + 8, 0);
+  Put32(s.table, at, 6);
+  Put32(s.table, at + 4, 12);
+  Put32(s.word, 82 + 8 * 43, static_cast<uint32_t>(at));
+  Put32(s.word, 86 + 8 * 43, 8);
+  auto fib = doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto parsed = doc::ParseFormatted(s.word, s.table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 2u);
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "comment range bookmarks not paired; falling back to point "
+            "anchors");
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  for (int id = 1; id <= 2; ++id) {
+    const std::string suffix = " w:id=\"" + std::to_string(id) + "\"/>";
+    const size_t start = xml.find("<w:commentRangeStart" + suffix);
+    const size_t ref = xml.find("<w:commentReference" + suffix);
+    const size_t end = xml.find("<w:commentRangeEnd" + suffix);
+    ASSERT_NE(start, std::string::npos);
+    ASSERT_NE(ref, std::string::npos);
+    ASSERT_NE(end, std::string::npos);
+    EXPECT_LT(start, ref);
+    EXPECT_LT(ref, end);
+  }
+}
+
 TEST(M15StoryPlc, CommentOwnersTrailingByteKeepsAuthor) {
   Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
   s.fib.and_ref = PutCommentRefPlc(s, 1);

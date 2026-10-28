@@ -179,6 +179,12 @@ std::vector<CommentRange> ReadCommentRanges(
       if (p > names.size())
         return invalid();
     }
+  } else if (count != anchors->size()) {
+    if (warnings)
+      warnings->push_back(
+          "comment range bookmarks not paired; falling back to point "
+          "anchors");
+    return out;
   }
   for (size_t i = 0; i < anchors->size(); ++i) {
     if ((*anchors)[i].bookmark_tag == UINT32_MAX)
@@ -189,8 +195,6 @@ std::vector<CommentRange> ReadCommentRanges(
       if (found == tag_to_bookmark.end())
         continue;
       index = found->second;
-    } else if (count != anchors->size()) {
-      continue;
     }
     const size_t record = 4 * (count + 1) + 4 * index;
     const size_t end_index = U16(starts, record);
