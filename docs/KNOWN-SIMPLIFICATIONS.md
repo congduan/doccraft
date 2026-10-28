@@ -44,7 +44,7 @@
 
 - RC4 回归样本由 `m6_fixture_gen` 从仓库明文样本反向加密，分别覆盖传统 RC4/MD5 与 RC4 CryptoAPI/SHA-1；verifier、错误口令、跨块解密和 `document.xml` 与明文逐字节一致已验证。40-bit CryptoAPI（含 KeySize=0 缺省）由 `M6Rc4.DecryptsCryptoApi40BitKeyVariants` 合成用例覆盖。尚未获得 Word 实际加密导出的 `.doc` 作外部互通验证。
 - 仅转换 WordDocument、Table、Data 主流。RC4 CryptoAPI 的独立加密属性流（按 [MS-DOC] 2.2.6.3 在 `fDocProps` 置位时出现；[MS-OFFCRYPTO] 2.3.5.1 措辞与其相悖，通行实现按 [MS-DOC] 极性）不迁移到 OOXML 元数据；嵌入对象在加密文档中的独立存储兼容性尚未验证。
-- 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉/脚注/尾注/批注故事的字段 PLC 自 M8 起接入（见「M8 当前范围」），正文及页眉文本框的字段 PLC 自 M11 起接入。尚无真实 Word 文本框域 golden，故 §6.1 域项保持 ◐。
+- 正文 `PlcfFldMom` 的 `fLocked`/`fResultsDirty` 已保存到复杂域和 PAGE 简单域；状态化 HYPERLINK 会输出通用复杂域以保留位标志。页眉/脚注/尾注/批注故事的字段 PLC 自 M8 起接入（见「M8 当前范围」），正文及页眉文本框的字段 PLC 自 M11 起接入。M8 续批扫描 `/tmp/doccraft-m4-real` 的 151 个 `.doc`：仅 `64132.doc`、`Bug50936_1.doc`、`Bug53380_1.doc` 同时有文本框故事字符数和字段 PLC 长度；LibreOffice 转出的 DOCX 分别是「有文本框无域」「有域无文本框」「两者都无」。网上搜索未找到可验证的真实组合样本，因此 §6.1 域项保持 ◐。
 
 ## M6 变异加固
 
