@@ -149,4 +149,25 @@ TEST(M6WriterBuffer, CommentImagePartLimitReturnsError) {
                 std::to_string(image_bytes) + " bytes)");
 }
 
+TEST(M6WriterBuffer, DoubleLimitReportsNamedPartFirst) {
+  model::Document document;
+  document.paragraphs.push_back({});
+  document.paragraphs.back().runs.push_back({});
+  document.paragraphs.back().runs.back().text = std::string(2048, 'x');
+  constexpr size_t kGenerousLimit = 16384;
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kGenerousLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  const size_t actual_bytes = Part(*baseline, "word/document.xml").size();
+  // Both limits sit one byte below the document part size, so the same
+  // AddPart("word/document.xml") call fails the part check and the total
+  // check at once. Lock the diagnostic order: the named-part error is the
+  // specific one and must win over the anonymous buffer error.
+  auto zip = docx::detail::WriteWithBufferLimit(document, actual_bytes - 1,
+                                                actual_bytes - 1);
+  ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized document";
+  EXPECT_EQ(zip.error().message,
+            "writer part limit exceeded: word/document.xml (" +
+                std::to_string(actual_bytes) + " bytes)");
+}
+
 }  // namespace
