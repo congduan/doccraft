@@ -190,7 +190,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 ### 6.6 对象与图形
 - ✅ 内联图片（PICF + Escher BLIP：png/jpg/wmf/emf 提取与格式保留；正文图片，其他故事与非嵌入 BLIP 限制见 KNOWN-SIMPLIFICATIONS）
 - ◐ 浮动图片与文字环绕（Escher anchor + 环绕类型映射）：FSPA anchor 定位（bx/by → margin/page/text，复用浮动表格语义）与主流环绕（topAndBottom/around=Square/none/rough=Tight→Through 合成覆盖）已通，LibreOffice golden 对拍达其内部基线下限；轮廓级 Tight/Through 区分需真实 Word 样本（LibreOffice 导出两者同为 wr=4），已知限制登记 KNOWN-SIMPLIFICATIONS
-- ◐ 浮动文本框：正文与页眉专用 FTXBXS/Tbkd 故事范围按 shape id 连接各自的 PlcfSpa 锚点，写出 `w:pict/w:txbxContent`；内联形状和链中各形状的独立排版仍待补齐
+- ◐ 浮动文本框：正文与页眉专用 FTXBXS/Tbkd 故事范围按 shape id 连接各自的 PlcfSpa 锚点，写出 `w:pict/w:txbxContent`；PICF 中无 BLIP 的单个 OfficeArtFSP 可输出内联 VML 形状占位；内联文本框内容和链中各形状的独立排版仍待补齐
 - ✅ 基本形状/艺术字占位：OfficeArtFSP 形状类型、FSPA 几何和 GeoText 原文进入 IR；矩形/椭圆/线条输出带形状类型注释的 VML 浮动占位，带 BLIP 的形状仍走图片路径。`M5FloatingImages.GeometryShapePlaceholderKeepsAnchor`、`LibreOfficeBasicShapesKeepGeometry`、`LineAndWordArtTypesKeepIdentity`；外观和环绕限制见 KNOWN-SIMPLIFICATIONS
 - ◐ OLE 嵌入对象：字段分隔符上的 `sprmCPicLocation` 定位 ObjectPool 子存储，完整流族重新封装为 CFB 嵌入部件；字段结果图片优先作预览，缺失时解码 `\1OlePres000`/`\2OlePres000` 的 EMF/WMF 元文件并输出 `w:object/o:OLEObject`。链接语义和其他预览格式仍待补齐
 - ◐ 脚注/尾注/批注/书签/交叉引用域/目录域（脚注、尾注、批注按各自 PLC 输出部件；标准书签的 `SttbfBkmk`/`PlcfBkf`/`PlcfBkl` 覆盖正文、页眉页脚、脚注、尾注、批注及正文/页眉文本框故事，并输出 `w:bookmarkStart`/`w:bookmarkEnd`；正文整域书签在 `ccpText` 闭合；非正文书签仅在起止位于同一故事时输出，结束位于故事守卫 CP 时仍会闭合，跨故事配对跳过并警告；文本框链中各分段的精确书签排版尚未对拍；交叉引用与目录域的指令与结果文本按通用复杂域输出）

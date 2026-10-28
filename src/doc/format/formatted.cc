@@ -703,6 +703,17 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
               : ReadInlinePicture(
                     data, r.object_offset,
                     detail::kMaxTotalImageSize - total_image_size);
+      if (!picture && !fib.legacy &&
+          picture.error().message == "PICF has no supported embedded BLIP") {
+        auto shape = ReadInlineShape(data, r.object_offset);
+        if (!shape)
+          return std::unexpected(shape.error());
+        r.shape_index = static_cast<int>(doc.shapes.size());
+        doc.shapes.push_back(std::move(*shape));
+        para.runs.push_back(std::move(r));
+        remember_run();
+        continue;
+      }
       if (!picture)
         return std::unexpected(picture.error());
       if (picture->bytes.size() > detail::kMaxTotalImageSize - total_image_size)

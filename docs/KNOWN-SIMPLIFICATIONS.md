@@ -91,6 +91,7 @@
 
 - 正文内联 `U+0001` 图片按 `sprmCPicLocation` 从 Data 流读取 PICF，扫描嵌入 Escher BLIP 并输出 DrawingML 与原格式媒体部件。PNG/JPEG 有 LibreOffice golden 媒体字节对比及像素对拍；WMF/EMF 的压缩和非压缩 BLIP 有合成位流断言，但尚无 LibreOffice 导出的真实元文件 golden。非嵌入或延迟 BLIP、ObjectPool/OLE、裁剪/边框/旋转，以及页眉、脚注等其他故事中的图片留待后续；遇到正文内联图片的缺失或不支持载荷会显式返回错误。
 - 正文及页眉浮动文本框通过各自 FTXBXS.lid 连接 PlcfSpaMom/PlcfSpaHdr，并以 VML `w:pict/w:txbxContent` 输出。多个 Tbkd 分段按故事顺序放入首个锚点；尚未按链中每个形状的容量分别排版。内联文本框、形状填充与边框仍未映射。页眉文本框在所属故事的首段锚定；同故事内多个段落的精确插入位置尚未恢复。LibreOffice 的透明无边框样本 `textbox.doc` 对拍通过（bad_ratio 0.093%）。
+- PICF 的 OfficeArt 子容器若没有可提取 BLIP、但恰有一个 FSP 形状，可用 PICF 目标尺寸写出内联 VML 几何占位。形状填充、边框、旋转和多形状组合未还原；真实内联形状 golden 尚缺，当前只以合成 PICF 验证。
 - 基本浮动形状读取 OfficeArtFSP 的 msospt、FSPA 坐标与尺寸。带 BLIP 的形状走图片输出；纯几何形状用带类型注释的 VML `v:rect`/`v:oval`/`v:line` 占位。艺术字的 GeoText 或文本框故事原文放入占位框；曲线字形、填充、边框和旋转不还原。LibreOffice `basic-shapes.doc` 对拍中矩形/椭圆坐标与尺寸一致，正文绕排不同，bad_ratio=0.148%，高于通用 0.1% 阈值；按本批降级验收仅认可占位位置，完整外观和绕排留待后续。
 - OLE EMBED/LINK/CONTROL 字段按分隔符上的 ObjectPool id 定位子存储，并将所有子流重新封装为独立 CFB 嵌入部件。字段结果 PICF/BLIP 图片优先作 `w:object` 的 VML 预览；没有字段结果图时从 `\1OlePres000`/`\2OlePres000` 读取 EMF/WMF 预览，严格校验流边界后原格式透传。`\3EPRINT`、DIB 等其他预览及链接对象的外部链接语义尚未恢复。真实样本来自 Apache POI `word_with_embeded_ooxml.doc`（原样复制为 `tests/fixtures/ole-embedded.doc`）；OlePres 元文件目前只有合成流测试，无真实 Word golden。
 - 损坏文档现有局部降级范围为 CHPX FKP 页（含坏 sprm 序列）、页眉故事 PLC，以及脚注、尾注、批注故事的引用/文本 PLC（批注还含作者表）。跳过故事后保留正文文本并在 CLI stderr 输出警告；同一故事的部件和引用一并省略。PAPX 可能包含表格结构，局部损坏继续拒绝；CFB/CLX/FIB 的全局损坏也继续拒绝。损坏文本框等故事尚未实现选择性降级，因此 §6.9 保持 ◐。

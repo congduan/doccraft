@@ -38,6 +38,9 @@ std::expected<model::Image, Error> ReadLegacyPicture(
     std::span<const uint8_t> word, uint32_t offset,
     size_t budget = std::numeric_limits<size_t>::max());
 
+std::expected<model::Shape, Error> ReadInlineShape(
+    std::span<const uint8_t> data, uint32_t offset);
+
 std::expected<std::optional<model::Image>, Error> ReadOlePresentation(
     std::span<const uint8_t> stream,
     size_t budget = std::numeric_limits<size_t>::max());

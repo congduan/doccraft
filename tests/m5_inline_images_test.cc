@@ -131,6 +131,47 @@ TEST(M5InlineImages, SyntheticPicfBlipToIrAndXml) {
             std::string(png.begin(), png.end()));
 }
 
+TEST(M5InlineShapes, PicfOfficeArtShapeWritesInlinePlaceholder) {
+  constexpr size_t kPicf = 68, kRecord = 8, kFsp = 8;
+  std::vector<uint8_t> data(kPicf + kRecord + kRecord + kFsp);
+  Put32(data, 0, static_cast<uint32_t>(data.size()));
+  Put16(data, 4, kPicf);
+  Put16(data, 28, 1440);
+  Put16(data, 30, 720);
+  Put16(data, 32, 1000);
+  Put16(data, 34, 1000);
+  Put16(data, kPicf, 0x000F);  // OfficeArtSpContainer.
+  Put16(data, kPicf + 2, 0xF004);
+  Put32(data, kPicf + 4, kRecord + kFsp);
+  Put16(data, kPicf + kRecord, 0x0012);  // Rectangle FSP, version 2.
+  Put16(data, kPicf + kRecord + 2, 0xF00A);
+  Put32(data, kPicf + kRecord + 4, kFsp);
+  Put32(data, kPicf + kRecord + kRecord, 37);
+  auto image = doc::ReadInlinePicture(data, 0);
+  ASSERT_FALSE(image);
+  EXPECT_EQ(image.error().message, "PICF has no supported embedded BLIP");
+  auto shape = doc::ReadInlineShape(data, 0);
+  ASSERT_TRUE(shape) << shape.error().message;
+  EXPECT_EQ(shape->id, 37u);
+  EXPECT_EQ(shape->type, model::kShapeRectangle);
+  EXPECT_EQ(shape->width, 1440);
+  EXPECT_EQ(shape->height, 720);
+  EXPECT_TRUE(shape->inline_shape);
+  model::Document document;
+  document.shapes.push_back(*shape);
+  document.paragraphs.push_back({});
+  model::Run run;
+  run.shape_index = 0;
+  document.paragraphs.back().runs.push_back(run);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<v:rect id=\"Shape37\""), std::string::npos);
+  EXPECT_NE(xml.find("width:72.000000pt;height:36.000000pt"),
+            std::string::npos);
+  EXPECT_EQ(xml.find("position:absolute"), std::string::npos);
+}
+
 TEST(M5FloatingImages, LibreOfficeGoldenAnchor) {
   auto parsed = ParseFixture("floating-image");
   ASSERT_TRUE(parsed) << parsed.error().message;

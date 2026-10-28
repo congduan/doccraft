@@ -452,6 +452,47 @@ std::expected<Bytes, Error> DrawingRange(Bytes table, Fib::Range range) {
 }
 }  // namespace
 
+std::expected<model::Shape, Error> ReadInlineShape(Bytes data,
+                                                   uint32_t offset) {
+  if (offset > data.size() || data.size() - offset < detail::kPicfHeaderSize)
+    return std::unexpected(Error{"PICF outside Data stream"});
+  Bytes picf = data.subspan(offset);
+  const size_t length = U32(picf, 0);
+  if (length <= detail::kPicfHeaderSize || length > picf.size() ||
+      U16(picf, 4) != detail::kPicfHeaderSize)
+    return std::unexpected(Error{"invalid PICF header or length"});
+  size_t start = detail::kPicfHeaderSize;
+  if (U16(picf, 6) == detail::kPicfShapeFile) {
+    if (length <= start)
+      return std::unexpected(Error{"missing PICF picture name length"});
+    start += 1 + picf[start];
+    if (start > length)
+      return std::unexpected(Error{"PICF picture name exceeds length"});
+  }
+  DrawingIndex index;
+  auto parsed = IndexArt(picf.subspan(start, length - start), index, 0);
+  if (!parsed)
+    return std::unexpected(parsed.error());
+  if (index.shapes.size() != 1 || !index.pictures.empty())
+    return std::unexpected(Error{"PICF has no supported inline shape"});
+  const int goal_width = S16(picf, detail::kPicfGoalOffset);
+  const int goal_height = S16(picf, detail::kPicfGoalOffset + 2);
+  const int scale_width = U16(picf, detail::kPicfScaleOffset);
+  const int scale_height = U16(picf, detail::kPicfScaleOffset + 2);
+  if (goal_width <= 0 || goal_height <= 0 || !scale_width || !scale_height)
+    return std::unexpected(Error{"invalid PICF dimensions"});
+  model::Shape shape;
+  shape.id = index.shapes.begin()->first;
+  shape.type = index.shapes.begin()->second.type;
+  shape.text = index.shapes.begin()->second.text;
+  shape.width = std::clamp(goal_width * scale_width / detail::kPicfScaleUnit, 1,
+                           static_cast<int>(detail::kMaxTwips));
+  shape.height = std::clamp(goal_height * scale_height / detail::kPicfScaleUnit,
+                            1, static_cast<int>(detail::kMaxTwips));
+  shape.inline_shape = true;
+  return shape;
+}
+
 std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
     Bytes word, Bytes table, const Fib& fib) {
   std::vector<FloatingPicture> result;

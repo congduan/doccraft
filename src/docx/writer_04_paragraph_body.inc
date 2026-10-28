@@ -253,10 +253,12 @@ void WriteShape(pugi::xml_node run, int index, WriteContext& ctx) {
   auto points = [](int twips) {
     return std::to_string(twips / 20.0) + "pt";
   };
-  Attr(node, "style",
-       "position:absolute;left:" + points(shape.anchor.x) +
-           ";top:" + points(shape.anchor.y) + ";width:" + points(shape.width) +
-           ";height:" + points(shape.height));
+  Attr(
+      node, "style",
+      (shape.inline_shape ? std::string()
+                          : "position:absolute;left:" + points(shape.anchor.x) +
+                                ";top:" + points(shape.anchor.y) + ";") +
+          "width:" + points(shape.width) + ";height:" + points(shape.height));
   if (shape.type == model::kShapeLine) {
     Attr(node, "from", "0pt,0pt");
     Attr(node, "to", points(shape.width) + "," + points(shape.height));
@@ -279,7 +281,8 @@ void WriteShape(pugi::xml_node run, int index, WriteContext& ctx) {
     case model::ImageWrap::kSquare:
       break;
   }
-  Attr(node.append_child("w10:wrap"), "type", wrap);
+  if (!shape.inline_shape)
+    Attr(node.append_child("w10:wrap"), "type", wrap);
   if (!shape.text.empty()) {
     auto content = node.append_child("v:textbox").append_child("w:txbxContent");
     model::Paragraph paragraph;

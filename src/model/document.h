@@ -50,6 +50,7 @@ struct Shape {
   int type = 0, width = 0, height = 0;
   ImageAnchor anchor;
   std::string text;
+  bool inline_shape = false;
 };
 
 struct OleObject {
