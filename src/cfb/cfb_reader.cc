@@ -63,6 +63,7 @@ struct Header {
   uint32_t mini_fat_start = 0;
   uint32_t num_mini_fat = 0;
   uint32_t difat_start = 0;
+  uint32_t num_dir_sectors = 0;
 };
 
 std::span<const uint8_t> SectorView(std::span<const uint8_t> bytes,
@@ -103,6 +104,13 @@ std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes) {
   if (bytes.size() < header.sector_size ||
       bytes.size() % header.sector_size != 0) {
     return std::unexpected(Fail(ErrorCode::kTruncated, "partial sector"));
+  }
+  // [MS-CFB] §2.2: Number of Directory Sectors (offset 40). Must be 0 for
+  // v3; for v4 it holds the actual count of directory chain sectors.
+  header.num_dir_sectors = U32(bytes, 40);
+  if (header.major_version == 3 && header.num_dir_sectors != 0) {
+    return std::unexpected(
+        Fail(ErrorCode::kCorruptFat, "v3 header with directory sectors"));
   }
   header.first_dir_sector = U32(bytes, 48);
   header.mini_fat_start = U32(bytes, 60);
@@ -273,6 +281,13 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
     return std::unexpected(
         Fail(ErrorCode::kCorruptDirectory, "empty directory"));
   }
+  // [MS-CFB] §2.2: for v4 the header field must equal the directory chain
+  // length; a mismatch means the header lies about its own structure.
+  const uint64_t chain_sectors = directory.size() / header.sector_size;
+  if (header.major_version == 4 && chain_sectors != header.num_dir_sectors) {
+    return std::unexpected(
+        Fail(ErrorCode::kCorruptDirectory, "directory sector count mismatch"));
+  }
   std::vector<DirEntry> entries;
   for (size_t i = 0; i + kDirEntrySize <= directory.size();
        i += kDirEntrySize) {
@@ -340,9 +355,21 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
     result.insert(result.end(), chunk.begin(), chunk.begin() + take);
     uint32_t next = table[at];
     if (i + 1 == count) {
+      // Tolerate one trailing chain sector beyond the declared size when it
+      // is properly ENDOFCHAIN-terminated: some real-world producers round
+      // streams up to an extra sector and keep the terminator on that one.
       if (next != kEnd) {
-        return std::unexpected(
-            Fail(ErrorCode::kCorruptFat, "chain longer than stream"));
+        if (next >= table.size() || seen[next]) {
+          return std::unexpected(
+              Fail(ErrorCode::kCorruptFat, "chain longer than stream"));
+        }
+        auto extra = mini ? Bytes() : SectorBytes(next);
+        if (!mini && !extra) {
+          return std::unexpected(extra.error());
+        }
+        seen[next] = 1;
+        at = next;
+        continue;  // the following iteration must see ENDOFCHAIN
       }
     } else if (next == kEnd || next == kFree || next == kFat ||
                next == kDifat) {
@@ -416,25 +443,37 @@ std::expected<CfbReader, Error> CfbReader::Open(
 
 std::expected<std::vector<uint8_t>, Error> CfbReader::ReadStream(
     std::string_view name) const {
-  std::expected<std::vector<uint8_t>, Error> result =
-      std::unexpected(Fail(ErrorCode::kStreamNotFound, "stream not found"));
+  // Disambiguate '/' by priority: full path > relative path > entry name.
+  // Collect the best match instead of returning the first directory-order
+  // hit, so a stream named "a/b" can no longer shadow storage "a"/stream "b".
+  const DirEntry* best = nullptr;
+  int best_rank = -1;  // 2 = full path, 1 = relative, 0 = entry name
   auto visited = Visit([&](const DirEntry& entry, std::string_view path, bool) {
     if (entry.type != EntryType::kStream)
       return true;
     const size_t prefix_length = entries_[0].name.size() + 1;
     if (path.size() <= prefix_length) {
-      result = std::unexpected(
-          Fail(ErrorCode::kCorruptDirectory, "stream path lacks root prefix"));
-      return false;
+      return true;  // skip malformed; handled by directory validation
     }
     const std::string_view relative = path.substr(prefix_length);
-    if (path != name && relative != name && entry.name != name)
-      return true;
-    result = ReadChain(entry.start_sector, entry.size, entry.size < 4096);
-    return false;
+    int rank = -1;
+    if (path == name)
+      rank = 2;
+    else if (relative == name)
+      rank = 1;
+    else if (entry.name == name)
+      rank = 0;
+    if (rank > best_rank) {
+      best_rank = rank;
+      best = &entry;
+    }
+    return true;
   });
   if (!visited)
     return std::unexpected(visited.error());
-  return result;
+  if (!best)
+    return std::unexpected(
+        Fail(ErrorCode::kStreamNotFound, "stream not found"));
+  return ReadChain(best->start_sector, best->size, best->size < 4096);
 }
 }  // namespace doccraft::cfb

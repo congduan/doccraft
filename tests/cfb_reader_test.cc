@@ -321,6 +321,82 @@ TEST(CfbReaderTest, RejectsInflatedAllFatStreamWithoutThrowing) {
   EXPECT_FALSE(threw);
 }
 
+// KNOWN-SIMPLIFICATIONS #2: header offset 40 directory sector count.
+// v3 must carry 0; a non-zero field is rejected.
+TEST(CfbReaderTest, RejectsV3HeaderWithDirectorySectorCount) {
+  auto bytes = CfbBuilder().AddStream("s", MakePayload(100, 7)).Build();
+  Put32(bytes, 40, 3);  // v3 forbids a non-zero directory sector count
+  auto result = CfbReader::Open(bytes);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().code, ErrorCode::kCorruptFat);
+}
+
+// v4: the field must equal the actual directory chain length.
+TEST(CfbReaderTest, RejectsV4DirectorySectorCountMismatch) {
+  auto bytes = CfbBuilder()
+                   .SetSectorSize(4096)
+                   .AddStream("s", MakePayload(100, 7))
+                   .Build();
+  // Real count is 1 (single directory sector); claim 2.
+  Put32(bytes, 40, 2);
+  auto result = CfbReader::Open(bytes);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().code, ErrorCode::kCorruptDirectory);
+}
+
+// ReadChain: one trailing ENDOFCHAIN-terminated sector beyond the declared
+// stream size is tolerated (real-world producers round up).
+TEST(CfbReaderTest, ToleratesTrailingEndOfChainSector) {
+  // Build a normal file, then extend one stream's FAT chain by one sector
+  // without changing the declared size: the reader must still return exactly
+  // `size` bytes and not report "chain longer than stream".
+  auto bytes = CfbBuilder().AddStream("s", MakePayload(512, 9)).Build();
+  // Locate the stream's start sector via a successful open first.
+  auto ok = CfbReader::Open(bytes);
+  ASSERT_TRUE(ok);
+  uint32_t start = 0;
+  ASSERT_TRUE(
+      ok->Visit([&](const DirEntry& e, std::string_view, bool is_storage) {
+        if (!is_storage && e.name == "s") {
+          start = e.start_sector;
+          return false;
+        }
+        return true;
+      }));
+  // The stream occupies exactly one sector whose FAT entry is ENDOFCHAIN.
+  // Append one physical sector and link it: start -> extra -> ENDOFCHAIN.
+  const uint32_t sector_size = 512;
+  const uint32_t old_count =
+      static_cast<uint32_t>(bytes.size() / sector_size) - 1;
+  bytes.resize(bytes.size() + sector_size, 0);
+  // New FAT entry for the extra sector: ENDOFCHAIN.
+  // FAT sector begins at physical offset sector_size.
+  const size_t fat_offset = sector_size + start * 4;
+  const uint32_t extra_sector = old_count;  // appended sector index
+  Put32(bytes, fat_offset, extra_sector);
+  Put32(bytes, sector_size + extra_sector * 4, 0xFFFFFFFEu);  // ENDOFCHAIN
+  auto result = CfbReader::Open(bytes);
+  ASSERT_TRUE(result) << result.error().message;
+  auto data = result->ReadStream("s");
+  ASSERT_TRUE(data) << data.error().message;
+  EXPECT_EQ(data->size(), 512u);
+}
+
+// ReadStream: '/' disambiguation — full path wins over bare entry name.
+TEST(CfbReaderTest, ReadStreamPrefersFullPathOverEntryName) {
+  // storage "a" containing stream "b", plus a top-level stream "a/b".
+  auto bytes = CfbBuilder()
+                   .AddStream("a/b", MakePayload(16, 1))
+                   .AddStream("x/a~b", MakePayload(16, 2))
+                   .Build();
+  auto result = CfbReader::Open(bytes);
+  ASSERT_TRUE(result);
+  // Full path "a/b" resolves to the nested stream (payload 1).
+  auto data = result->ReadStream("a/b");
+  ASSERT_TRUE(data);
+  EXPECT_EQ((*data)[0], 1);
+}
+
 TEST(CfbReaderTest, HandlesMutatedHeadersAndDirectoryWithoutCrashing) {
   CfbBuilder b;
   b.AddStream("Small", MakePayload(137, 0x7A));
