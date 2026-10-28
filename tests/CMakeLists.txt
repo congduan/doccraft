@@ -168,7 +168,8 @@ target_compile_definitions(m4_textbox_test PRIVATE
 gtest_discover_tests(m4_textbox_test)
 
 add_executable(docx_writer_test docx_writer_test.cc)
-target_link_libraries(docx_writer_test PRIVATE doccraft_docx gtest_main)
+target_link_libraries(docx_writer_test PRIVATE doccraft_cfb doccraft_doc doccraft_docx gtest_main)
+target_compile_definitions(docx_writer_test PRIVATE DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(docx_writer_test)
 add_test(NAME docx_zip_order COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/docx/validate_order.py

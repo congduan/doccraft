@@ -14,11 +14,16 @@
 
 #include <gtest/gtest.h>
 
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
 #include "miniz.h"
 
+#include "cfb/cfb_reader.h"
+#include "doc/fib.h"
+#include "doc/format.h"
 #include "docx/internal.h"
 #include "docx/writer.h"
 
@@ -224,6 +229,8 @@ TEST(DocxWriterRelations, HeaderImageAndLinkUseOwnRelationships) {
   EXPECT_EQ(docrels.find("https://example.com/header"), std::string::npos);
 }
 
+
+
 TEST(DocxWriterRelations, PlainHeaderHasNoRelationshipsPart) {
   model::Document document;
   model::Paragraph header;
@@ -381,6 +388,64 @@ TEST(DocxWriterRelations, HeaderNestedImageOleAndShapeDeclareNamespaces) {
   EXPECT_NE(rels.find("Target=\"media/image1.png\""), std::string::npos);
   EXPECT_NE(rels.find("Target=\"embeddings/oleObject1.bin\""),
             std::string::npos);
+}
+
+TEST(M4Textbox, LibreOfficeFloatingTextboxKeepsStoryAtAnchor) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb) << cfb.error().message;
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word) << word.error().message;
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table) << table.error().message;
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->textboxes.size(), 1U);
+  ASSERT_EQ(parsed->textboxes[0].paragraphs.size(), 1U);
+  ASSERT_EQ(parsed->textboxes[0].paragraphs[0].runs.size(), 1U);
+  EXPECT_EQ(parsed->textboxes[0].paragraphs[0].runs[0].text, "Box sample line");
+  auto written = docx::Write(*parsed);
+  ASSERT_TRUE(written) << written.error().message;
+  const std::string xml = Part(*written, "word/document.xml");
+  EXPECT_NE(xml.find("<w:txbxContent>"), std::string::npos);
+  EXPECT_NE(xml.find("Box sample line"), std::string::npos);
+  EXPECT_NE(xml.find("<w:pict>"), std::string::npos);
+}
+
+TEST(M4Textbox, HeaderTextboxAppearsInHeaderPart) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/header-textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb) << cfb.error().message;
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word) << word.error().message;
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table) << table.error().message;
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->textboxes.size(), 1U);
+  EXPECT_EQ(parsed->textboxes[0].paragraphs[0].runs[0].text, "Header box text");
+  auto written = docx::Write(*parsed);
+  ASSERT_TRUE(written) << written.error().message;
+  bool found = false;
+  for (int i = 1; i <= 6; ++i) {
+    const auto xml =
+        Part(*written, ("word/header" + std::to_string(i) + ".xml").c_str());
+    found |= xml.find("Header box text") != std::string::npos &&
+             xml.find("<w:txbxContent>") != std::string::npos;
+  }
+  EXPECT_TRUE(found);
 }
 
 }  // namespace
