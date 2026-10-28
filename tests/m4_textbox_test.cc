@@ -476,6 +476,32 @@ TEST(M6WriterBuffer, LastSectionHeaderPartLimitReturnsError) {
                 std::to_string(header_bytes) + " bytes)");
 }
 
+TEST(M6WriterBuffer, CommentImagePartLimitReturnsError) {
+  model::Document document;
+  model::Image image;
+  image.bytes.assign(4096, 'i');
+  image.width = 96;
+  image.height = 96;
+  document.images.push_back(std::move(image));
+  model::Comment comment;
+  model::Run image_run;
+  image_run.image_index = 0;
+  model::Paragraph body;
+  body.runs.push_back(std::move(image_run));
+  comment.paragraphs.push_back(std::move(body));
+  document.comments.push_back(std::move(comment));
+  constexpr size_t kTotalLimit = 16384;
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kTotalLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  const size_t image_bytes = Part(*baseline, "word/media/image1.png").size();
+  auto zip = docx::detail::WriteWithBufferLimit(document, kTotalLimit,
+                                                image_bytes - 1);
+  ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized comment image";
+  EXPECT_EQ(zip.error().message,
+            "writer part limit exceeded: word/media/image1.png (" +
+                std::to_string(image_bytes) + " bytes)");
+}
+
 TEST(M6TextboxDegradation, InvalidHeaderPlcKeepsHeaderText) {
   const std::string path =
       std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/header-textbox.doc";
