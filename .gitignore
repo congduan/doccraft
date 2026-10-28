@@ -7,3 +7,7 @@ compile_commands.json
 # Python bytecode (test tooling)
 __pycache__/
 *.pyc
+
+# .NET build output of tools/schema-gen (offline schema metadata dumper)
+tools/schema-gen/**/bin/
+tools/schema-gen/**/obj/

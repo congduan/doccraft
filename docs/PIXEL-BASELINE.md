@@ -19,8 +19,11 @@ done
 `comments-basic.doc` after doccraft conversion; a repeat produced the same
 result. `fast-saved-o-kurs.doc` has a page-count mismatch; `floating-image.doc`,
 `floating-tight.doc`, and `ole-embedded.doc` exceeded the pixel threshold.
-`footnote-endnote.doc` is counted as PASS by the comparison script because its
-checked-in `.allow` file records the known page-count exception. A PASS here
+`footnote-endnote.doc` used to pass only through a checked-in `.allow` page-count
+exception (A=1, B=2). The writer now emits the note reference mark, its tab stop
+and the note text styles, so both renders produce one page, the `.allow` file is
+gone, and an equivalent 150 DPI re-measurement finds 100 bad pixels (0.005%) —
+the same level as LibreOffice's own `.doc`→`.docx` import asymmetry. A PASS here
 means passing this specific LibreOffice comparison, not identical behavior in
 Microsoft Word or complete support for all forms of the feature.
 

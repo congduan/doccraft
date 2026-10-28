@@ -186,10 +186,8 @@ void WriteListLevel(pugi::xml_node list, const model::ListLevel& level,
                     size_t index) {
   auto ln = list.append_child("w:lvl");
   IntAttr(ln, "w:ilvl", index);
+  // CT_Lvl order: start, numFmt, lvlRestart, pStyle, isLgl, suff, lvlText.
   Value(ln, "w:start", level.start);
-  if (level.style >= 0) {
-    Attr(ln.append_child("w:pStyle"), "w:val", Id(level.style));
-  }
   const char* format = "decimal";
   if (level.format == kNumberFormatBullet) {
     format = "bullet";
@@ -205,12 +203,15 @@ void WriteListLevel(pugi::xml_node list, const model::ListLevel& level,
     format = "lowerLetter";
   }
   Attr(ln.append_child("w:numFmt"), "w:val", format);
-  Attr(ln.append_child("w:lvlText"), "w:val", level.text);
+  if (level.style >= 0) {
+    Attr(ln.append_child("w:pStyle"), "w:val", Id(level.style));
+  }
   if (level.suffix == 2) {
     Attr(ln.append_child("w:suff"), "w:val", "nothing");
   } else if (level.suffix == 1) {
     Attr(ln.append_child("w:suff"), "w:val", "space");
   }
+  Attr(ln.append_child("w:lvlText"), "w:val", level.text);
   auto pp = ln.append_child("w:pPr");
   if (level.left || level.first) {
     auto ind = pp.append_child("w:ind");

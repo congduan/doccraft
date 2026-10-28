@@ -84,19 +84,37 @@ int TableIndent(const model::Table& t, bool* has_indent) {
 }
 
 void WriteTableProperties(pugi::xml_node tn, const model::Table& t) {
+  // CT_TblPr order: tblStyle, tblpPr, tblOverlap, bidiVisual,
+  // tblStyleRowBandSize, tblStyleColBandSize, tblW, jc, tblCellSpacing,
+  // tblInd, tblBorders, shd, tblLayout, tblCellMar, tblLook.
   auto pr = tn.append_child("w:tblPr");
   if (t.style >= 0) {
     Attr(pr.append_child("w:tblStyle"), "w:val", Id(t.style));
   }
   WriteTablePosition(pr, t);
+  if (t.no_overlap) {
+    Attr(pr.append_child("w:tblOverlap"), "w:val", "never");
+  }
+  if (t.bidi) {
+    One(pr, "w:bidiVisual");
+  }
+  if (t.row_band > 0) {
+    Value(pr, "w:tblStyleRowBandSize", t.row_band);
+  }
+  if (t.col_band > 0) {
+    Value(pr, "w:tblStyleColBandSize", t.col_band);
+  }
   auto width = pr.append_child("w:tblW");
   IntAttr(width, "w:w", t.width);
   Attr(width, "w:type",
        t.width_type == 3   ? "dxa"
        : t.width_type == 2 ? "pct"
                            : "auto");
-  Attr(pr.append_child("w:tblLayout"), "w:type",
-       t.auto_fit ? "autofit" : "fixed");
+  if (t.align >= 0) {
+    const char* aligns[] = {"left", "center", "right"};
+    Attr(pr.append_child("w:jc"), "w:val",
+         t.align < 3 ? aligns[t.align] : "left");
+  }
   if (t.cell_spacing >= 0) {
     auto spacing = pr.append_child("w:tblCellSpacing");
     IntAttr(spacing, "w:w", t.cell_spacing);
@@ -109,25 +127,10 @@ void WriteTableProperties(pugi::xml_node tn, const model::Table& t) {
     IntAttr(ind, "w:w", indent);
     Attr(ind, "w:type", "dxa");
   }
-  if (t.align >= 0) {
-    const char* aligns[] = {"left", "center", "right"};
-    Attr(pr.append_child("w:jc"), "w:val",
-         t.align < 3 ? aligns[t.align] : "left");
-  }
-  if (t.bidi) {
-    One(pr, "w:bidiVisual");
-  }
-  if (t.no_overlap) {
-    Attr(pr.append_child("w:tblOverlap"), "w:val", "never");
-  }
-  ShadePr(pr, t.shade, t.shade_fore, t.shade_pattern);
   WriteTableBorders(pr, t);
-  if (t.row_band > 0) {
-    Value(pr, "w:tblStyleRowBandSize", t.row_band);
-  }
-  if (t.col_band > 0) {
-    Value(pr, "w:tblStyleColBandSize", t.col_band);
-  }
+  ShadePr(pr, t.shade, t.shade_fore, t.shade_pattern);
+  Attr(pr.append_child("w:tblLayout"), "w:type",
+       t.auto_fit ? "autofit" : "fixed");
   auto margins = pr.append_child("w:tblCellMar");
   const char* margin_sides[] = {"w:top", "w:left", "w:bottom", "w:right"};
   for (size_t k = 0; k < 4; k++) {
@@ -221,6 +224,8 @@ void WriteCellMargins(pugi::xml_node tcp, const model::CellProperties& cp,
 
 void WriteCellProperties(pugi::xml_node tcp, const model::CellProperties* cp,
                          int cell_width, size_t span, bool correct_left_inset) {
+  // CT_TcPr order: tcW, gridSpan, hMerge, vMerge, tcBorders, shd, noWrap,
+  // tcMar, textDirection, tcFitText, vAlign, hideMark.
   if (cell_width >= 0) {
     auto cw = tcp.append_child("w:tcW");
     IntAttr(cw, "w:w", cell_width);
@@ -232,36 +237,36 @@ void WriteCellProperties(pugi::xml_node tcp, const model::CellProperties* cp,
   if (!cp) {
     return;
   }
-  WriteCellBorders(tcp, *cp);
-  ShadePr(tcp, cp->shade, cp->shade_fore, cp->shade_pattern);
-  WriteCellMargins(tcp, *cp, correct_left_inset);
+  if (cp->horizontal_merge) {
+    Attr(tcp.append_child("w:hMerge"), "w:val",
+         cp->horizontal_merge == 2 ? "restart" : "continue");
+  }
   if (cp->vertical_merge) {
     Attr(tcp.append_child("w:vMerge"), "w:val",
          cp->vertical_merge == 2 ? "restart" : "continue");
   }
-  if (cp->horizontal_merge) {
-    Attr(tcp.append_child("w:hMerge"), "w:val",
-         cp->horizontal_merge == 2 ? "restart" : "continue");
+  WriteCellBorders(tcp, *cp);
+  ShadePr(tcp, cp->shade, cp->shade_fore, cp->shade_pattern);
+  if (cp->no_wrap) {
+    One(tcp, "w:noWrap");
+  }
+  WriteCellMargins(tcp, *cp, correct_left_inset);
+  if (cp->text_direction >= 0) {
+    const char* directions[] = {"lrTb", "tbRl",  "lrTb",
+                                "btLr", "lrTbV", "tbRlV"};
+    Attr(tcp.append_child("w:textDirection"), "w:val",
+         cp->text_direction < 6 ? directions[cp->text_direction] : "lrTb");
+  }
+  if (cp->fit_text) {
+    One(tcp, "w:tcFitText");
   }
   if (cp->vertical_align >= 0) {
     const char* aligns[] = {"top", "center", "bottom"};
     Attr(tcp.append_child("w:vAlign"), "w:val",
          cp->vertical_align < 3 ? aligns[cp->vertical_align] : "top");
   }
-  if (cp->no_wrap) {
-    One(tcp, "w:noWrap");
-  }
-  if (cp->fit_text) {
-    One(tcp, "w:tcFitText");
-  }
   if (cp->hide_mark) {
     One(tcp, "w:hideMark");
-  }
-  if (cp->text_direction >= 0) {
-    const char* directions[] = {"lrTb", "tbRl",  "lrTb",
-                                "btLr", "lrTbV", "tbRlV"};
-    Attr(tcp.append_child("w:textDirection"), "w:val",
-         cp->text_direction < 6 ? directions[cp->text_direction] : "lrTb");
   }
 }
 

@@ -216,4 +216,80 @@ TEST(M4Ole, OlePresentationMetafilesBecomePreviewParts) {
     EXPECT_FALSE(doc::ReadOlePresentation(pres));
   }
 }
+
+TEST(M4Ole, OlePresentationBitmapBecomesBmpPart) {
+  // CF_DIB presentation: BITMAPINFOHEADER plus pixel data, no file header.
+  constexpr size_t kHeader = 40;
+  constexpr size_t kPixels = 16;  // 2 rows of a 2x2 24-bit bitmap.
+  std::vector<uint8_t> dib(kHeader + kPixels, 0);
+  Put32(dib, 0, kHeader);  // biSize
+  Put32(dib, 4, 2);        // biWidth
+  Put32(dib, 8, 2);        // biHeight
+  dib[12] = 1;             // biPlanes
+  dib[14] = 24;            // biBitCount
+  dib[kHeader] = 0x11;     // first pixel byte
+  std::vector<uint8_t> pres(40 + dib.size());
+  Put32(pres, 0, 0xFFFFFFFF);
+  Put32(pres, 4, 8);  // CF_DIB
+  Put32(pres, 8, 4);
+  Put32(pres, 28, 2540);
+  Put32(pres, 32, 1270);
+  Put32(pres, 36, dib.size());
+  std::copy(dib.begin(), dib.end(), pres.begin() + 40);
+
+  auto image = doc::ReadOlePresentation(pres);
+  ASSERT_TRUE(image) << image.error().message;
+  ASSERT_TRUE(*image);
+  EXPECT_EQ((*image)->format, model::ImageFormat::kBmp);
+  EXPECT_EQ((*image)->width, 1440);
+  EXPECT_EQ((*image)->height, 720);
+  ASSERT_EQ((*image)->bytes.size(), 14 + dib.size());
+  const auto& bmp = (*image)->bytes;
+  EXPECT_EQ(bmp[0], 'B');
+  EXPECT_EQ(bmp[1], 'M');
+  // bfSize and bfOffBits: 14-byte file header plus the 40-byte DIB header.
+  const auto le32 = [&bmp](size_t at) {
+    return static_cast<uint32_t>(bmp[at]) |
+           static_cast<uint32_t>(bmp[at + 1]) << 8 |
+           static_cast<uint32_t>(bmp[at + 2]) << 16 |
+           static_cast<uint32_t>(bmp[at + 3]) << 24;
+  };
+  EXPECT_EQ(le32(2), static_cast<uint32_t>(14 + dib.size()));
+  EXPECT_EQ(le32(10), static_cast<uint32_t>(14 + kHeader));
+  EXPECT_EQ(std::string(bmp.begin() + 14, bmp.end()),
+            std::string(dib.begin(), dib.end()));
+
+  model::Document document;
+  document.images.push_back(**image);
+  model::OleObject object;
+  object.storage_id = 42;
+  object.program_id = "Package";
+  object.bytes = {1, 2, 3};
+  object.preview_image_index = 0;
+  document.ole_objects.push_back(std::move(object));
+  document.paragraphs.push_back({});
+  model::Run run;
+  run.ole_index = 0;
+  document.paragraphs.back().runs.push_back(run);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_EQ(Part(*zip, "word/media/image1.bmp"),
+            std::string(bmp.begin(), bmp.end()));
+  EXPECT_NE(Part(*zip, "[Content_Types].xml")
+                .find("<Default Extension=\"bmp\" ContentType=\"image/bmp\"/>"),
+            std::string::npos);
+  EXPECT_NE(Part(*zip, "word/document.xml").find("<v:imagedata"),
+            std::string::npos);
+
+  // Malformed payloads stay errors rather than producing an unreadable part.
+  auto bad_bits = pres;
+  bad_bits[40 + 14] = 3;  // biBitCount
+  EXPECT_FALSE(doc::ReadOlePresentation(bad_bits));
+  auto bad_palette = pres;
+  bad_palette[40 + 14] = 8;              // 256 palette entries...
+  Put32(bad_palette, 40 + 32, 0x10000);  // ...but a far larger biClrUsed.
+  EXPECT_FALSE(doc::ReadOlePresentation(bad_palette));
+  const std::vector<uint8_t> truncated(pres.begin(), pres.begin() + 40 + 10);
+  EXPECT_FALSE(doc::ReadOlePresentation(truncated));
+}
 }  // namespace

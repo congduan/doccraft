@@ -23,7 +23,7 @@
 #include <vector>
 namespace doccraft::model {
 
-enum class ImageFormat { kPng, kJpeg, kWmf, kEmf };
+enum class ImageFormat { kPng, kJpeg, kWmf, kEmf, kBmp };
 
 enum class ImageWrap { kNone, kSquare, kTight, kThrough, kTopAndBottom };
 inline constexpr int kShapeRectangle = 1, kShapeEllipse = 3, kShapeLine = 20;
@@ -52,6 +52,11 @@ struct Shape {
   std::string text;
   bool inline_shape = false;
   uint32_t textbox_id = 0;  // OfficeArtClientTextbox: story and chain index.
+  // OfficeArt fill/line ([MS-ODRAW] §2.3.7.2 / §2.3.8.1 / §2.3.8.14).
+  // -1 keeps the writer default: no fill for the shape, no explicit line color.
+  int fill_color = -1;  // COLORREF of a solid fill.
+  int line_color = -1;  // COLORREF of a solid line.
+  int line_width = 0;   // Line width in EMU; 0 = writer default.
 };
 
 struct OleObject {
@@ -143,6 +148,9 @@ struct Run {
   // w:footnoteReference / w:endnoteReference. -1 = not a reference.
   int note_ref = -1;
   bool note_endnote = false;
+  // Writer-synthesized reference mark inside a note part: 1 writes
+  // w:footnoteRef, 2 writes w:endnoteRef. 0 = the run carries no mark.
+  int note_ref_mark = 0;
   // Comment anchor: index into Document::comments + 1 (w:commentReference id).
   int comment_ref = -1;
   // Bookmark marker: w:bookmarkStart / w:bookmarkEnd with this id and name.

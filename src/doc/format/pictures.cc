@@ -262,6 +262,52 @@ std::expected<model::Image, Error> ReadInlinePicture(Bytes data,
   return image;
 }
 
+namespace {
+// Turns a CF_DIB presentation payload into a stand-alone .bmp: a
+// BITMAPFILEHEADER followed by the untouched BITMAPINFOHEADER block. The
+// palette (bit counts up to 8) and the optional BI_BITFIELDS masks stay in
+// place, so only the pixel-data offset has to be computed.
+std::expected<std::vector<uint8_t>, Error> PackDib(Bytes dib) {
+  if (dib.size() < detail::kBitmapInfoHeaderSize)
+    return std::unexpected(Error{"truncated OLE DIB preview"});
+  const uint32_t header = U32(dib, detail::kBitmapHeaderSizeOffset);
+  const uint16_t planes = U16(dib, detail::kBitmapPlanesOffset);
+  const uint16_t bits = U16(dib, detail::kBitmapBitCountOffset);
+  const uint32_t compression = U32(dib, detail::kBitmapCompressionOffset);
+  const uint32_t colors = U32(dib, detail::kBitmapColorsUsedOffset);
+  if (header < detail::kBitmapInfoHeaderSize || header > dib.size() ||
+      planes != detail::kBitmapPlanes ||
+      (bits != 1 && bits != 4 && bits != 8 && bits != 16 && bits != 24 &&
+       bits != 32) ||
+      (compression != detail::kBitmapRgb &&
+       compression != detail::kBitmapBitfields))
+    return std::unexpected(Error{"unsupported OLE DIB preview format"});
+  uint64_t offset = detail::kBitmapFileHeaderSize + header;
+  if (compression == detail::kBitmapBitfields)
+    offset += detail::kBitmapMasksSize;
+  if (bits <= detail::kBitmapPaletteMaxBits) {
+    const uint64_t entries = colors ? colors : uint64_t{1} << bits;
+    offset += entries * 4;
+  }
+  if (offset > detail::kBitmapFileHeaderSize + dib.size())
+    return std::unexpected(Error{"OLE DIB palette exceeds payload"});
+  std::vector<uint8_t> bmp(detail::kBitmapFileHeaderSize, 0);
+  const auto put_le = [&bmp](size_t at, uint32_t value, size_t width) {
+    for (size_t i = 0; i < width; i++)
+      bmp[at + i] = static_cast<uint8_t>(value >> (8 * i));
+  };
+  bmp[0] = 'B';
+  bmp[1] = 'M';
+  // The payload was already bounded by kMaxImageSize, so the 32-bit file size
+  // and offset fields cannot overflow here.
+  put_le(2, static_cast<uint32_t>(detail::kBitmapFileHeaderSize + dib.size()),
+         4);
+  put_le(10, static_cast<uint32_t>(offset), 4);
+  bmp.insert(bmp.end(), dib.begin(), dib.end());
+  return bmp;
+}
+}  // namespace
+
 std::expected<std::optional<model::Image>, Error> ReadOlePresentation(
     Bytes stream, size_t budget) {
   if (stream.size() < detail::kOlePresentationPrefix)
@@ -271,7 +317,8 @@ std::expected<std::optional<model::Image>, Error> ReadOlePresentation(
       marker != detail::kOleClipboardMarkerAlt)
     return std::nullopt;
   const uint32_t format = U32(stream, 4);
-  if (format != detail::kOleClipboardWmf && format != detail::kOleClipboardEmf)
+  if (format != detail::kOleClipboardWmf &&
+      format != detail::kOleClipboardEmf && format != detail::kOleClipboardDib)
     return std::nullopt;
   const uint32_t target_size = U32(stream, 8);
   if (target_size < 4 || target_size > stream.size() - 8 ||
@@ -296,12 +343,13 @@ std::expected<std::optional<model::Image>, Error> ReadOlePresentation(
         U32(payload, 4) > payload.size() ||
         U32(payload, detail::kEmfSignatureOffset) != detail::kEmfSignature)
       return std::unexpected(Error{"invalid OLE EMF preview"});
-  } else if (payload.size() < detail::kWmfHeaderBytes ||
-             U16(payload, 2) != detail::kWmfHeaderWords ||
-             (U16(payload, 4) != detail::kWmfVersion1 &&
-              U16(payload, 4) != detail::kWmfVersion3) ||
-             stream.size() - start - size < detail::kOleWmfTrailer) {
-    return std::unexpected(Error{"invalid OLE WMF preview"});
+  } else if (format == detail::kOleClipboardWmf) {
+    if (payload.size() < detail::kWmfHeaderBytes ||
+        U16(payload, 2) != detail::kWmfHeaderWords ||
+        (U16(payload, 4) != detail::kWmfVersion1 &&
+         U16(payload, 4) != detail::kWmfVersion3) ||
+        stream.size() - start - size < detail::kOleWmfTrailer)
+      return std::unexpected(Error{"invalid OLE WMF preview"});
   }
   const int64_t twip_width =
       int64_t{width} * detail::kTwipsPerInch / detail::kOleHimetricPerInch;
@@ -311,10 +359,18 @@ std::expected<std::optional<model::Image>, Error> ReadOlePresentation(
       twip_height > detail::kMaxTwips)
     return std::unexpected(Error{"OLE preview dimensions exceed limit"});
   model::Image image;
-  image.format = format == detail::kOleClipboardEmf ? model::ImageFormat::kEmf
-                                                    : model::ImageFormat::kWmf;
   image.width = static_cast<int>(twip_width);
   image.height = static_cast<int>(twip_height);
+  if (format == detail::kOleClipboardDib) {
+    auto bmp = PackDib(payload);
+    if (!bmp)
+      return std::unexpected(bmp.error());
+    image.format = model::ImageFormat::kBmp;
+    image.bytes = std::move(*bmp);
+    return image;
+  }
+  image.format = format == detail::kOleClipboardEmf ? model::ImageFormat::kEmf
+                                                    : model::ImageFormat::kWmf;
   image.bytes.assign(payload.begin(), payload.end());
   return image;
 }
@@ -340,6 +396,16 @@ std::expected<ArtRecord, Error> ArtNext(Bytes& bytes) {
   return record;
 }
 
+// OfficeArtCOLORREF: red, green and blue followed by a flag byte. A set flag
+// byte selects a palette, system or scheme color instead of a literal RGB
+// value; those are not resolved and leave the colour unset.
+bool PlainColor(uint32_t value, int& color) {
+  if (value & detail::kColorFlagMask)
+    return false;
+  color = static_cast<int>(value);
+  return true;
+}
+
 struct DrawingIndex {
   std::vector<Bytes> blips;
   std::map<uint32_t, uint32_t> pictures;
@@ -347,6 +413,10 @@ struct DrawingIndex {
     uint16_t type = 0;
     std::string text;
     uint32_t textbox_id = 0;
+    // OfficeArt fill and line, resolved from the shape's FOPT records.
+    int fill_color = -1, line_color = -1;
+    int line_width = 0;
+    bool solid_fill = false;
   };
   std::map<uint32_t, ShapeInfo> shapes;
   size_t records = 0;
@@ -370,6 +440,9 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
       uint32_t id = 0, pib = 0, textbox_id = 0;
       uint16_t shape_type = 0;
       std::string shape_text;
+      int fill_color = -1, line_color = -1, line_width = 0;
+      uint32_t fill_type = 0;
+      bool fill_type_set = false;
       Bytes children = r->body;
       while (!children.empty()) {
         if (++index.records > detail::kMaxDrawingRecords)
@@ -396,9 +469,23 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
           for (size_t i = 0; i < child->instance; ++i) {
             const size_t at = i * detail::kFopteSize;
             const uint16_t op = U16(child->body, at);
-            if ((op & detail::kPropertyIdMask) == detail::kPib &&
-                !(op & detail::kPropertyComplex))
-              pib = U32(child->body, at + 2);
+            const uint16_t property = op & detail::kPropertyIdMask;
+            if (!(op & detail::kPropertyComplex)) {
+              const uint32_t value = U32(child->body, at + 2);
+              if (property == detail::kPib) {
+                pib = value;
+              } else if (property == detail::kFillColor) {
+                PlainColor(value, fill_color);
+              } else if (property == detail::kFillType) {
+                fill_type = value;
+                fill_type_set = true;
+              } else if (property == detail::kLineColor) {
+                PlainColor(value, line_color);
+              } else if (property == detail::kLineWidth) {
+                line_width =
+                    static_cast<int>(std::min(value, detail::kMaxLineWidthEmu));
+              }
+            }
             if (op & detail::kPropertyComplex) {
               const uint32_t length = U32(child->body, at + 2);
               if (length > child->body.size() - complex_at)
@@ -436,11 +523,18 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
       }
       if (pib && !index.pictures.emplace(id, pib).second)
         return std::unexpected(Error{"duplicate drawing shape id"});
-      if (id && !index.shapes
-                     .emplace(id, DrawingIndex::ShapeInfo{shape_type,
-                                                          std::move(shape_text),
-                                                          textbox_id})
-                     .second)
+      DrawingIndex::ShapeInfo info;
+      info.type = shape_type;
+      info.text = std::move(shape_text);
+      info.textbox_id = textbox_id;
+      // A colour without an explicit fill type is a solid fill; patterned,
+      // gradient and picture fills are not mapped and leave the shape unfilled.
+      info.solid_fill = fill_color >= 0 &&
+                        (!fill_type_set || fill_type == detail::kFillTypeSolid);
+      info.fill_color = info.solid_fill ? fill_color : -1;
+      info.line_color = line_color;
+      info.line_width = line_width;
+      if (id && !index.shapes.emplace(id, std::move(info)).second)
         return std::unexpected(Error{"duplicate drawing shape id"});
     } else if (r->version == detail::kEscherContainerVersion) {
       auto nested = IndexArt(r->body, index, depth + 1,
@@ -493,6 +587,9 @@ std::expected<model::Shape, Error> ReadInlineShape(Bytes data,
   shape.textbox_id = index.shapes.begin()->second.textbox_id;
   shape.type = index.shapes.begin()->second.type;
   shape.text = index.shapes.begin()->second.text;
+  shape.fill_color = index.shapes.begin()->second.fill_color;
+  shape.line_color = index.shapes.begin()->second.line_color;
+  shape.line_width = index.shapes.begin()->second.line_width;
   shape.width = std::clamp(goal_width * scale_width / detail::kPicfScaleUnit, 1,
                            static_cast<int>(detail::kMaxTwips));
   shape.height = std::clamp(goal_height * scale_height / detail::kPicfScaleUnit,
@@ -632,13 +729,18 @@ std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
     if (picture != index.pictures.end()) {
       item.image.anchor = anchor;
     } else {
-      item.shape = model::Shape{id,
-                                shape->second.type,
-                                static_cast<int>(width),
-                                static_cast<int>(height),
-                                anchor,
-                                shape->second.text};
-      item.shape->textbox_id = shape->second.textbox_id;
+      model::Shape shape_record;
+      shape_record.id = id;
+      shape_record.type = shape->second.type;
+      shape_record.width = static_cast<int>(width);
+      shape_record.height = static_cast<int>(height);
+      shape_record.anchor = anchor;
+      shape_record.text = shape->second.text;
+      shape_record.textbox_id = shape->second.textbox_id;
+      shape_record.fill_color = shape->second.fill_color;
+      shape_record.line_color = shape->second.line_color;
+      shape_record.line_width = shape->second.line_width;
+      item.shape = std::move(shape_record);
     }
     result.push_back(std::move(item));
   }

@@ -189,19 +189,11 @@ void WriteFootnoteProperties(pugi::xml_node sec,
       section.footnote_start < 0 && section.footnote_format < 0) {
     return;
   }
+  // CT_FtnProps order: pos, numFmt, numStart, numRestart.
   auto note = sec.append_child("w:footnotePr");
   if (section.footnote_position >= 0) {
     Attr(note.append_child("w:pos"), "w:val",
          section.footnote_position == 2 ? "beneathText" : "pageBottom");
-  }
-  if (section.footnote_restart >= 0) {
-    const char* restart[] = {"continuous", "eachSect", "eachPage"};
-    Attr(note.append_child("w:numRestart"), "w:val",
-         section.footnote_restart < 3 ? restart[section.footnote_restart]
-                                      : "continuous");
-  }
-  if (section.footnote_start > 0) {
-    Value(note, "w:numStart", section.footnote_start);
   }
   if (section.footnote_format >= 0) {
     const char* format[] = {"decimal", "upperRoman", "lowerRoman",
@@ -209,6 +201,15 @@ void WriteFootnoteProperties(pugi::xml_node sec,
     Attr(note.append_child("w:numFmt"), "w:val",
          section.footnote_format < 5 ? format[section.footnote_format]
                                      : "decimal");
+  }
+  if (section.footnote_start > 0) {
+    Value(note, "w:numStart", section.footnote_start);
+  }
+  if (section.footnote_restart >= 0) {
+    const char* restart[] = {"continuous", "eachSect", "eachPage"};
+    Attr(note.append_child("w:numRestart"), "w:val",
+         section.footnote_restart < 3 ? restart[section.footnote_restart]
+                                      : "continuous");
   }
 }
 
@@ -242,6 +243,17 @@ void WriteEndnoteProperties(pugi::xml_node sec, const model::Section& section) {
 std::expected<void, Error> SectionPr(pugi::xml_node sec,
                                      const model::Section& section,
                                      WriteContext* ctx) {
+  // CT_SectPr order: headerReference*, footerReference*, footnotePr,
+  // endnotePr, type, pgSz, pgMar, paperSrc, pgBorders, lnNumType, pgNumType,
+  // cols, formProt, vAlign, noEndnote, titlePg, textDirection, bidi,
+  // rtlGutter, docGrid, printerSettings.
+  if (ctx != nullptr) {
+    auto result = WriteSectionReferences(sec, section, *ctx);
+    if (!result)
+      return std::unexpected(result.error());
+  }
+  WriteFootnoteProperties(sec, section);
+  WriteEndnoteProperties(sec, section);
   if (section.break_specified) {
     const char* types[] = {"continuous", "nextColumn", "nextPage", "evenPage",
                            "oddPage"};
@@ -249,11 +261,26 @@ std::expected<void, Error> SectionPr(pugi::xml_node sec,
          section.break_type < 5 ? types[section.break_type] : "nextPage");
   }
   WritePageSetup(sec, section);
+  WritePageBorders(sec, section);
+  WriteLineNumbering(sec, section);
+  WritePageNumbers(sec, section);
   WriteColumns(sec, section);
+  if (section.form_unprotected_set) {
+    // sprmSFProtected states whether the section opts out of form protection.
+    SpecBool(sec, "w:formProt", !section.form_unprotected, true);
+  }
   if (section.vertical_justify >= 0) {
     const char* align[] = {"top", "center", "both", "bottom"};
     Attr(sec.append_child("w:vAlign"), "w:val",
          align[section.vertical_justify]);
+  }
+  if (section.first_page_different) {
+    One(sec, "w:titlePg");
+  }
+  if (section.text_flow >= 0) {
+    const char* directions[] = {"lrTb", "tbRl", "btLr", "tbRl", "lrTb", "tbRl"};
+    Attr(sec.append_child("w:textDirection"), "w:val",
+         section.text_flow < 6 ? directions[section.text_flow] : "lrTb");
   }
   if (section.bidi) {
     One(sec, "w:bidi");
@@ -261,25 +288,6 @@ std::expected<void, Error> SectionPr(pugi::xml_node sec,
   if (section.rtl_gutter) {
     One(sec, "w:rtlGutter");
   }
-  WritePageNumbers(sec, section);
   WriteDocGrid(sec, section);
-  WritePageBorders(sec, section);
-  if (section.text_flow >= 0) {
-    const char* directions[] = {"lrTb", "tbRl", "btLr", "tbRl", "lrTb", "tbRl"};
-    Attr(sec.append_child("w:textDirection"), "w:val",
-         section.text_flow < 6 ? directions[section.text_flow] : "lrTb");
-  }
-  if (section.form_unprotected_set) {
-    // sprmSFProtected states whether the section opts out of form protection.
-    SpecBool(sec, "w:formProt", !section.form_unprotected, true);
-  }
-  WriteLineNumbering(sec, section);
-  WriteFootnoteProperties(sec, section);
-  WriteEndnoteProperties(sec, section);
-  if (ctx != nullptr) {
-    auto result = WriteSectionReferences(sec, section, *ctx);
-    if (!result)
-      return std::unexpected(result.error());
-  }
   return {};
 }

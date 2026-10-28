@@ -164,7 +164,8 @@ std::string BuildContentTypes(const WriteContext& ctx) {
         "<Default Extension=\"png\" ContentType=\"image/png\"/>"
         "<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>"
         "<Default Extension=\"wmf\" ContentType=\"image/x-wmf\"/>"
-        "<Default Extension=\"emf\" ContentType=\"image/x-emf\"/>";
+        "<Default Extension=\"emf\" ContentType=\"image/x-emf\"/>"
+        "<Default Extension=\"bmp\" ContentType=\"image/bmp\"/>";
   }
   if (ctx.document && !ctx.document->ole_objects.empty()) {
     out +=

@@ -162,6 +162,45 @@ TEST(M3Notes, WritesFootnoteAndEndnoteParts) {
   EXPECT_NE(rels.find("Target=\"endnotes.xml\""), std::string::npos);
 }
 
+TEST(M3Notes, NoteBodyCarriesReferenceMarkAndTextStyle) {
+  auto d = ParseFixture("footnote-endnote");
+  ASSERT_TRUE(d) << d.error().message;
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip) << zip.error().message;
+  struct Case {
+    const char* part;
+    const char* mark;
+    const char* text_style;
+  };
+  const Case cases[] = {{"word/footnotes.xml", "<w:footnoteRef/>",
+                         "<w:name w:val=\"footnote text\"/>"},
+                        {"word/endnotes.xml", "<w:endnoteRef/>",
+                         "<w:name w:val=\"endnote text\"/>"}};
+  for (const auto& item : cases) {
+    const std::string xml = Part(*zip, item.part);
+    ASSERT_FALSE(xml.empty()) << item.part;
+    const size_t mark = xml.find(item.mark);
+    ASSERT_NE(mark, std::string::npos) << item.part;
+    // The DOC text plane carries no mark, so the writer synthesizes the mark,
+    // then a tab stop at 340 twips, then the body text.
+    const size_t paragraph = xml.rfind("<w:p>", mark);
+    ASSERT_NE(paragraph, std::string::npos);
+    EXPECT_NE(xml.find("<w:pStyle w:val=\"Style", paragraph),
+              std::string::npos);
+    EXPECT_NE(xml.find("<w:tab w:val=\"left\" w:pos=\"340\"/>", paragraph),
+              std::string::npos);
+    EXPECT_NE(xml.find("<w:rStyle w:val=\"Style", paragraph),
+              std::string::npos);
+    const size_t tab = xml.find("<w:tab/>", mark);
+    ASSERT_NE(tab, std::string::npos);
+    EXPECT_GT(tab, mark);
+    EXPECT_GT(xml.find("body text.</w:t>"), tab);
+    // The paragraph style comes from the parsed STSH entry, not an invented id.
+    EXPECT_NE(Part(*zip, "word/styles.xml").find(item.text_style),
+              std::string::npos);
+  }
+}
+
 TEST(M3Notes, DocumentWithoutNotesHasNoNoteParts) {
   model::Document d;
   model::Paragraph p;

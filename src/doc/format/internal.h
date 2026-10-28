@@ -82,6 +82,21 @@ inline constexpr size_t kMaxImageSize = 64 * 1024 * 1024;
 // BLIP, so per-image limits alone do not bound total memory.
 inline constexpr size_t kMaxTotalImageSize = kMaxDocumentImageBytes;
 inline constexpr uint32_t kOleClipboardWmf = 3, kOleClipboardEmf = 14;
+// CF_DIB (Windows clipboard format 8) inside an OLE presentation stream: a
+// packed BITMAPINFOHEADER block with no file header. OOXML has no packed-DIB
+// part, so it is wrapped in a BITMAPFILEHEADER before being written out.
+inline constexpr uint32_t kOleClipboardDib = 8;
+inline constexpr size_t kBitmapFileHeaderSize = 14;
+inline constexpr size_t kBitmapInfoHeaderSize = 40;
+inline constexpr size_t kBitmapMasksSize = 12;
+inline constexpr uint16_t kBitmapPlanes = 1;
+inline constexpr uint8_t kBitmapPaletteMaxBits = 8;
+inline constexpr uint32_t kBitmapRgb = 0, kBitmapBitfields = 3;
+inline constexpr size_t kBitmapHeaderSizeOffset = 0;
+inline constexpr size_t kBitmapPlanesOffset = 12;
+inline constexpr size_t kBitmapBitCountOffset = 14;
+inline constexpr size_t kBitmapCompressionOffset = 16;
+inline constexpr size_t kBitmapColorsUsedOffset = 32;
 inline constexpr uint32_t kOleClipboardMarker = 0xFFFFFFFF;
 inline constexpr uint32_t kOleClipboardMarkerAlt = 0xFFFFFFFE;
 inline constexpr uint32_t kOleHimetricPerInch = 2540;
@@ -111,6 +126,17 @@ inline constexpr size_t kFopteSize = 6, kFbseDelayOffset = 28;
 inline constexpr uint16_t kPropertyIdMask = 0x3FFF;
 inline constexpr uint16_t kPropertyComplex = 0x8000, kPib = 0x0104;
 inline constexpr uint16_t kGtextUnicode = 192;
+// [MS-ODRAW] §2.3.7.2 fillColor, §2.3.7.4 fillType, §2.3.8.1 lineColor,
+// §2.3.8.14 lineWidth. Only plain RGB COLORREFs are mapped: an
+// OfficeArtCOLORREF whose flag byte is set carries a palette/system/scheme
+// index instead.
+inline constexpr uint16_t kFillColor = 0x0181, kFillType = 0x0183;
+inline constexpr uint16_t kLineColor = 0x01C0, kLineWidth = 0x01CB;
+inline constexpr uint32_t kFillTypeSolid = 1;
+inline constexpr uint32_t kColorFlagMask = 0xFF000000u;
+// OfficeArt geometry is EMU: 635 per twip, so line widths share the twip cap.
+inline constexpr uint32_t kEmuPerTwip = 635;
+inline constexpr uint32_t kMaxLineWidthEmu = kMaxTwips * kEmuPerTwip;
 inline constexpr size_t kFtxbxsSize = 22, kTbkdSize = 6;
 inline constexpr size_t kFtxbxsLidOffset = 14;
 inline constexpr int kWrapTopBottom = 1, kWrapNone = 3;

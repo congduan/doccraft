@@ -62,6 +62,15 @@ std::vector<uint8_t> ReadFile(const std::string& path) {
   return {std::istreambuf_iterator<char>(file), {}};
 }
 
+size_t Count(const std::string& text, const std::string& needle) {
+  size_t hits = 0, at = 0;
+  while ((at = text.find(needle, at)) != std::string::npos) {
+    ++hits;
+    at += needle.size();
+  }
+  return hits;
+}
+
 std::expected<model::Document, doc::Error> ParseFixture(
     const std::string& name) {
   auto source = ReadFile(std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/" +
@@ -442,7 +451,8 @@ struct FloatingStream {
 };
 FloatingStream Floating(uint16_t flags, bool delayed = true, size_t count = 1,
                         uint16_t shape_type = 0x4B2, bool has_pib = true,
-                        const std::string& shape_text = "") {
+                        const std::string& shape_text = "", int fill_color = -1,
+                        int line_color = -1, int line_width = 0) {
   FloatingStream s;
   std::vector<uint8_t> raster(17);
   Append(raster, {0x89, 'P', 'N', 'G'});
@@ -472,6 +482,24 @@ FloatingStream Floating(uint16_t flags, bool delayed = true, size_t count = 1,
     Put32(property, 2, unicode.size());
     Append(property, unicode);
     Append(children, Art(0xF00B, 0x13, property));
+  }
+  // OfficeArt fill and line properties: fillColor/fillType and
+  // lineColor/lineWidth, two scalar FOPTE entries in one FOPT record.
+  if (fill_color >= 0) {
+    std::vector<uint8_t> paint(12);
+    Put16(paint, 0, 0x0181);  // fillColor
+    Put32(paint, 2, static_cast<uint32_t>(fill_color));
+    Put16(paint, 6, 0x0183);  // fillType
+    Put32(paint, 8, 1);       // msoFillSolid
+    Append(children, Art(0xF00B, 0x20, paint));
+  }
+  if (line_color >= 0) {
+    std::vector<uint8_t> paint(12);
+    Put16(paint, 0, 0x01C0);  // lineColor
+    Put32(paint, 2, static_cast<uint32_t>(line_color));
+    Put16(paint, 6, 0x01CB);  // lineWidth in EMU
+    Put32(paint, 8, static_cast<uint32_t>(line_width));
+    Append(children, Art(0xF00B, 0x20, paint));
   }
   Append(s.table, Art(0xF002, 15, Art(0xF004, 15, children)));
   s.fib.drawing_group = {0, static_cast<uint32_t>(s.table.size())};
@@ -586,6 +614,63 @@ TEST(M5FloatingImages, GeometryShapePlaceholderKeepsAnchor) {
   EXPECT_NE(xml.find("width:72.000000pt"), std::string::npos);
 }
 
+TEST(M5FloatingImages, ShapeFillAndLineComeFromOfficeArt) {
+  constexpr int kGreenFill = 0x0000FF00;  // COLORREF, written as #00FF00.
+  constexpr int kBlueLine = 0x00A46534;   // COLORREF, written as #3465A4.
+  constexpr int kFifthPointEmu = 2540;    // 0.2pt, the VML weight unit.
+  auto s = Floating(0x54, true, 1, /*shape_type=*/1, /*has_pib=*/false, "",
+                    kGreenFill, kBlueLine, kFifthPointEmu);
+  auto result = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+  ASSERT_TRUE(result) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  ASSERT_TRUE(result->front().shape);
+  EXPECT_EQ(result->front().shape->fill_color, kGreenFill);
+  EXPECT_EQ(result->front().shape->line_color, kBlueLine);
+  EXPECT_EQ(result->front().shape->line_width, kFifthPointEmu);
+
+  model::Document document;
+  document.shapes.push_back(*result->front().shape);
+  document.paragraphs.push_back({});
+  model::Run run;
+  run.shape_index = 0;
+  document.paragraphs.back().runs.push_back(run);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const auto xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("filled=\"t\""), std::string::npos);
+  EXPECT_NE(xml.find("<v:fill color=\"#00FF00\"/>"), std::string::npos);
+  EXPECT_NE(xml.find("<v:stroke color=\"#3465A4\" weight=\"0.200000pt\"/>"),
+            std::string::npos);
+}
+
+TEST(M5FloatingImages, IndexedOfficeArtColorKeepsDefaultPaint) {
+  // A set OfficeArtCOLORREF flag byte means a palette/system/scheme index, not
+  // a literal RGB value; such a colour is not mapped and the shape keeps the
+  // VML default of no fill and a default black line.
+  constexpr int kSchemeIndexed = 0x08000001;
+  auto s = Floating(0x54, true, 1, /*shape_type=*/1, /*has_pib=*/false, "", -1,
+                    kSchemeIndexed, 0);
+  auto result = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+  ASSERT_TRUE(result) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  ASSERT_TRUE(result->front().shape);
+  EXPECT_EQ(result->front().shape->fill_color, -1);
+  EXPECT_EQ(result->front().shape->line_color, -1);
+
+  model::Document document;
+  document.shapes.push_back(*result->front().shape);
+  document.paragraphs.push_back({});
+  model::Run run;
+  run.shape_index = 0;
+  document.paragraphs.back().runs.push_back(run);
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const auto xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("filled=\"f\""), std::string::npos);
+  EXPECT_EQ(xml.find("<v:fill"), std::string::npos);
+  EXPECT_EQ(xml.find("<v:stroke"), std::string::npos);
+}
+
 TEST(M5FloatingImages, LibreOfficeBasicShapesKeepGeometry) {
   auto parsed = ParseFixture("basic-shapes");
   ASSERT_TRUE(parsed) << parsed.error().message;
@@ -594,11 +679,19 @@ TEST(M5FloatingImages, LibreOfficeBasicShapesKeepGeometry) {
   EXPECT_EQ(parsed->shapes[1].type, 3);
   EXPECT_EQ(parsed->shapes[0].width, 1440);
   EXPECT_EQ(parsed->shapes[0].height, 720);
+  // LibreOffice renders both shapes with its default 0.75pt blue outline and no
+  // fill; the colour comes straight from the OfficeArt lineColor property.
+  for (const auto& shape : parsed->shapes) {
+    EXPECT_EQ(shape.line_color, 0x00A46534);
+    EXPECT_EQ(shape.fill_color, -1);
+    EXPECT_EQ(shape.line_width, 0);
+  }
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const auto xml = Part(*zip, "word/document.xml");
   EXPECT_NE(xml.find("<v:rect"), std::string::npos);
   EXPECT_NE(xml.find("<v:oval"), std::string::npos);
+  EXPECT_EQ(Count(xml, "<v:stroke color=\"#3465A4\"/>"), 2u);
 }
 
 TEST(M5FloatingImages, LineAndWordArtTypesKeepIdentity) {
