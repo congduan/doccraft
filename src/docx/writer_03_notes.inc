@@ -161,7 +161,9 @@ std::expected<void, Error> WriteCommentPart(const model::Document& document,
       node.append_child("w:p");
     }
     for (const auto& paragraph : comment.paragraphs) {
-      WriteParagraph(node, paragraph, nullptr, ctx);
+      auto written = WriteParagraph(node, paragraph, nullptr, ctx);
+      if (!written)
+        return std::unexpected(written.error());
     }
   }
   const int rid = ctx.next_rid++;
