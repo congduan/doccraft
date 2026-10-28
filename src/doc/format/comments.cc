@@ -29,6 +29,8 @@ namespace {
 constexpr size_t kAtrdSize = 30;
 constexpr size_t kAuthorIndexOffset = 20;
 constexpr size_t kInitialsSize = 10;
+constexpr size_t kInitialsLengthSize = 1;
+constexpr size_t kUtf16CodeUnitSize = 2;
 constexpr size_t kBookmarkTagOffset = 26;
 constexpr size_t kAtnbeSize = 10;
 
@@ -39,8 +41,8 @@ struct CommentAnchor {
   uint32_t bookmark_tag = UINT32_MAX;
 };
 
-std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(Bytes table,
-                                                             Fib::Range r) {
+std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(
+    Bytes table, Fib::Range r, std::vector<std::string>* warnings = nullptr) {
   std::vector<CommentAnchor> out;
   if (!r.size) {
     return out;
@@ -58,12 +60,17 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(Bytes table,
       return std::unexpected(Error{"invalid comment anchor PLC CP order"});
     previous = anchor.cp;
     const size_t atrd = 4 * (count + 1) + kAtrdSize * i;
-    for (size_t k = 0; k + 1 < kInitialsSize; k += 2) {
-      const uint16_t c = U16(plc, atrd + k);
-      if (c == 0) {
-        break;
+    const size_t cch = plc[atrd];
+    if (kInitialsLengthSize + cch * kUtf16CodeUnitSize > kInitialsSize) {
+      if (warnings)
+        warnings->push_back("skipped invalid comment initials: id " +
+                            std::to_string(i + 1));
+    } else {
+      for (size_t k = 0; k < cch; ++k) {
+        AppendUtf8(anchor.initials,
+                   U16(plc, atrd + kInitialsLengthSize +
+                                k * kUtf16CodeUnitSize));
       }
-      AppendUtf8(anchor.initials, c);
     }
     const uint16_t author = U16(plc, atrd + kAuthorIndexOffset);
     anchor.author = author == 0xFFFF ? -1 : static_cast<int>(author);
@@ -246,7 +253,7 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
                                         const BookmarkMarks& bookmarks) {
   if (auto valid = ValidateCommentStory(table, fib); !valid)
     return {};
-  auto anchors = ReadAnchors(table, fib.and_ref);
+  auto anchors = ReadAnchors(table, fib.and_ref, &doc.warnings);
   if (!anchors) {
     return std::unexpected(anchors.error());
   }
