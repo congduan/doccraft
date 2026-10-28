@@ -296,8 +296,8 @@ TEST(M3Batch7, ParagraphStyleIncrementInheritsTargetOutline) {
   ASSERT_TRUE(inherited) << inherited.error().message;
   ASSERT_FALSE(inherited->paragraphs.empty());
   EXPECT_EQ(inherited->paragraphs[0].style, 3);
-  EXPECT_EQ(inherited->paragraphs[0].outline, 5);
-  EXPECT_NE(Xml(*inherited).find("<w:outlineLvl w:val=\"5\"/>"),
+  EXPECT_EQ(inherited->paragraphs[0].outline, 2);
+  EXPECT_NE(Xml(*inherited).find("<w:outlineLvl w:val=\"2\"/>"),
             std::string::npos);
 
   auto explicit_level =
@@ -312,6 +312,16 @@ TEST(M3Batch7, ParagraphStyleIncrementInheritsTargetOutline) {
   EXPECT_EQ(non_heading->paragraphs[0].style, 10);
   EXPECT_EQ(non_heading->paragraphs[0].outline, 6);
   EXPECT_NE(Xml(*non_heading).find("<w:outlineLvl w:val=\"6\"/>"),
+            std::string::npos);
+}
+
+TEST(M3Batch7, ParagraphStyleIncrementIgnoresHeadingStyleOutline) {
+  // Heading 1's UPX says outline 5, but final istd 1 requires outline 0.
+  auto heading = Synthetic(Prl(0x2602, {0xFF}), {}, {}, 2, OutlineStyles());
+  ASSERT_TRUE(heading) << heading.error().message;
+  EXPECT_EQ(heading->paragraphs[0].style, 1);
+  EXPECT_EQ(heading->paragraphs[0].outline, 0);
+  EXPECT_NE(Xml(*heading).find("<w:outlineLvl w:val=\"0\"/>"),
             std::string::npos);
 }
 

@@ -908,15 +908,15 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
           static_cast<size_t>(paragraph.style) >= doc.styles.size())
         continue;
       const auto& style = doc.styles[paragraph.style];
-      if (style.type == 1 && !style.name.empty() &&
-          style.resolved_paragraph.outline >= 0) {
+      if (style.type != 1 || style.name.empty())
+        continue;
+      if (paragraph.style >= 1 && paragraph.style <= 9) {
+        paragraph.outline = paragraph.style - 1;
+      } else if (style.resolved_paragraph.outline >= 0) {
         paragraph.outline = style.resolved_paragraph.outline;
-        if (paragraph.style < 1 || paragraph.style > 9) {
-          if (paragraph.outline < 9) {
-            paragraph.outline =
-                std::clamp(paragraph.outline + paragraph.list_level_inc, 0, 9);
-          }
-        }
+        if (paragraph.outline < 9)
+          paragraph.outline =
+              std::clamp(paragraph.outline + paragraph.list_level_inc, 0, 9);
       }
     }
   };

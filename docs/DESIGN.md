@@ -176,7 +176,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 ### 6.3 段落格式（PAP）
 - ✅ 对齐（左/中/右/两端/分散）/缩进（左右/首行/悬挂，twips 与字符单位）/行距/段距（twips 与行单位）
 - ✅ 段落边框与底纹/项目符号与多级列表（LSTF/LVL/override）
-- ✅ `sprmPIncLvl` 的样式级别增量：istd 1–9 增量并夹紧；未显式轮廓级别时沿最终样式的 based-on 链求值，非标题样式再应用轮廓级别增量
+- ✅ `sprmPIncLvl` 的样式级别增量：istd 1–9 增量并夹紧，轮廓级别为最终 istd−1；其他样式未显式指定轮廓级别时沿最终样式的 based-on 链求值，再应用轮廓级别增量
 - ✅ 制表位（自定义/toc 风格）/keepNext/keepLines/pageBreakBefore/东亚排版开关
 - ✅ 大纲级别/段落阴影/首字下沉（`w:framePr` dropCap）/纵向文字流
 
