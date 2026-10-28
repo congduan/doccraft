@@ -146,9 +146,9 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     // split a run, so include their final character in the first component.
     const uint32_t end =
         bkd->Cp(i + 1) == txt->Cp(f + 1) ? bkd->Cp(i + 1) : bkd->Cp(i + 1) + 1;
-    auto paragraphs =
-        ReadStoryParagraphs(*chars, chpx, papx, fonts, prcs, base, bkd->Cp(i),
-                            end, &field_status, &story_bookmarks);
+    auto paragraphs = ReadStoryParagraphs(
+        *chars, chpx, papx, fonts, prcs, base, bkd->Cp(i), end, &field_status,
+        &story_bookmarks, bkd->Cp(i + 1) == txt->Cp(f + 1));
     auto& target = boxes[by_ftxbxs.at(f)].paragraphs;
     for (auto& paragraph : paragraphs)
       target.push_back(std::move(paragraph));

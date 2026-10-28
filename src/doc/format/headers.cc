@@ -80,14 +80,14 @@ std::expected<std::map<uint32_t, uint8_t>, Error> ReadStoryFieldStatus(
 }
 
 // One story's CP range (relative to the start of its story region) is turned
-// into paragraphs; the last paragraph mark is a guard.
+// into paragraphs; the last paragraph mark may be a guard.
 std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<Char>& chars, const std::vector<FormatRange>& chpx,
     const std::vector<FormatRange>& papx, const std::vector<std::string>& fonts,
     const std::vector<std::vector<uint8_t>>& prcs, uint64_t base,
     uint32_t first, uint32_t last,
     const std::map<uint32_t, uint8_t>* field_status,
-    const BookmarkMarks* bookmarks) {
+    const BookmarkMarks* bookmarks, bool last_cp_is_guard) {
   std::vector<model::Paragraph> out;
   if (last <= first) {
     return out;
@@ -261,9 +261,9 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
       }
     }
   }
-  // The final paragraph mark is a guard, but a bookmark may end at its CP.
-  // Attach that end to the final paragraph without reading the guard as text.
-  if (bookmarks) {
+  // Only the story's final paragraph mark is a guard. At an interior textbox
+  // break, the next segment emits marks at this CP before its first character.
+  if (bookmarks && last_cp_is_guard) {
     if (auto found = bookmarks->marks.find(base + last - 1);
         found != bookmarks->marks.end()) {
       auto* final_para =

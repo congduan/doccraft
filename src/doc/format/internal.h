@@ -315,7 +315,8 @@ std::expected<std::map<uint32_t, uint8_t>, Error> ReadStoryFieldStatus(
     Bytes table, Fib::Range r, uint64_t base, uint32_t story_length);
 
 // Turns the CP range [first, last) of one story into paragraphs. `base` is the
-// absolute CP where the story starts; the final paragraph mark is a guard.
+// absolute CP where the story starts. `last_cp_is_guard` controls whether the
+// final CP is a paragraph guard that may hold a bookmark end.
 // `field_status` (may be null) carries the story's Plcfld flags keyed by the
 // absolute begin CP; the field hierarchy itself always comes from the 0x13/
 // 0x14/0x15 characters, so a null map only drops fldLock/dirty.
@@ -326,7 +327,7 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
     const std::vector<std::vector<uint8_t>>& prcs, uint64_t base,
     uint32_t first, uint32_t last,
     const std::map<uint32_t, uint8_t>* field_status = nullptr,
-    const BookmarkMarks* bookmarks = nullptr);
+    const BookmarkMarks* bookmarks = nullptr, bool last_cp_is_guard = true);
 
 uint16_t Prm0Opcode(uint8_t isprm);
 
