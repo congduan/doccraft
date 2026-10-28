@@ -176,6 +176,13 @@ add_test(NAME degraded_sprm_warning COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/fixtures/degraded-sprm.doc
   "warning: skipped CHPX FKP page" "After textbox")
 
+add_executable(m8_bad_papx_fixture m8_bad_papx_fixture.cc cfb_test_util.cc)
+target_link_libraries(m8_bad_papx_fixture PRIVATE doccraft_cfb doccraft_doc)
+add_test(NAME m8_bad_papx_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/m8_bad_papx_cli.py
+  $<TARGET_FILE:m8_bad_papx_fixture> $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/complex-table.doc)
+
 # Standalone corpus builder for the 50 MiB performance envelope.
 add_executable(perf_repack perf/repack_doc.cc cfb_test_util.cc)
 target_link_libraries(perf_repack PRIVATE doccraft_cfb)

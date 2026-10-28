@@ -262,6 +262,7 @@ struct FormatRange {
   uint32_t first, last;
   std::vector<uint8_t> sprms;
   int style = -1;
+  bool damaged = false;
 };
 
 inline bool Valid(Bytes b, Fib::Range r) {

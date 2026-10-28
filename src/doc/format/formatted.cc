@@ -140,9 +140,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       ReadFkps(word, table, fib.chpx_bte, false, &doc.warnings, fib.legacy);
   if (!chpx)
     return std::unexpected(chpx.error());
-  // PAPX can carry table structure; losing it can change cell boundaries.
-  auto papx = ReadFkps(word, table, fib.papx_bte, true,
-                       fib.legacy ? &doc.warnings : nullptr, fib.legacy);
+  auto papx =
+      ReadFkps(word, table, fib.papx_bte, true, &doc.warnings, fib.legacy);
   if (!papx)
     return std::unexpected(papx.error());
   size_t total_image_size = 0;
@@ -354,10 +353,45 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       paragraph_fc[j] = end_fc;
     }
   }
+  bool skipping_damaged_table = false;
   for (size_t i = 0; i < chars->size(); i++) {
     const Char& ch = (*chars)[i];
     const auto text = ch.text();
     const char control = text.size() == 1 ? text[0] : '\0';
+    const uint32_t mark_fc = paragraph_fc.empty() ? ch.fc : paragraph_fc[i];
+    const auto* damage_pap = Find(*papx, mark_fc);
+    if ((damage_pap && damage_pap->damaged) ||
+        (Find(*papx, ch.fc) && Find(*papx, ch.fc)->damaged)) {
+      if (!skipping_damaged_table) {
+        // An open table may have started on a healthy FKP page. Discard its
+        // uncommitted frame rather than publishing an incomplete table.
+        frames.clear();
+        para = {};
+        fields.clear();
+        hyperlink.clear();
+        page_field = false;
+        pending_ole = -1;
+        last_run_count = 0;
+        cached_pap = nullptr;
+        table_pap = nullptr;
+      }
+      skipping_damaged_table = true;
+      continue;
+    }
+    if (skipping_damaged_table) {
+      bool still_table = control == '\x07';
+      if (damage_pap) {
+        WalkParagraph(damage_pap->sprms, data, [&](uint16_t op, Bytes value) {
+          if (op == kSprmPFInTable && value[0])
+            still_table = true;
+          if (op == kSprmPItap && S32(value, 0) > 0)
+            still_table = true;
+        });
+      }
+      if (still_table)
+        continue;
+      skipping_damaged_table = false;
+    }
     emit_bookmarks(ch.cp);
     // The hyperlink/page target of a field applies to the runs after its
     // separator; pop restores the enclosing field's target.

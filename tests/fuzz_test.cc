@@ -587,8 +587,8 @@ TEST(Fuzz, SprmDispatchOnEveryOpcodeNeverCrashes) {
 // ---------------------------------------------------------------------------
 TEST(Fuzz, KnownCorruptionsReportDistinguishableErrors) {
   const SyntheticDoc base = MakeSyntheticDoc();
-  // CLX and PAPX corruption is a hard error; CHPX page corruption degrades
-  // to a warning (§6.9), so those cases assert the skip instead.
+  // CLX and malformed table sprms remain hard errors. Local FKP page damage
+  // degrades to a warning (§6.9), so those cases assert the skip instead.
   auto error_of = [](SyntheticDoc d) {
     auto parsed = doc::ParseFormatted(d.word, d.table, d.fib, d.data);
     EXPECT_FALSE(parsed.has_value());
@@ -633,7 +633,13 @@ TEST(Fuzz, KnownCorruptionsReportDistinguishableErrors) {
             std::string::npos);
   d = base;
   d.word[d.papx_cb] = 255;  // PAPX cb beyond the page
-  EXPECT_EQ(error_of(d), "invalid PAPX size");
+  auto papx_degraded = doc::ParseFormatted(d.word, d.table, d.fib, d.data);
+  ASSERT_TRUE(papx_degraded) << papx_degraded.error().message;
+  ASSERT_FALSE(papx_degraded->warnings.empty());
+  EXPECT_NE(papx_degraded->warnings[0].find("skipped PAPX FKP page 0"),
+            std::string::npos);
+  ASSERT_FALSE(papx_degraded->paragraphs.empty());
+  EXPECT_TRUE(papx_degraded->paragraphs[0].runs.empty());
 
   auto plain = ReadSeed(std::string(DOCCRAFT_SOURCE_DIR) +
                         "/tests/corpus/corpus/plain-text.doc");
@@ -655,6 +661,49 @@ TEST(Fuzz, KnownCorruptionsReportDistinguishableErrors) {
   EXPECT_FALSE(outcome.ok);
   EXPECT_NE(outcome.error.find("legacy RC4/MD5"), std::string::npos);
   EXPECT_NE(outcome.error.find("requires --password"), std::string::npos);
+}
+
+TEST(Fuzz, BadPapxTableRegionKeepsFollowingBody) {
+  SyntheticDoc d =
+      MakeSyntheticDoc(std::string("A\x07"
+                                   "After\r",
+                                   8));
+  // Two BTE ranges: the first holds a damaged cell mark, and the second
+  // holds an ordinary paragraph on a separate valid FKP page.
+  d.word.resize(2560);
+  d.table.resize(128);
+  d.fib.papx_bte = {32, 20};
+  d.fib.chpx_bte = {80, 12};
+  Put32(d.table, 32, 1024);
+  Put32(d.table, 36, 1026);
+  Put32(d.table, 40, 1032);
+  Put32(d.table, 44, 0);
+  Put32(d.table, 48, 4);
+  Put32(d.table, 80, 1024);
+  Put32(d.table, 84, 1032);
+  Put32(d.table, 88, 1);
+  Put32(d.word, 2048, 1026);
+  Put32(d.word, 2052, 1032);
+  d.word[2056] = 20;
+  d.word[2088] = 2;
+  Put16(d.word, 2089, 0);
+  d.word[2559] = 1;
+  d.word[d.papx_cb] = 255;
+  auto parsed = doc::ParseFormatted(d.word, d.table, d.fib, d.data);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_FALSE(parsed->warnings.empty());
+  EXPECT_NE(parsed->warnings[0].find("skipped PAPX FKP page 0"),
+            std::string::npos);
+  EXPECT_TRUE(parsed->tables.empty());
+  ASSERT_EQ(parsed->paragraphs.size(), 1u);
+  ASSERT_EQ(parsed->paragraphs[0].runs.size(), 1u);
+  EXPECT_EQ(parsed->paragraphs[0].runs[0].text, "After");
+  auto truncated = d;
+  truncated.fib.lcb_clx = static_cast<uint32_t>(d.table.size() + 1);
+  auto rejected = doc::ParseFormatted(truncated.word, truncated.table,
+                                      truncated.fib, truncated.data);
+  ASSERT_FALSE(rejected);
+  EXPECT_EQ(rejected.error().message, "CLX outside table stream");
 }
 
 }  // namespace

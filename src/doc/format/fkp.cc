@@ -480,9 +480,21 @@ std::expected<std::vector<FormatRange>, Error> ReadFkps(
     };
     auto page = read_page();
     if (!page) {
-      if (!warnings)
+      // A malformed sprm stream cannot be localized safely: its operands may
+      // carry table definitions and indirect Data-stream references.
+      if (!warnings ||
+          (para && page.error().message == "invalid FKP sprm sequence"))
         return std::unexpected(page.error());
       out.resize(before);
+      if (para) {
+        const uint32_t first = U32(plc, 4 * k);
+        const uint32_t last = U32(plc, 4 * (k + 1));
+        if (last <= first)
+          return std::unexpected(Error{"invalid PAPX BTE FC order"});
+        FormatRange damaged{first, last, {}};
+        damaged.damaged = true;
+        out.push_back(std::move(damaged));
+      }
       warnings->push_back(std::string("skipped ") + (para ? "PAPX" : "CHPX") +
                           " FKP page " + std::to_string(pn) + ": " +
                           page.error().message);
