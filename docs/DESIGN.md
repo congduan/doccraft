@@ -171,6 +171,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ✅ 上标/下标/字距/字符缩放/隐藏文字/着重号/字符单位适配（`w:fitText`、`w:eastAsianLayout`）
 - ✅ 颜色/高亮/边框底纹/阴影/浮雕
 - ✅ 超链接（HYPERLINK 域）
+- ✅ 修订标记作者：`sprmCIbstRMark`/`sprmCIbstRMarkDel`/`sprmCPropRMark` 的 ibst 查 `SttbfRMark`（FIB pair 24，经 fcClx=pair(33) 位于 0x01A2 的锚点关系验证：本解析器 pair(i) 对应规范表格第 i+1 行）写入 `w:ins`/`w:del`/`w:rPrChange` 的 `@w:author`；无 ibst 用规范默认 0 号 "Unknown"；表缺失/结构非法/索引越界回退占位作者 `doccraft` 并警告；时间戳（DTTM）仍省略
 
 ### 6.3 段落格式（PAP）
 - ✅ 对齐（左/中/右/两端/分散）/缩进（左右/首行/悬挂，twips 与字符单位）/行距/段距（twips 与行单位）

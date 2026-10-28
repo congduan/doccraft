@@ -29,8 +29,8 @@
 | ✅ | `0x0801` | sprmCFRMarkIns | A ToggleOperand that specifies whether the text is formatted as inserted revision mark text, which is text that was inserted while revision marking was on. | 字符 CHP §2.6.1；M3Batch8.RevisionMarksWrapRuns |
 | ✅ | `0x0802` | sprmCFFldVanish | A ToggleOperand that specifies whether the field text is hidden. | 字符 CHP §2.6.1；M3Batch7.HiddenTextSources |
 | ✅ | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage. | 字符 CHP §2.6.1；正文内联图片 Data 偏移、PICF/BLIP 到 `w:drawing`；M5InlineImages.LibreOfficeGoldenKeepsMediaBytes、M5InlineImages.SameChpxTextDoesNotAbsorbPicture、M5InlineImages.AggregateImageLimitAcceptsBoundaryRejectsOverflow；OLE 字段分隔符 ObjectPool id 到嵌入部件由 M4Ole.RealObjectPoolSubstorageIsIndependentCfbPart 验证 |
-| N/A | `0x4804` | sprmCIbstRMark | A signed 16-bit integer that specifies a zero-based index into SttbfRMark.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
-| N/A | `0x6805` | sprmCDttmRMark | A DTTM that specifies the date and time at which the text was inserted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ✅ | `0x4804` | sprmCIbstRMark | A signed 16-bit integer that specifies a zero-based index into SttbfRMark. | 字符 CHP §2.6.1；ibst 存入 Run 查 SttbfRMark（FIB pair 24）写入 w:ins/@w:author，无 ibst 用默认 0 号 "Unknown"，表缺失/越界回退占位作者并警告；M19Revisions.InsertAuthorFromSttbfRMark、M19Revisions.UnindexedMarkNamesUnknown |
+| N/A | `0x6805` | sprmCDttmRMark | A DTTM that specifies the date and time at which the text was inserted.；M19 已接入修订作者，DTTM 时间戳仍省略；不影响当前格式值 | 字符 CHP §2.6.1 |
 | N/A | `0x0806` | sprmCFData | A Bool8 that specifies whether the picture character in the text represents binary data. | 字符 CHP §2.6.1；图片二进制标记；二进制数据不作为内联图片读取，M5InlineImages.BinaryDataMarkerDoesNotReadPicture；载荷留待后续 |
 | N/A | `0x4807` | sprmCIdslRMark | An unsigned 16-bit integer that specifies the reason value of the inserted or modified revision mark text.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
 | ✅ | `0x6A09` | sprmCSymbol | A CSymbolOperand structure that designates the character as a symbol and specifies the font and character code for the symbol. | 字符 CHP §2.6.1 |
@@ -82,8 +82,8 @@
 | ✅ | `0x4A60` | sprmCIcoBi | An ICO value that specifies the color of text when displayed right-to-left or determined to be complex script.<147> | 字符 CHP §2.6.1；M3Batch8.ComplexScriptColor |
 | ✅ | `0x4A61` | sprmCHpsBi | An unsigned 2-byte integer value that specifies the size of the text, for text that is displayed right-to-left or text that is a complex script. | 字符 CHP §2.6.1 |
 | N/A | `0xCA62` | sprmCDispFldRMark | A DispFldRmOperand value that indicates a revision within the result of a display field.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
-| N/A | `0x4863` | sprmCIbstRMarkDel | A signed 16-bit integer value that specifies a zero-based index into SttbfRMark.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
-| N/A | `0x6864` | sprmCDttmRMarkDel | A DTTM value that specifies the date and time at which the text was deleted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
+| ✅ | `0x4863` | sprmCIbstRMarkDel | A signed 16-bit integer value that specifies a zero-based index into SttbfRMark. | 字符 CHP §2.6.1；ibst 存入 Run 查 SttbfRMark（FIB pair 24）写入 w:del/@w:author，越界回退占位作者并警告；M19Revisions.DeleteAuthorFromSttbfRMark、M19Revisions.OutOfRangeIndexFallsBackAndWarns |
+| N/A | `0x6864` | sprmCDttmRMarkDel | A DTTM value that specifies the date and time at which the text was deleted.；M19 已接入修订作者，DTTM 时间戳仍省略；不影响当前格式值 | 字符 CHP §2.6.1 |
 | ✅ | `0x6865` | sprmCBrc80 | A Brc80 value that specifies the border of all four sides of the text. | 字符 CHP §2.6.1 |
 | ✅ | `0x4866` | sprmCShd80 | A Shd80 structure that specifies the background shading for the text. | 字符 CHP §2.6.1；M3Batch7.Shd80PaletteToRgb |
 | N/A | `0x4867` | sprmCIdslRMarkDel | An unsigned 16-bit integer that specifies the reason why the text under revision was deleted.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
@@ -107,7 +107,7 @@
 | N/A | `0x2A86` | sprmCNeedFontFixup | An FFM that specifies the type of font substitution that is needed for the associated text. | 字符 CHP §2.6.1；字体替换提示；渲染端按 w:rFonts 与字体可用性自行替换 |
 | N/A | `0x6887` | sprmCPbiIBullet | A CP value in the Bullet Pictures document that specifies which picture is used as a bullet character when rendering the bullet. | 字符 CHP §2.6.1；图片项目符号位置；需 Bullet Pictures 位图与 numbering 的 numPicBullet（M5） |
 | N/A | `0x4888` | sprmCPbiGrf | A PbiGrfOperand value that specifies whether a picture is used as a bullet character when rendering the bullet. | 字符 CHP §2.6.1；图片项目符号属性；同 sprmCPbiIBullet，随 M5 输出 |
-| N/A | `0xCA89` | sprmCPropRMark | A PropRMarkOperand value that specifies whether the text has an associated property revision mark, as well as its author and the date and time. | 字符 CHP §2.6.1；属性修订元数据（作者/时间）留 M4，与 sprmCPropRMark90 同处理 |
+| ✅ | `0xCA89` | sprmCPropRMark | A PropRMarkOperand value that specifies whether the text has an associated property revision mark, as well as its author and the date and time. | 字符 CHP §2.6.1；fPropRMark→w:rPrChange，操作数偏移 2 的 ibst 查 SttbfRMark 写入 @w:author；DTTM 时间戳仍省略；M19Revisions.PropRMarkAuthorFromOperand |
 | ✅ | `0x2A90` | sprmCFSdtVanish | A Bool8 value that specifies whether the text is hidden from display when the option to hide arbitrary XML delimiters is enabled. | 字符 CHP §2.6.1；并入 w:vanish；M3Batch7.HiddenTextSources |
 
 ## 2. 段落 PAP（§2.6.2，91 项）
@@ -359,17 +359,17 @@
 
 | 类别 | 总数 | ✅ | ◐ | ☐ | N/A | 覆盖率（✅ / 适用项） |
 |---|---:|---:|---:|---:|---:|---:|
-| 字符 CHP | 84 | 59 | 0 | 0 | 25 | 100% |
+| 字符 CHP | 84 | 62 | 0 | 0 | 22 | 100% |
 | 段落 PAP | 91 | 78 | 0 | 0 | 13 | 100% |
 | 表格 TAP | 80 | 73 | 0 | 0 | 7 | 100% |
 | 节 SEP | 59 | 55 | 0 | 0 | 4 | 100% |
-| **合计** | 314 | 265 | 0 | 0 | 49 | 100% |
+| **合计** | 314 | 268 | 0 | 0 | 46 | 100% |
 
 **口径说明（重要）**：本表只统计 [MS-DOC] §2.6 四张 sprm 表的**属性**覆盖。✅ 表示该 opcode 的解析、IR 字段与 OOXML 输出齐备且有一条断言（相当比例是合成位流断言，而非真实 Word 文档）。它**不等于**格式还原率或产品完成度：结构级特性（图片、文本框、OLE、脚注尾注批注书签、嵌套表格、多节页眉页脚、fast-save、加密）不在本表计数内，见 `DESIGN.md` §6 与 `KNOWN-SIMPLIFICATIONS.md`。
 
 M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们不对应 sprm opcode，因此不改变本表的覆盖计数。
 
-基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，覆盖率达到 100%；后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现（当前 265 / 265 适用项）。
+基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，覆盖率达到 100%；后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现；M19 把修订作者三个 sprm（0x4804/0x4863/0xCA89）从 N/A 拉回实现（当前 268 / 268 适用项）。
 
 ## Word 6/95 旧版 opcode（不计入 314）
 
@@ -411,7 +411,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | sprmCRmf `0x4875` | 当前 §2.6.1 不含该 opcode；`0x0875` 是 `sprmCFNoProof`。旧别名 N/A。 |
 | sprmSDopLayoutUnix | 当前 §2.6.4 无此名称；属于文档级兼容设置而非 SEPX sprm。旧别名 N/A。 |
 | sprmSFTextFlow `0x3615` | `0x3615` 是表格 `sprmTFAutofit`；节文字方向为 `sprmSTextFlow` (`0x5033`)，已覆盖。旧别名 N/A。 |
-| sprmCFRMark | 当前名称为 `sprmCFRMarkIns` (`0x0801`)；修订标记及 `sprmCFRMarkDel`、`sprmCPropRMark` 完整语义留 M4。 |
+| sprmCFRMark | 当前名称为 `sprmCFRMarkIns` (`0x0801`)；作者名已由 M19 经 SttbfRMark（pair 24）接入，DTTM 时间戳仍省略。 |
 
 ## 5. 第 7 批增量（本次 28 项）
 
@@ -474,12 +474,11 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | 行边框颜色 | `0xD61A`–`0xD61D` | 逐单元格 Brc 的 `w:color` |
 | 页面边框/保护 | `0x522F` `0x3006` `0x702C` `0x702D` `0xD235` `0xD236` | `w:pgBorders/@w:offsetFrom+@w:display`、`<w:formProt>`、左右页边框 |
 
-### 6.1 N/A 归类明细（第 8 批 29 项，M5 已转实现 1 项）
+### 6.1 N/A 归类明细（第 8 批 29 项，M5 转实现 1 项、M19 转实现 1 项：0xCA89 作者经 SttbfRMark 接入）
 
 | 类别 | opcode | 理由 |
 |---|---|---|
 | M5 图片/OLE 载荷 | `0x0806` `0x080A` `0x0856` `0x0855` `0x6887` `0x4888` `0x2471` | 非图片二进制/OLE/图片项目符号/文本框环绕仍待 M5 后续；`0x6A03` 的正文图片分支已实现 |
-| M4 修订元数据 | `0xCA89` | 作者与时间戳需要 SttbfRMark，与 `sprmCPropRMark90` 同处理 |
 | 规范允许忽略 | `0xC81A` | §2.6.1 脚注 145 允许实现忽略；公式由 OMML 重排 |
 | 编辑期/增量保存内部状态 | `0xC601` `0xCA31` `0x244B` `0x245A` `0x6465` `0x7469` `0xCA47` | 样式置换表、嵌套表簿记、PGPInfo id；docx 用显式结构或同源读取表达，最终格式等价 |
 | 无 docx 对应属性 | `0x2879` `0x484E` `0x2A86` `0x2462` `0xC66C` `0xF617` `0xF618` `0xD662` `0x5026` | 换行类型/断词提示/字体替换/框架防重叠/表级缩进/纸张 tie-breaker；条件格式已由 CNF 三兄弟输出 |
