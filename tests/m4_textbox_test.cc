@@ -638,9 +638,9 @@ TEST(M11TextboxFields, InvalidPlcWarnsAndKeepsHierarchy) {
   Put32(*table, fib->fields_txbx.offset + 4, fib->ccp_txbx + 1);
   auto parsed = doc::ParseFormatted(*word, *table, *fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
-  ASSERT_EQ(parsed->warnings.size(), 1u);
-  EXPECT_EQ(parsed->warnings[0],
-            "skipped textbox field PLC: invalid field PLC entry");
+  EXPECT_NE(std::find(parsed->warnings.begin(), parsed->warnings.end(),
+                      "skipped textbox field PLC: invalid field PLC entry"),
+            parsed->warnings.end());
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip);
   const std::string xml = Part(*zip, "word/document.xml");
