@@ -126,8 +126,7 @@ TEST(M3Comments, RangeBookmarkSurroundsAnnotatedText) {
   auto d = ParseFixture("comments-range");
   ASSERT_TRUE(d) << d.error().message;
   ASSERT_EQ(d->comments.size(), 1u);
-  EXPECT_EQ(ParagraphText(d->paragraphs[0]),
-            "Before annotated phrase after.");
+  EXPECT_EQ(ParagraphText(d->paragraphs[0]), "Before annotated phrase after.");
   auto zip = docx::Write(*d);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
