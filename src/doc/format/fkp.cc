@@ -32,7 +32,8 @@ using base::DecodeAnsiChar;
 
 std::expected<std::vector<Char>, Error> ReadChars(
     Bytes word, Bytes table, const Fib& fib, uint32_t limit, uint32_t begin,
-    std::vector<std::vector<uint8_t>>* prcs) {
+    std::vector<std::vector<uint8_t>>* prcs,
+    std::vector<std::string>* warnings) {
   if (fib.legacy) {
     // Word 6/95 stores its fc/lcb tables and CLX in WordDocument. Its PCD
     // stores a direct file offset; bit 0x10 of its first byte selects ANSI.
@@ -95,7 +96,7 @@ std::expected<std::vector<Char>, Error> ReadChars(
     modern.legacy = false;
     modern.fc_clx = 0;
     modern.lcb_clx = static_cast<uint32_t>(normalized.size());
-    return ReadChars(word, normalized, modern, limit, begin, prcs);
+    return ReadChars(word, normalized, modern, limit, begin, prcs, warnings);
   }
   if (!Valid(table, {fib.fc_clx, fib.lcb_clx}))
     return std::unexpected(Error{"CLX outside table stream"});
@@ -129,6 +130,13 @@ std::expected<std::vector<Char>, Error> ReadChars(
       p + nbytes != b.size())
     return std::unexpected(Error{"invalid PlcPcd size"});
   size_t count = (nbytes - 4) / 12, desc = p + 4 * (count + 1);
+  const uint32_t covered = U32(b, p + 4 * count);
+  if (warnings && !fib.complex && !fib.legacy && begin == 0 &&
+      limit == fib.ccp_text && covered < limit) {
+    warnings->push_back("non-complex piece coverage short: expected " +
+                        std::to_string(limit) + " CP, actual " +
+                        std::to_string(covered) + " CP");
+  }
   std::vector<Char> out;
   // Each emitted character consumes at least one WordDocument byte. Reserve
   // the CP upper bound up front so a large body never briefly holds both

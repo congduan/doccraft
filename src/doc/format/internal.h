@@ -272,7 +272,8 @@ inline bool Valid(Bytes b, Fib::Range r) {
 
 std::expected<std::vector<Char>, Error> ReadChars(
     Bytes word, Bytes table, const Fib& fib, uint32_t limit, uint32_t begin = 0,
-    std::vector<std::vector<uint8_t>>* prcs = nullptr);
+    std::vector<std::vector<uint8_t>>* prcs = nullptr,
+    std::vector<std::string>* warnings = nullptr);
 
 std::expected<std::vector<FormatRange>, Error> ReadFkps(
     Bytes word, Bytes table, Fib::Range r, bool para,

@@ -127,6 +127,29 @@ TEST(PieceTableTest, ReadsFastSavedPiecesAndPrc) {
   EXPECT_NE(xml.find("<w:b"), std::string::npos);
 }
 
+TEST(PieceTableTest, NonComplexShortCoverageWarnsAndKeepsText) {
+  auto fib = doccraft::doc::ParseFib(Fib());
+  ASSERT_TRUE(fib);
+  fib->lcb_clx = 21;
+  std::vector<uint8_t> table(100), word(1024);
+  table[40] = 2;
+  Put32(table, 41, 16);
+  Put32(table, 45, 0);
+  Put32(table, 49, 3);
+  Put32(table, 55, 0x40000000u | (512u * 2));
+  word[512] = 'A';
+  word[513] = 'B';
+  word[514] = '\r';
+  auto parsed = doccraft::doc::ParseFormatted(word, table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "non-complex piece coverage short: expected 5 CP, actual 3 CP");
+  ASSERT_FALSE(parsed->paragraphs.empty());
+  ASSERT_FALSE(parsed->paragraphs[0].runs.empty());
+  EXPECT_EQ(parsed->paragraphs[0].runs[0].text, "AB");
+}
+
 TEST(PieceTableTest, RejectsInvalidFastSavedPrcReference) {
   auto fib = doccraft::doc::ParseFib(Fib(0x0004));
   ASSERT_TRUE(fib);

@@ -131,11 +131,12 @@ uint16_t Prm0Opcode(uint8_t isprm) {
 std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
                                                      const Fib& fib,
                                                      Bytes data) {
+  model::Document doc;
   std::vector<std::vector<uint8_t>> prcs;
-  auto chars = ReadChars(word, table, fib, fib.ccp_text, 0, &prcs);
+  auto chars =
+      ReadChars(word, table, fib, fib.ccp_text, 0, &prcs, &doc.warnings);
   if (!chars)
     return std::unexpected(chars.error());
-  model::Document doc;
   auto chpx =
       ReadFkps(word, table, fib.chpx_bte, false, &doc.warnings, fib.legacy);
   if (!chpx)
