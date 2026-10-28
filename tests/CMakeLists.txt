@@ -209,3 +209,14 @@ target_compile_features(perf_repack PRIVATE cxx_std_23)
 add_executable(perf_repack_body perf/repack_body.cc cfb_test_util.cc)
 target_link_libraries(perf_repack_body PRIVATE doccraft_cfb doccraft_doc)
 target_compile_features(perf_repack_body PRIVATE cxx_std_23)
+
+add_executable(m21_cli_fixture m21_cli_fixture.cc cfb_test_util.cc)
+target_link_libraries(m21_cli_fixture PRIVATE doccraft_cfb doccraft_doc)
+add_test(NAME m21_short_piece_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/m21_cli.py $<TARGET_FILE:m21_cli_fixture>
+  $<TARGET_FILE:doccraft> short-piece
+  ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc)
+add_test(NAME m21_missing_pool_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/m21_cli.py $<TARGET_FILE:m21_cli_fixture>
+  $<TARGET_FILE:doccraft> missing-pool
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/ole-embedded.doc)

@@ -298,12 +298,15 @@ int main(int argc, char** argv) {
       }
       image_total += image.bytes.size();
     }
+    const auto warn_missing_ole = [](int storage_id) {
+      std::fprintf(stderr,
+                   "warning: OLE %d has no ObjectPool payload; "
+                   "placeholder emitted\n",
+                   storage_id);
+    };
     for (auto& object : extracted->ole_objects) {
       if (!cfb) {
-        std::fprintf(stderr,
-                     "warning: OLE %d has no ObjectPool payload; "
-                     "placeholder emitted\n",
-                     object.storage_id);
+        warn_missing_ole(object.storage_id);
         continue;
       }
       auto packaged = doccraft::cfb::RepackageStorage(
@@ -311,10 +314,7 @@ int main(int argc, char** argv) {
       if (!packaged) {
         if (packaged.error().code ==
             doccraft::cfb::ErrorCode::kStreamNotFound) {
-          std::fprintf(stderr,
-                       "warning: OLE %d has no ObjectPool payload; "
-                       "placeholder emitted\n",
-                       object.storage_id);
+          warn_missing_ole(object.storage_id);
           continue;
         }
         std::fprintf(stderr, "convert: OLE %d: %s\n", object.storage_id,
