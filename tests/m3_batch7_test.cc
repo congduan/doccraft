@@ -58,7 +58,7 @@ std::vector<uint8_t> Sprms(std::initializer_list<std::vector<uint8_t>> list) {
 // PAPX.
 std::expected<model::Document, doc::Error> Synthetic(
     std::vector<uint8_t> pap, std::vector<uint8_t> chp,
-    std::vector<uint8_t> data = {}) {
+    std::vector<uint8_t> data = {}, uint16_t style = 0) {
   std::vector<uint8_t> word(1536), table(64);
   word[1024] = 'X';
   word[1025] = '\r';
@@ -79,7 +79,7 @@ std::expected<model::Document, doc::Error> Synthetic(
         sprms.insert(sprms.end(), nop.begin(), nop.end());
       }
       word[base + 40] = static_cast<uint8_t>((sprms.size() + 3) / 2);
-      Put16(word, base + 41, 0);
+      Put16(word, base + 41, style);
       std::copy(sprms.begin(), sprms.end(), word.begin() + base + 43);
     } else {
       word[base + 40] = static_cast<uint8_t>(sprms.size());
@@ -205,6 +205,23 @@ TEST(M3Batch7, ParagraphNestAndListLevelIncrement) {
   std::string clamped = RoundTrip(
       Sprms({Prl(0x460B, {1, 0}), Prl(0x260A, {7}), Prl(0x2602, {5})}), {});
   EXPECT_NE(clamped.find("<w:ilvl w:val=\"8\"/>"), std::string::npos);
+}
+
+TEST(M3Batch7, ParagraphStyleLevelIncrementWithoutList) {
+  auto document = Synthetic(Prl(0x2602, {1}), {}, {}, 2);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_FALSE(document->paragraphs.empty());
+  EXPECT_EQ(document->paragraphs[0].style, 3);
+  EXPECT_EQ(document->paragraphs[0].list_id, -1);
+  EXPECT_NE(Xml(*document).find("<w:pStyle w:val=\"Heading3\"/>"),
+            std::string::npos);
+
+  auto listed = Synthetic(
+      Sprms({Prl(0x460B, {1, 0}), Prl(0x260A, {1}), Prl(0x2602, {1})}), {}, {},
+      2);
+  ASSERT_TRUE(listed) << listed.error().message;
+  EXPECT_EQ(listed->paragraphs[0].style, 3);
+  EXPECT_NE(Xml(*listed).find("<w:ilvl w:val=\"2\"/>"), std::string::npos);
 }
 
 TEST(M3Batch7, IndirectParagraphSprms) {

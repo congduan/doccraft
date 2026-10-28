@@ -1068,6 +1068,12 @@ void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v) {
     }
     case kSprmPIncLvl:
       p.list_level_inc = static_cast<int8_t>(v[0]);
+      // [MS-DOC] 2.6.2: heading istd 1..9 is offset and clamped to that
+      // range. Other styles offset the outline level instead.
+      if (p.style >= 1 && p.style <= 9)
+        p.style = std::clamp(p.style + p.list_level_inc, 1, 9);
+      else if (p.outline >= 0 && p.outline < 9)
+        p.outline = std::clamp(p.outline + p.list_level_inc, 0, 9);
       break;
     case kSprmPNest80:
     case kSprmPNest:
