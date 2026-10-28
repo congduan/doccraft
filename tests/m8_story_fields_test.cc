@@ -946,6 +946,57 @@ TEST(M15StoryPlc, CommentTagsPairReorderedBookmarks) {
   EXPECT_LT(b_end, b_ref);
 }
 
+TEST(M15StoryPlc, CommentRangeMayExtendPastReference) {
+  Synthetic s = TaggedComments();
+  Put32(s.table, s.fib.atn_bkl.offset, 8);  // A: [3, 8], reference at 7.
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->warnings.empty());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t range_end =
+      xml.find("<w:commentRangeEnd w:id=\"1\"/>");
+  const size_t reference =
+      xml.find("<w:commentReference w:id=\"1\"/>");
+  ASSERT_NE(range_end, std::string::npos);
+  ASSERT_NE(reference, std::string::npos);
+  EXPECT_LT(reference, range_end);
+}
+
+TEST(M15StoryPlc, InvalidCommentRangeKeepsOtherRange) {
+  Synthetic s = TaggedComments();
+  Put32(s.table, s.fib.atn_bkf.offset + 4, 8);  // A: [8, 6].
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 2u);
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0], "skipped invalid comment range: id 1");
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t b_start =
+      xml.find("<w:commentRangeStart w:id=\"2\"/>");
+  const size_t b_end = xml.find("<w:commentRangeEnd w:id=\"2\"/>");
+  const size_t b_ref =
+      xml.find("<w:commentReference w:id=\"2\"/>");
+  const size_t a_start =
+      xml.find("<w:commentRangeStart w:id=\"1\"/>");
+  const size_t a_ref =
+      xml.find("<w:commentReference w:id=\"1\"/>");
+  const size_t a_end = xml.find("<w:commentRangeEnd w:id=\"1\"/>");
+  ASSERT_NE(b_start, std::string::npos);
+  ASSERT_NE(b_end, std::string::npos);
+  ASSERT_NE(b_ref, std::string::npos);
+  ASSERT_NE(a_start, std::string::npos);
+  ASSERT_NE(a_ref, std::string::npos);
+  ASSERT_NE(a_end, std::string::npos);
+  EXPECT_LT(b_start, b_end);
+  EXPECT_LT(b_end, b_ref);
+  EXPECT_LT(a_start, a_ref);
+  EXPECT_LT(a_ref, a_end);
+}
+
 TEST(M15StoryPlc, UnmatchedCommentTagFallsBackToPointAnchor) {
   Synthetic s = TaggedComments();
   Put32(s.table, s.fib.atn_bkmk.offset + 22, 0x12345678);
@@ -1030,4 +1081,38 @@ TEST(M15StoryPlc, CommentOwnersTrailingByteKeepsAuthor) {
   ASSERT_TRUE(zip);
   EXPECT_NE(Part(*zip, "word/comments.xml").find("w:author=\"A\""),
             std::string::npos);
+}
+
+TEST(M15StoryPlc, CommentInitialsUseByteCountAndUtf16Payload) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  const size_t record = s.fib.and_ref.offset + 8;
+  s.table[record] = 2;
+  Put16(s.table, record + 1, 'A');
+  Put16(s.table, record + 3, 'B');
+  Put16(s.table, record + 20, 0xffff);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  EXPECT_EQ(parsed->comments[0].initials, "AB");
+  EXPECT_EQ(parsed->comments[0].author, "AB");
+  EXPECT_TRUE(parsed->warnings.empty());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/comments.xml").find("w:initials=\"AB\""),
+            std::string::npos);
+}
+
+TEST(M15StoryPlc, OversizedCommentInitialsWarnAndKeepComment) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  s.table[s.fib.and_ref.offset + 8] = 5;
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  EXPECT_TRUE(parsed->comments[0].initials.empty());
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0], "skipped invalid comment initials: id 1");
 }
