@@ -122,6 +122,28 @@ TEST(M3Comments, ReadsBodiesAuthorsAndAnchors) {
   EXPECT_EQ(anchor_of(d->paragraphs[1]), 2);
 }
 
+TEST(M3Comments, RangeBookmarkSurroundsAnnotatedText) {
+  auto d = ParseFixture("comments-range");
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->comments.size(), 1u);
+  EXPECT_EQ(ParagraphText(d->paragraphs[0]),
+            "Before annotated phrase after.");
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t start = xml.find("<w:commentRangeStart w:id=\"1\"/>");
+  const size_t phrase = xml.find("annotated phrase");
+  const size_t end = xml.find("<w:commentRangeEnd w:id=\"1\"/>");
+  const size_t ref = xml.find("<w:commentReference w:id=\"1\"/>");
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(phrase, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_NE(ref, std::string::npos);
+  EXPECT_LT(start, phrase);
+  EXPECT_LT(phrase, end);
+  EXPECT_LT(end, ref);
+}
+
 TEST(M3Comments, WritesCommentsPartAndAnchors) {
   auto d = ParseFixture("comments-basic");
   ASSERT_TRUE(d) << d.error().message;
