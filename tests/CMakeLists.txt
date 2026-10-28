@@ -157,6 +157,17 @@ target_compile_definitions(m4_textbox_test PRIVATE
   DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m4_textbox_test)
 
+add_executable(docx_writer_test docx_writer_test.cc)
+target_link_libraries(docx_writer_test PRIVATE doccraft_docx gtest_main)
+gtest_discover_tests(docx_writer_test)
+
+add_executable(m6_textbox_degradation_test m6_textbox_degradation_test.cc)
+target_link_libraries(m6_textbox_degradation_test PRIVATE doccraft_cfb
+  doccraft_doc doccraft_docx gtest_main)
+target_compile_definitions(m6_textbox_degradation_test PRIVATE
+  DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(m6_textbox_degradation_test)
+
 add_executable(m14_textbox_test m14_textbox_test.cc)
 target_link_libraries(m14_textbox_test PRIVATE doccraft_cfb doccraft_doc
                                                  doccraft_docx gtest_main)
