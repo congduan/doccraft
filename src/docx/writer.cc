@@ -280,10 +280,6 @@ std::expected<std::vector<uint8_t>, Error> Write(
   ctx.document = &document;
   ctx.image_rids.resize(document.images.size());
   ctx.ole_rids.resize(document.ole_objects.size());
-  for (const auto& object : document.ole_objects) {
-    if (object.bytes.empty())
-      return std::unexpected(Error{"OLE object storage is missing"});
-  }
   pugi::xml_document doc;
   auto root = doc.append_child("w:document");
   Attr(root, "xmlns:w", kWordmlNamespace);

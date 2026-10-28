@@ -224,6 +224,18 @@ TEST(M3Batch7, ParagraphStyleLevelIncrementWithoutList) {
   EXPECT_NE(Xml(*listed).find("<w:ilvl w:val=\"2\"/>"), std::string::npos);
 }
 
+TEST(M3Batch7, EmbeddedObjectWithoutOleUsesPlaceholder) {
+  auto document = Synthetic({}, Prl(0x0856, {1}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->warnings.size(), 1u);
+  EXPECT_EQ(document->warnings[0],
+            "embedded object at CP 0 has no OLE payload; placeholder emitted");
+  ASSERT_FALSE(document->paragraphs.empty());
+  ASSERT_FALSE(document->paragraphs[0].runs.empty());
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "[Embedded object]");
+  EXPECT_NE(Xml(*document).find("[Embedded object]"), std::string::npos);
+}
+
 TEST(M3Batch7, IndirectParagraphSprms) {
   std::vector<uint8_t> nested = Prl(0x2407, {1});
   std::vector<uint8_t> data(2 + nested.size());

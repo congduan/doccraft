@@ -169,6 +169,10 @@ void WriteOle(pugi::xml_node run, int index, WriteContext& ctx) {
       static_cast<size_t>(index) >= ctx.document->ole_objects.size())
     return;
   const auto& object = ctx.document->ole_objects[index];
+  if (object.bytes.empty()) {
+    run.append_child("w:t").text().set("[Embedded object]");
+    return;
+  }
   if (ctx.ole_rids[index] == 0) {
     const std::string name =
         "embeddings/oleObject" + std::to_string(index + 1) + ".bin";

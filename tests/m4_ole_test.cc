@@ -100,6 +100,22 @@ TEST(M4Ole, RealObjectPoolSubstorageIsIndependentCfbPart) {
   EXPECT_EQ(embedded.size(), parsed->ole_objects[0].bytes.size());
 }
 
+TEST(M4Ole, MissingObjectPoolPayloadUsesPlaceholder) {
+  model::Document document;
+  model::Paragraph paragraph;
+  model::Run marker;
+  marker.ole_index = 0;
+  paragraph.runs.push_back(marker);
+  document.paragraphs.push_back(paragraph);
+  document.ole_objects.emplace_back();
+  auto written = docx::Write(document);
+  ASSERT_TRUE(written) << written.error().message;
+  EXPECT_NE(Part(*written, "word/document.xml").find("[Embedded object]"),
+            std::string::npos);
+  EXPECT_EQ(Part(*written, "word/document.xml").find("<o:OLEObject"),
+            std::string::npos);
+}
+
 TEST(M4Ole, SyntheticObjectPoolStreamFamilyRoundTrips) {
   const std::vector<uint8_t> native{'f', 'i', 'l', 'e'};
   const std::vector<uint8_t> preview{'E', 'M', 'F'};

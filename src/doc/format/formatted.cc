@@ -739,6 +739,14 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       else
         ApplyRun(r, op, v, doc.fonts);
     });
+    if (r.embedded_object && !r.ole_object) {
+      doc.warnings.push_back("embedded object at CP " + std::to_string(ch.cp) +
+                             " has no OLE payload; placeholder emitted");
+      r.text = "[Embedded object]";
+      para.runs.push_back(std::move(r));
+      last_run_count = 0;
+      continue;
+    }
     if (control == '\x01' && r.object_offset >= 0 && !r.ole_object &&
         !r.embedded_object && !r.binary_data) {
       auto picture =

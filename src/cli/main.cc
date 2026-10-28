@@ -300,13 +300,23 @@ int main(int argc, char** argv) {
     }
     for (auto& object : extracted->ole_objects) {
       if (!cfb) {
-        std::fprintf(stderr, "convert: OLE %d: OLE storage has no streams\n",
+        std::fprintf(stderr,
+                     "warning: OLE %d has no ObjectPool payload; "
+                     "placeholder emitted\n",
                      object.storage_id);
-        return 1;
+        continue;
       }
       auto packaged = doccraft::cfb::RepackageStorage(
           *cfb, "Root Entry/ObjectPool/_" + std::to_string(object.storage_id));
       if (!packaged) {
+        if (packaged.error().code ==
+            doccraft::cfb::ErrorCode::kStreamNotFound) {
+          std::fprintf(stderr,
+                       "warning: OLE %d has no ObjectPool payload; "
+                       "placeholder emitted\n",
+                       object.storage_id);
+          continue;
+        }
         std::fprintf(stderr, "convert: OLE %d: %s\n", object.storage_id,
                      packaged.error().message.c_str());
         return 1;
