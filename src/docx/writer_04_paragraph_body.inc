@@ -26,10 +26,10 @@ const char* ImageExtension(model::ImageFormat format) {
   return "png";
 }
 
-void RegisterImage(int index, WriteContext& ctx) {
+std::expected<void, Error> RegisterImage(int index, WriteContext& ctx) {
   if (!ctx.document || index < 0 ||
       static_cast<size_t>(index) >= ctx.document->images.size())
-    return;
+    return {};
   const model::Image& image = ctx.document->images[index];
   if (ctx.image_rids[index] == 0) {
     const int number = index + 1;
@@ -37,15 +37,23 @@ void RegisterImage(int index, WriteContext& ctx) {
                        ImageExtension(image.format);
     ctx.image_rids[index] = ctx.next_rid++;
     ctx.relations.emplace_back(ctx.image_rids[index], name);
-    ctx.AddPart(name, std::string(image.bytes.begin(), image.bytes.end()));
+    auto result = ctx.AddPart(
+        "word/" + name, std::string(image.bytes.begin(), image.bytes.end()),
+        ctx.parts);
+    if (!result)
+      return std::unexpected(result.error());
   }
+  return {};
 }
 
-void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
+std::expected<void, Error> WriteImage(pugi::xml_node run, int index,
+                                      WriteContext& ctx) {
   if (!ctx.document || index < 0 ||
       static_cast<size_t>(index) >= ctx.document->images.size())
-    return;
-  RegisterImage(index, ctx);
+    return {};
+  auto result = RegisterImage(index, ctx);
+  if (!result)
+    return std::unexpected(result.error());
   const model::Image& image = ctx.document->images[index];
   constexpr int64_t kEmuPerTwip = 635;
   const int64_t width = static_cast<int64_t>(image.width) * kEmuPerTwip;
@@ -161,23 +169,29 @@ void WriteImage(pugi::xml_node run, int index, WriteContext& ctx) {
   Attr(ext, "cx", std::to_string(width));
   Attr(ext, "cy", std::to_string(height));
   Attr(sp_pr.append_child("a:prstGeom"), "prst", "rect");
+  return {};
 }
 
-void WriteOle(pugi::xml_node run, int index, WriteContext& ctx) {
+std::expected<void, Error> WriteOle(pugi::xml_node run, int index,
+                                    WriteContext& ctx) {
   if (!ctx.document || index < 0 ||
       static_cast<size_t>(index) >= ctx.document->ole_objects.size())
-    return;
+    return {};
   const auto& object = ctx.document->ole_objects[index];
   if (object.bytes.empty()) {
     run.append_child("w:t").text().set("[Embedded object]");
-    return;
+    return {};
   }
   if (ctx.ole_rids[index] == 0) {
     const std::string name =
         "embeddings/oleObject" + std::to_string(index + 1) + ".bin";
     ctx.ole_rids[index] = ctx.next_rid++;
     ctx.relations.emplace_back(ctx.ole_rids[index], name);
-    ctx.AddPart(name, std::string(object.bytes.begin(), object.bytes.end()));
+    auto result = ctx.AddPart(
+        "word/" + name, std::string(object.bytes.begin(), object.bytes.end()),
+        ctx.parts);
+    if (!result)
+      return std::unexpected(result.error());
   }
   int width = 1440, height = 1440;
   if (object.preview_image_index >= 0 &&
@@ -186,7 +200,9 @@ void WriteOle(pugi::xml_node run, int index, WriteContext& ctx) {
     const auto& image = ctx.document->images[object.preview_image_index];
     width = image.width;
     height = image.height;
-    RegisterImage(object.preview_image_index, ctx);
+    auto result = RegisterImage(object.preview_image_index, ctx);
+    if (!result)
+      return std::unexpected(result.error());
   }
   auto container = run.append_child("w:object");
   IntAttr(container, "w:dxaOrig", width);
@@ -209,12 +225,14 @@ void WriteOle(pugi::xml_node run, int index, WriteContext& ctx) {
   Attr(ole, "DrawAspect", "Content");
   Attr(ole, "ObjectID", "_" + std::to_string(object.storage_id));
   Attr(ole, "r:id", "rId" + std::to_string(ctx.ole_rids[index]));
+  return {};
 }
 
-void WriteTextbox(pugi::xml_node run, int index, WriteContext& ctx) {
+std::expected<void, Error> WriteTextbox(pugi::xml_node run, int index,
+                                        WriteContext& ctx) {
   if (!ctx.document || index < 0 ||
       static_cast<size_t>(index) >= ctx.document->textboxes.size())
-    return;
+    return {};
   const auto& box = ctx.document->textboxes[index];
   auto rect = run.append_child("w:pict").append_child("v:rect");
   Attr(rect, "id", "Textbox" + std::to_string(index + 1));
@@ -232,14 +250,19 @@ void WriteTextbox(pugi::xml_node run, int index, WriteContext& ctx) {
                      : std::string()) +
            "width:" + points(box.width) + ";height:" + points(box.height));
   auto content = rect.append_child("v:textbox").append_child("w:txbxContent");
-  for (const auto& paragraph : box.paragraphs)
-    WriteParagraph(content, paragraph, nullptr, ctx);
+  for (const auto& paragraph : box.paragraphs) {
+    auto result = WriteParagraph(content, paragraph, nullptr, ctx);
+    if (!result)
+      return std::unexpected(result.error());
+  }
+  return {};
 }
 
-void WriteShape(pugi::xml_node run, int index, WriteContext& ctx) {
+std::expected<void, Error> WriteShape(pugi::xml_node run, int index,
+                                      WriteContext& ctx) {
   if (!ctx.document || index < 0 ||
       static_cast<size_t>(index) >= ctx.document->shapes.size())
-    return;
+    return {};
   const auto& shape = ctx.document->shapes[index];
   const char* kind = shape.type == model::kShapeEllipse ? "v:oval"
                      : shape.type == model::kShapeLine  ? "v:line"
@@ -293,16 +316,24 @@ void WriteShape(pugi::xml_node run, int index, WriteContext& ctx) {
     model::Run text_run;
     text_run.text = shape.text;
     paragraph.runs.push_back(std::move(text_run));
-    WriteParagraph(content, paragraph, nullptr, ctx);
+    auto result = WriteParagraph(content, paragraph, nullptr, ctx);
+    if (!result)
+      return std::unexpected(result.error());
   }
+  return {};
 }
 
-void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
-                    const model::Section* break_section, WriteContext& ctx) {
+std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
+                                          const model::Paragraph& p,
+                                          const model::Section* break_section,
+                                          WriteContext& ctx) {
   auto pn = parent.append_child("w:p");
   ParaPr(pn, p);
   if (break_section) {
-    SectionPr(pn.child("w:pPr").append_child("w:sectPr"), *break_section, &ctx);
+    auto result = SectionPr(pn.child("w:pPr").append_child("w:sectPr"),
+                            *break_section, &ctx);
+    if (!result)
+      return std::unexpected(result.error());
   }
   for (const auto& r : p.runs) {
     pugi::xml_node owner = pn;
@@ -351,13 +382,21 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       IntAttr(rn.append_child("w:commentRangeEnd"), "w:id", r.comment_ref);
       IntAttr(rn.append_child("w:commentReference"), "w:id", r.comment_ref);
     } else if (r.image_index >= 0) {
-      WriteImage(rn, r.image_index, ctx);
+      auto result = WriteImage(rn, r.image_index, ctx);
+      if (!result)
+        return std::unexpected(result.error());
     } else if (r.shape_index >= 0) {
-      WriteShape(rn, r.shape_index, ctx);
+      auto result = WriteShape(rn, r.shape_index, ctx);
+      if (!result)
+        return std::unexpected(result.error());
     } else if (r.textbox_index >= 0) {
-      WriteTextbox(rn, r.textbox_index, ctx);
+      auto result = WriteTextbox(rn, r.textbox_index, ctx);
+      if (!result)
+        return std::unexpected(result.error());
     } else if (r.ole_index >= 0) {
-      WriteOle(rn, r.ole_index, ctx);
+      auto result = WriteOle(rn, r.ole_index, ctx);
+      if (!result)
+        return std::unexpected(result.error());
     } else if (r.note_ref >= 0) {
       // A note reference is an empty run carrying the reference element.
       IntAttr(rn.append_child(r.note_endnote ? "w:endnoteReference"
@@ -390,4 +429,5 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       Text(rn, r.text, deleted);
     }
   }
+  return {};
 }

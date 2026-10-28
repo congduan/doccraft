@@ -114,33 +114,35 @@ struct WriteContext {
   std::vector<std::pair<int, std::string>> relations;  // rId -> part name
   std::vector<Part> parts;
   size_t max_part_bytes = detail::kMaxWriterPartBytes;
-  std::string part_error;
-
-  void AddPart(std::string name, std::string data) {
-    if (!part_error.empty())
-      return;
+  std::expected<void, Error> AddPart(std::string name, std::string data,
+                                     std::vector<Part>& destination) {
     if (data.size() > max_part_bytes) {
-      part_error = "writer part limit exceeded: " + name + " (" +
-                   std::to_string(data.size()) + " bytes)";
-      return;
+      return std::unexpected(Error{"writer part limit exceeded: " + name +
+                                   " (" + std::to_string(data.size()) +
+                                   " bytes)"});
     }
-    parts.push_back({std::move(name), std::move(data)});
+    destination.push_back({std::move(name), std::move(data)});
+    return {};
   }
 };
 
 std::string Save(const pugi::xml_document& d);
 
-void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
-                    const model::Section* break_section, WriteContext& ctx);
+std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
+                                          const model::Paragraph& p,
+                                          const model::Section* break_section,
+                                          WriteContext& ctx);
 
 // Emits footnotes.xml / endnotes.xml when the document has notes, and
 // registers the parts and relationships.
-void WriteNoteParts(const model::Document& document, WriteContext& ctx);
-void WriteCommentPart(const model::Document& document, WriteContext& ctx);
+std::expected<void, Error> WriteNoteParts(const model::Document& document,
+                                          WriteContext& ctx);
+std::expected<void, Error> WriteCommentPart(const model::Document& document,
+                                            WriteContext& ctx);
 
-// Returns false when `section` has no header/footer story to reference.
-bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
-                            WriteContext& ctx);
+std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
+                                                  const model::Section& section,
+                                                  WriteContext& ctx);
 
 #include "docx/writer_01_paragraph.inc"
 #include "docx/writer_02_section.inc"
@@ -164,10 +166,10 @@ std::string BuildContentTypes(const WriteContext& ctx) {
         "vnd.openxmlformats-officedocument.oleObject\"/>";
   }
   for (const auto& part : ctx.parts) {
-    bool header = part.name.starts_with("header");
-    if (!header && !part.name.starts_with("footer"))
+    bool header = part.name.starts_with("word/header");
+    if (!header && !part.name.starts_with("word/footer"))
       continue;
-    out += "<Override PartName=\"/word/" + part.name +
+    out += "<Override PartName=\"/" + part.name +
            "\" "
            "ContentType=\"application/"
            "vnd.openxmlformats-officedocument.wordprocessingml." +
@@ -175,17 +177,17 @@ std::string BuildContentTypes(const WriteContext& ctx) {
            "+xml\"/>";
   }
   for (const auto& part : ctx.parts) {
-    if (part.name == "footnotes.xml") {
+    if (part.name == "word/footnotes.xml") {
       out +=
           "<Override PartName=\"/word/footnotes.xml\" "
           "ContentType=\"application/"
           "vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml\"/"
           ">";
-    } else if (part.name == "endnotes.xml") {
+    } else if (part.name == "word/endnotes.xml") {
       out +=
           "<Override PartName=\"/word/endnotes.xml\" ContentType=\"application/"
           "vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml\"/>";
-    } else if (part.name == "comments.xml") {
+    } else if (part.name == "word/comments.xml") {
       out +=
           "<Override PartName=\"/word/comments.xml\" ContentType=\"application/"
           "vnd.openxmlformats-officedocument.wordprocessingml.comments+xml\"/>";
@@ -322,18 +324,19 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   Attr(root, "xmlns:pic",
        "http://schemas.openxmlformats.org/drawingml/2006/picture");
   auto body = root.append_child("w:body");
-  WriteBody(body, document, ctx);
-  if (!ctx.part_error.empty())
-    return std::unexpected(Error{ctx.part_error});
-
-  WriteNoteParts(document, ctx);
-  if (!ctx.part_error.empty())
-    return std::unexpected(Error{ctx.part_error});
-  WriteCommentPart(document, ctx);
-  if (!ctx.part_error.empty())
-    return std::unexpected(Error{ctx.part_error});
+  auto write_result = WriteBody(body, document, ctx);
+  if (!write_result)
+    return std::unexpected(write_result.error());
+  write_result = WriteNoteParts(document, ctx);
+  if (!write_result)
+    return std::unexpected(write_result.error());
+  write_result = WriteCommentPart(document, ctx);
+  if (!write_result)
+    return std::unexpected(write_result.error());
   auto sec = body.append_child("w:sectPr");
-  SectionPr(sec, document.section, &ctx);
+  write_result = SectionPr(sec, document.section, &ctx);
+  if (!write_result)
+    return std::unexpected(write_result.error());
 
   pugi::xml_document styles = WriteStyles(document);
   pugi::xml_document numbering = WriteNumbering(document);
@@ -343,15 +346,12 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   size_t buffered = 0;
   auto add_part = [&](std::string name,
                       std::string data) -> std::expected<void, Error> {
-    if (data.size() > max_part_bytes) {
-      return std::unexpected(Error{"writer part limit exceeded: " + name +
-                                   " (" + std::to_string(data.size()) +
-                                   " bytes)"});
-    }
     if (data.size() > max_buffer_bytes - buffered)
       return std::unexpected(Error{"writer buffer limit exceeded"});
-    buffered += data.size();
-    parts.push_back({std::move(name), std::move(data)});
+    auto added = ctx.AddPart(std::move(name), std::move(data), parts);
+    if (!added)
+      return std::unexpected(added.error());
+    buffered += parts.back().data.size();
     return {};
   };
   auto result = add_part("[Content_Types].xml", BuildContentTypes(ctx));
@@ -372,8 +372,9 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   result = add_part("word/numbering.xml", Save(numbering));
   if (!result)
     return std::unexpected(result.error());
+
   for (const auto& part : ctx.parts) {
-    result = add_part("word/" + part.name, part.data);
+    result = add_part(part.name, part.data);
     if (!result)
       return std::unexpected(result.error());
   }

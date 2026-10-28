@@ -20,14 +20,13 @@ std::string Save(const pugi::xml_document& d) {
 
 // Emits the w:headerReference / w:footerReference of one section and registers
 // its part plus relationship, so every section carries its own stories.
-bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
-                            WriteContext& ctx) {
-  bool any = false;
+std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
+                                                  const model::Section& section,
+                                                  WriteContext& ctx) {
   for (size_t i = 0; i < 6; i++) {
     if (section.headers[i].empty()) {
       continue;
     }
-    any = true;
     const bool is_header = i == 0 || i == 1 || i == 4;
     const int rid = ctx.next_rid++;
     const std::string name = (is_header ? "header" : "footer") +
@@ -57,9 +56,13 @@ bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
       Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
     }
     for (const auto& paragraph : section.headers[i]) {
-      WriteParagraph(root, paragraph, nullptr, ctx);
+      auto result = WriteParagraph(root, paragraph, nullptr, ctx);
+      if (!result)
+        return std::unexpected(result.error());
     }
-    ctx.AddPart(name, Save(part));
+    auto result = ctx.AddPart("word/" + name, Save(part), ctx.parts);
+    if (!result)
+      return std::unexpected(result.error());
   }
   if (section.first_page_different) {
     One(sec, "w:titlePg");
@@ -67,18 +70,19 @@ bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
   if (section.odd_even_different) {
     ctx.odd_even = true;
   }
-  return any;
+  return {};
 }
 
-void WriteNoteParts(const model::Document& document, WriteContext& ctx) {
+std::expected<void, Error> WriteNoteParts(const model::Document& document,
+                                          WriteContext& ctx) {
   bool has_footnotes = false, has_endnotes = false;
   for (const auto& note : document.notes) {
     (note.endnote ? has_endnotes : has_footnotes) = true;
   }
   if (!has_footnotes && !has_endnotes) {
-    return;
+    return {};
   }
-  auto write_class = [&](bool endnote) {
+  auto write_class = [&](bool endnote) -> std::expected<void, Error> {
     const char* part = endnote ? "endnotes.xml" : "footnotes.xml";
     const char* root_name = endnote ? "w:endnotes" : "w:footnotes";
     const char* note_name = endnote ? "w:endnote" : "w:footnote";
@@ -112,24 +116,32 @@ void WriteNoteParts(const model::Document& document, WriteContext& ctx) {
         node.append_child("w:p");
       }
       for (const auto& paragraph : note.paragraphs) {
-        WriteParagraph(node, paragraph, nullptr, ctx);
+        auto result = WriteParagraph(node, paragraph, nullptr, ctx);
+        if (!result)
+          return std::unexpected(result.error());
       }
     }
     const int rid = ctx.next_rid++;
     ctx.relations.emplace_back(rid, part);
-    ctx.AddPart(part, Save(doc));
+    return ctx.AddPart("word/" + std::string(part), Save(doc), ctx.parts);
   };
   if (has_footnotes) {
-    write_class(false);
+    auto result = write_class(false);
+    if (!result)
+      return std::unexpected(result.error());
   }
   if (has_endnotes) {
-    write_class(true);
+    auto result = write_class(true);
+    if (!result)
+      return std::unexpected(result.error());
   }
+  return {};
 }
 
-void WriteCommentPart(const model::Document& document, WriteContext& ctx) {
+std::expected<void, Error> WriteCommentPart(const model::Document& document,
+                                            WriteContext& ctx) {
   if (document.comments.empty()) {
-    return;
+    return {};
   }
   pugi::xml_document doc;
   auto root = doc.append_child("w:comments");
@@ -154,5 +166,5 @@ void WriteCommentPart(const model::Document& document, WriteContext& ctx) {
   }
   const int rid = ctx.next_rid++;
   ctx.relations.emplace_back(rid, "comments.xml");
-  ctx.AddPart("comments.xml", Save(doc));
+  return ctx.AddPart("word/comments.xml", Save(doc), ctx.parts);
 }

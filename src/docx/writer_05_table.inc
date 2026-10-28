@@ -265,12 +265,16 @@ void WriteCellProperties(pugi::xml_node tcp, const model::CellProperties* cp,
   }
 }
 
-void WriteTable(pugi::xml_node parent, const model::Table& t,
-                const model::Document& document, WriteContext& ctx);
+std::expected<void, Error> WriteTable(pugi::xml_node parent,
+                                      const model::Table& t,
+                                      const model::Document& document,
+                                      WriteContext& ctx);
 
-void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
-                   const model::Document& document, WriteContext& ctx,
-                   bool correct_left_inset) {
+std::expected<void, Error> WriteTableRow(pugi::xml_node tn,
+                                         const model::Table& t, size_t index,
+                                         const model::Document& document,
+                                         WriteContext& ctx,
+                                         bool correct_left_inset) {
   const auto& row = t.rows[index];
   const model::RowProperties* rp =
       index < t.row_properties.size() ? &t.row_properties[index] : nullptr;
@@ -291,22 +295,33 @@ void WriteTableRow(pugi::xml_node tn, const model::Table& t, size_t index,
     grid_index += span;
     // A w:tc must contain at least one paragraph.
     if (row[j].blocks.empty()) {
-      WriteParagraph(tc, model::Paragraph{}, nullptr, ctx);
+      auto result = WriteParagraph(tc, model::Paragraph{}, nullptr, ctx);
+      if (!result)
+        return std::unexpected(result.error());
     }
     for (const auto& block : row[j].blocks) {
       if (block.table) {
         if (block.index < document.tables.size()) {
-          WriteTable(tc, document.tables[block.index], document, ctx);
+          auto result =
+              WriteTable(tc, document.tables[block.index], document, ctx);
+          if (!result)
+            return std::unexpected(result.error());
         }
       } else if (block.index < document.paragraphs.size()) {
-        WriteParagraph(tc, document.paragraphs[block.index], nullptr, ctx);
+        auto result =
+            WriteParagraph(tc, document.paragraphs[block.index], nullptr, ctx);
+        if (!result)
+          return std::unexpected(result.error());
       }
     }
   }
+  return {};
 }
 
-void WriteTable(pugi::xml_node parent, const model::Table& t,
-                const model::Document& document, WriteContext& ctx) {
+std::expected<void, Error> WriteTable(pugi::xml_node parent,
+                                      const model::Table& t,
+                                      const model::Document& document,
+                                      WriteContext& ctx) {
   bool correct_left_inset = false;
   for (const auto& row : t.row_properties) {
     for (const auto& cell : row.cells) {
@@ -323,8 +338,11 @@ void WriteTable(pugi::xml_node parent, const model::Table& t,
     IntAttr(grid.append_child("w:gridCol"), "w:w", column);
   }
   for (size_t i = 0; i < t.rows.size(); i++) {
-    WriteTableRow(tn, t, i, document, ctx, correct_left_inset);
+    auto result = WriteTableRow(tn, t, i, document, ctx, correct_left_inset);
+    if (!result)
+      return std::unexpected(result.error());
   }
+  return {};
 }
 
 const model::Section* SectionBreakFor(const model::Document& document,
@@ -338,23 +356,32 @@ const model::Section* SectionBreakFor(const model::Document& document,
                                                                    : nullptr;
 }
 
-void WriteBody(pugi::xml_node body, const model::Document& document,
-               WriteContext& ctx) {
+std::expected<void, Error> WriteBody(pugi::xml_node body,
+                                     const model::Document& document,
+                                     WriteContext& ctx) {
   if (document.blocks.empty()) {
     for (size_t i = 0; i < document.paragraphs.size(); i++) {
-      WriteParagraph(body, document.paragraphs[i], SectionBreakFor(document, i),
-                     ctx);
+      auto result = WriteParagraph(body, document.paragraphs[i],
+                                   SectionBreakFor(document, i), ctx);
+      if (!result)
+        return std::unexpected(result.error());
     }
-    return;
+    return {};
   }
   for (const auto& block : document.blocks) {
     if (block.table && block.index < document.tables.size()) {
-      WriteTable(body, document.tables[block.index], document, ctx);
+      auto result =
+          WriteTable(body, document.tables[block.index], document, ctx);
+      if (!result)
+        return std::unexpected(result.error());
     } else if (!block.table && block.index < document.paragraphs.size()) {
-      WriteParagraph(body, document.paragraphs[block.index],
-                     SectionBreakFor(document, block.index), ctx);
+      auto result = WriteParagraph(body, document.paragraphs[block.index],
+                                   SectionBreakFor(document, block.index), ctx);
+      if (!result)
+        return std::unexpected(result.error());
     }
   }
+  return {};
 }
 
 // CNF condition (cnfc) -> w:tblStylePr/@w:type.

@@ -239,8 +239,9 @@ void WriteEndnoteProperties(pugi::xml_node sec, const model::Section& section) {
   }
 }
 
-void SectionPr(pugi::xml_node sec, const model::Section& section,
-               WriteContext* ctx) {
+std::expected<void, Error> SectionPr(pugi::xml_node sec,
+                                     const model::Section& section,
+                                     WriteContext* ctx) {
   if (section.break_specified) {
     const char* types[] = {"continuous", "nextColumn", "nextPage", "evenPage",
                            "oddPage"};
@@ -276,7 +277,9 @@ void SectionPr(pugi::xml_node sec, const model::Section& section,
   WriteFootnoteProperties(sec, section);
   WriteEndnoteProperties(sec, section);
   if (ctx != nullptr) {
-    WriteSectionReferences(sec, section, *ctx);
+    auto result = WriteSectionReferences(sec, section, *ctx);
+    if (!result)
+      return std::unexpected(result.error());
   }
+  return {};
 }
-
