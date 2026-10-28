@@ -113,6 +113,19 @@ struct WriteContext {
   bool odd_even = false;
   std::vector<std::pair<int, std::string>> relations;  // rId -> part name
   std::vector<Part> parts;
+  size_t max_part_bytes = detail::kMaxWriterPartBytes;
+  std::string part_error;
+
+  void AddPart(std::string name, std::string data) {
+    if (!part_error.empty())
+      return;
+    if (data.size() > max_part_bytes) {
+      part_error = "writer part limit exceeded: " + name + " (" +
+                   std::to_string(data.size()) + " bytes)";
+      return;
+    }
+    parts.push_back({std::move(name), std::move(data)});
+  }
 };
 
 std::string Save(const pugi::xml_document& d);
@@ -279,11 +292,13 @@ std::expected<std::vector<uint8_t>, Error> Write(
 }
 
 std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
-    const model::Document& document, size_t max_buffer_bytes) {
+    const model::Document& document, size_t max_buffer_bytes,
+    size_t max_part_bytes) {
   using Clock = std::chrono::steady_clock;
   const auto t_start = Clock::now();
   WriteContext ctx;
   ctx.document = &document;
+  ctx.max_part_bytes = max_part_bytes;
   ctx.image_rids.resize(document.images.size());
   ctx.ole_rids.resize(document.ole_objects.size());
   pugi::xml_document doc;
@@ -308,9 +323,15 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
        "http://schemas.openxmlformats.org/drawingml/2006/picture");
   auto body = root.append_child("w:body");
   WriteBody(body, document, ctx);
+  if (!ctx.part_error.empty())
+    return std::unexpected(Error{ctx.part_error});
 
   WriteNoteParts(document, ctx);
+  if (!ctx.part_error.empty())
+    return std::unexpected(Error{ctx.part_error});
   WriteCommentPart(document, ctx);
+  if (!ctx.part_error.empty())
+    return std::unexpected(Error{ctx.part_error});
   auto sec = body.append_child("w:sectPr");
   SectionPr(sec, document.section, &ctx);
 
@@ -319,23 +340,47 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   pugi::xml_document docrels = BuildRelationships(ctx);
 
   std::vector<Part> parts;
-  parts.push_back({"[Content_Types].xml", BuildContentTypes(ctx)});
-  parts.push_back({"_rels/.rels", kRootRelationships});
-  parts.push_back({"word/_rels/document.xml.rels", Save(docrels)});
-  parts.push_back({"word/document.xml", Save(doc)});
-  parts.push_back({"word/styles.xml", Save(styles)});
-  parts.push_back({"word/numbering.xml", Save(numbering)});
+  size_t buffered = 0;
+  auto add_part = [&](std::string name,
+                      std::string data) -> std::expected<void, Error> {
+    if (data.size() > max_part_bytes) {
+      return std::unexpected(Error{"writer part limit exceeded: " + name +
+                                   " (" + std::to_string(data.size()) +
+                                   " bytes)"});
+    }
+    if (data.size() > max_buffer_bytes - buffered)
+      return std::unexpected(Error{"writer buffer limit exceeded"});
+    buffered += data.size();
+    parts.push_back({std::move(name), std::move(data)});
+    return {};
+  };
+  auto result = add_part("[Content_Types].xml", BuildContentTypes(ctx));
+  if (!result)
+    return std::unexpected(result.error());
+  result = add_part("_rels/.rels", kRootRelationships);
+  if (!result)
+    return std::unexpected(result.error());
+  result = add_part("word/_rels/document.xml.rels", Save(docrels));
+  if (!result)
+    return std::unexpected(result.error());
+  result = add_part("word/document.xml", Save(doc));
+  if (!result)
+    return std::unexpected(result.error());
+  result = add_part("word/styles.xml", Save(styles));
+  if (!result)
+    return std::unexpected(result.error());
+  result = add_part("word/numbering.xml", Save(numbering));
+  if (!result)
+    return std::unexpected(result.error());
   for (const auto& part : ctx.parts) {
-    parts.push_back({"word/" + part.name, part.data});
+    result = add_part("word/" + part.name, part.data);
+    if (!result)
+      return std::unexpected(result.error());
   }
   if (ctx.odd_even) {
-    parts.push_back({"word/settings.xml", kSettingsPart});
-  }
-  size_t buffered = 0;
-  for (const auto& part : parts) {
-    if (part.data.size() > max_buffer_bytes - buffered)
-      return std::unexpected(Error{"writer buffer limit exceeded"});
-    buffered += part.data.size();
+    result = add_part("word/settings.xml", kSettingsPart);
+    if (!result)
+      return std::unexpected(result.error());
   }
   const auto t_xml = Clock::now();
   auto archive = PackParts(parts);

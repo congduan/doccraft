@@ -37,8 +37,7 @@ void RegisterImage(int index, WriteContext& ctx) {
                        ImageExtension(image.format);
     ctx.image_rids[index] = ctx.next_rid++;
     ctx.relations.emplace_back(ctx.image_rids[index], name);
-    ctx.parts.push_back(
-        {name, std::string(image.bytes.begin(), image.bytes.end())});
+    ctx.AddPart(name, std::string(image.bytes.begin(), image.bytes.end()));
   }
 }
 
@@ -178,8 +177,7 @@ void WriteOle(pugi::xml_node run, int index, WriteContext& ctx) {
         "embeddings/oleObject" + std::to_string(index + 1) + ".bin";
     ctx.ole_rids[index] = ctx.next_rid++;
     ctx.relations.emplace_back(ctx.ole_rids[index], name);
-    ctx.parts.push_back(
-        {name, std::string(object.bytes.begin(), object.bytes.end())});
+    ctx.AddPart(name, std::string(object.bytes.begin(), object.bytes.end()));
   }
   int width = 1440, height = 1440;
   if (object.preview_image_index >= 0 &&
@@ -330,9 +328,8 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       wrapper = owner.append_child(deleted ? "w:del" : "w:ins");
       IntAttr(wrapper, "w:id", ++ctx.revision_id);
       Attr(wrapper, "w:author",
-           RevisionAuthor(ctx.document,
-                          deleted ? r.revision_author_delete
-                                  : r.revision_author_insert));
+           RevisionAuthor(ctx.document, deleted ? r.revision_author_delete
+                                                : r.revision_author_insert));
     }
     auto rn = wrapper.append_child("w:r");
     RunPr(rn, r, ctx.document);

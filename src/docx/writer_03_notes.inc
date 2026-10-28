@@ -44,23 +44,22 @@ bool WriteSectionReferences(pugi::xml_node sec, const model::Section& section,
     auto root = part.append_child(is_header ? "w:hdr" : "w:ftr");
     Attr(root, "xmlns:w", kWordmlNamespace);
     Attr(root, "xmlns:r", kRelationshipsNamespace);
-    const bool header_has_vml =
-        std::any_of(section.headers[i].begin(), section.headers[i].end(),
-                    [](const model::Paragraph& paragraph) {
-                      return std::any_of(
-                          paragraph.runs.begin(), paragraph.runs.end(),
-                          [](const model::Run& run) {
-                            return run.textbox_index >= 0 ||
-                                   run.shape_index >= 0;
-                          });
-                    });
+    const bool header_has_vml = std::any_of(
+        section.headers[i].begin(), section.headers[i].end(),
+        [](const model::Paragraph& paragraph) {
+          return std::any_of(paragraph.runs.begin(), paragraph.runs.end(),
+                             [](const model::Run& run) {
+                               return run.textbox_index >= 0 ||
+                                      run.shape_index >= 0;
+                             });
+        });
     if (header_has_vml) {
       Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
     }
     for (const auto& paragraph : section.headers[i]) {
       WriteParagraph(root, paragraph, nullptr, ctx);
     }
-    ctx.parts.push_back({name, Save(part)});
+    ctx.AddPart(name, Save(part));
   }
   if (section.first_page_different) {
     One(sec, "w:titlePg");
@@ -118,7 +117,7 @@ void WriteNoteParts(const model::Document& document, WriteContext& ctx) {
     }
     const int rid = ctx.next_rid++;
     ctx.relations.emplace_back(rid, part);
-    ctx.parts.push_back({part, Save(doc)});
+    ctx.AddPart(part, Save(doc));
   };
   if (has_footnotes) {
     write_class(false);
@@ -127,7 +126,6 @@ void WriteNoteParts(const model::Document& document, WriteContext& ctx) {
     write_class(true);
   }
 }
-
 
 void WriteCommentPart(const model::Document& document, WriteContext& ctx) {
   if (document.comments.empty()) {
@@ -156,5 +154,5 @@ void WriteCommentPart(const model::Document& document, WriteContext& ctx) {
   }
   const int rid = ctx.next_rid++;
   ctx.relations.emplace_back(rid, "comments.xml");
-  ctx.parts.push_back({"comments.xml", Save(doc)});
+  ctx.AddPart("comments.xml", Save(doc));
 }
