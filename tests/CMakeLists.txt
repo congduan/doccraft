@@ -91,6 +91,10 @@ add_test(NAME m15_bad_note_cli COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/m15_bad_note_cli.py
   $<TARGET_FILE:m15_bad_note_fixture> $<TARGET_FILE:doccraft>
   ${CMAKE_SOURCE_DIR}/tests/fixtures/footnote-endnote.doc)
+add_test(NAME m6_bad_textbox_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/m6_bad_textbox_cli.py
+  $<TARGET_FILE:m15_bad_note_fixture> $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/textbox.doc)
 
 add_executable(m3_batch6_test m3_batch6_test.cc)
 target_link_libraries(m3_batch6_test PRIVATE doccraft_doc doccraft_docx gtest_main)

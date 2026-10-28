@@ -35,7 +35,7 @@ void Put32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 3)
+  if (argc != 3 && argc != 4)
     return 2;
   std::ifstream input(argv[1], std::ios::binary);
   std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
@@ -49,9 +49,10 @@ int main(int argc, char** argv) {
   const size_t pair_count =
       lw_count + 2 + static_cast<size_t>(U16(*word, lw_count)) * 4;
   const size_t pairs = pair_count + 2;
-  // FIB pair 2 is PlcffndRef. Keep its length while moving its offset far
-  // past the table stream, so the endnote and body remain independently valid.
-  Put32(*word, pairs + 2 * 8, 0x7fffffff);
+  // Keep the PLC length while moving its offset beyond the table stream.
+  // Pair 2 is PlcffndRef; pair 75 is the body textbox Tbkd PLC.
+  const size_t pair = argc == 4 ? 75 : 2;
+  Put32(*word, pairs + pair * 8, 0x7fffffff);
   doccraft::cfb::test::CfbBuilder builder;
   builder.AddStream("WordDocument", std::move(*word));
   for (const char* name : {"0Table", "1Table", "Data"}) {

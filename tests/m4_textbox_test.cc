@@ -350,8 +350,11 @@ TEST(M4Textbox, SyntheticFlowBreaksStayInStoryOrder) {
   // Duplicate CPs are malformed and must never be used as offsets.
   Put32(*table, fib->txbx_bkd.offset + 4, 0);
   auto invalid = doc::ParseFormatted(*word, *table, *fib);
-  ASSERT_FALSE(invalid);
-  EXPECT_EQ(invalid.error().message, "invalid textbox PLC CP order");
+  ASSERT_TRUE(invalid) << invalid.error().message;
+  EXPECT_TRUE(invalid->textboxes.empty());
+  ASSERT_FALSE(invalid->warnings.empty());
+  EXPECT_NE(invalid->warnings[0].find("skipped textbox story PLC"),
+            std::string::npos);
 }
 
 TEST(M4Textbox, HeaderTextboxAppearsInHeaderPart) {
@@ -382,6 +385,129 @@ TEST(M4Textbox, HeaderTextboxAppearsInHeaderPart) {
              xml.find("<w:txbxContent>") != std::string::npos;
   }
   EXPECT_TRUE(found);
+}
+
+TEST(M6TextboxDegradation, InvalidBodyPlcKeepsMainText) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb);
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word);
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib);
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table);
+  Put32(*table, fib->txbx_bkd.offset + 4, 0);
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->textboxes.empty());
+  ASSERT_FALSE(parsed->warnings.empty());
+  EXPECT_NE(parsed->warnings[0].find("skipped textbox story PLC"),
+            std::string::npos);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:body>"), std::string::npos);
+  EXPECT_EQ(xml.find("Box sample line"), std::string::npos);
+}
+
+TEST(M6WriterBuffer, SerializedPartsLimitReturnsError) {
+  model::Document document;
+  constexpr size_t kTestLimit = 8192;
+  auto baseline = docx::WriteWithBufferLimit(document, kTestLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  document.paragraphs.push_back({});
+  document.paragraphs.back().runs.push_back({});
+  document.paragraphs.back().runs.back().text = std::string(16384, 'x');
+  auto zip = docx::WriteWithBufferLimit(document, kTestLimit);
+  ASSERT_FALSE(zip);
+  EXPECT_EQ(zip.error().message, "writer buffer limit exceeded");
+}
+
+TEST(M6TextboxDegradation, InvalidHeaderPlcKeepsHeaderText) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/header-textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb);
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word);
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib);
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table);
+  Put32(*table, fib->hdr_txbx_bkd.offset + 4, 0);
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_FALSE(parsed->warnings.empty());
+  EXPECT_NE(parsed->warnings[0].find("skipped header textbox story PLC"),
+            std::string::npos);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  std::string headers;
+  for (int i = 1; i <= 6; ++i)
+    headers += Part(*zip, ("word/header" + std::to_string(i) + ".xml").c_str());
+  EXPECT_NE(headers.find("<w:hdr"), std::string::npos);
+  EXPECT_EQ(headers.find("Header box text"), std::string::npos);
+}
+
+TEST(M6TextboxDegradation, BadSecondStoryKeepsFirstTextbox) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb);
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word);
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib);
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table);
+  constexpr size_t kItem = doc::detail::kFtxbxsSize;
+  std::vector<uint8_t> stories(16 + 3 * kItem);
+  for (size_t i = 0; i < 4; ++i)
+    Put32(stories, i * 4,
+          static_cast<uint32_t>(i == 0   ? 0
+                                : i == 1 ? 8
+                                : i == 2 ? 17
+                                         : 18));
+  const size_t old_items = fib->txbx_txt.offset + 12;
+  std::copy_n(table->begin() + old_items, kItem, stories.begin() + 16);
+  std::copy_n(table->begin() + old_items, kItem, stories.begin() + 16 + kItem);
+  std::copy_n(table->begin() + old_items + kItem, kItem,
+              stories.begin() + 16 + 2 * kItem);
+  Put32(stories, 16 + kItem + doc::detail::kFtxbxsLidOffset, 500);
+  fib->txbx_txt = {static_cast<uint32_t>(table->size()),
+                   static_cast<uint32_t>(stories.size())};
+  table->insert(table->end(), stories.begin(), stories.end());
+  std::vector<uint8_t> breaks(16 + 3 * doc::detail::kTbkdSize);
+  Put32(breaks, 0, 0);
+  Put32(breaks, 4, 8);
+  Put32(breaks, 8, fib->ccp_txbx + 1);
+  Put32(breaks, 12, fib->ccp_txbx + 2);
+  Put16(breaks, 16 + doc::detail::kTbkdSize, 1);
+  fib->txbx_bkd = {static_cast<uint32_t>(table->size()),
+                   static_cast<uint32_t>(breaks.size())};
+  table->insert(table->end(), breaks.begin(), breaks.end());
+  AddLinkedAnchor(&*table, &*fib);
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->textboxes.size(), 1u);
+  ASSERT_FALSE(parsed->warnings.empty());
+  EXPECT_NE(parsed->warnings[0].find("FTXBXS 2"), std::string::npos);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:txbxContent>"), std::string::npos);
+  EXPECT_NE(xml.find("Box"), std::string::npos);
 }
 
 TEST(M11TextboxFields, FieldFlagsReachBodyAndHeaderTextboxXml) {
