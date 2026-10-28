@@ -25,6 +25,7 @@
 #include <string_view>
 #include <vector>
 
+#include "docx/internal.h"
 #include "docx/writer_run.h"
 #include "docx/xml_util.h"
 #include "third_party/miniz/miniz.h"
@@ -274,6 +275,11 @@ uint32_t Crc32(std::string_view bytes) {
 
 std::expected<std::vector<uint8_t>, Error> Write(
     const model::Document& document) {
+  return WriteWithBufferLimit(document, detail::kMaxWriterBufferBytes);
+}
+
+std::expected<std::vector<uint8_t>, Error> WriteWithBufferLimit(
+    const model::Document& document, size_t max_buffer_bytes) {
   using Clock = std::chrono::steady_clock;
   const auto t_start = Clock::now();
   WriteContext ctx;
@@ -324,6 +330,12 @@ std::expected<std::vector<uint8_t>, Error> Write(
   }
   if (ctx.odd_even) {
     parts.push_back({"word/settings.xml", kSettingsPart});
+  }
+  size_t buffered = 0;
+  for (const auto& part : parts) {
+    if (part.data.size() > max_buffer_bytes - buffered)
+      return std::unexpected(Error{"writer buffer limit exceeded"});
+    buffered += part.data.size();
   }
   const auto t_xml = Clock::now();
   auto archive = PackParts(parts);

@@ -28,7 +28,6 @@ struct Plc {
   Bytes bytes;
   size_t count = 0;
   size_t stride = 0;
-  uint32_t limit = 0;
 
   uint32_t Cp(size_t i) const {
     return U32(bytes, i * sizeof(uint32_t));
@@ -38,8 +37,8 @@ struct Plc {
   }
 };
 
-std::expected<Plc, Error> ReadPlc(Bytes table, Fib::Range range, size_t stride,
-                                  uint32_t limit) {
+std::expected<Plc, Error> ReadPlc(Bytes table, Fib::Range range,
+                                  size_t stride) {
   if (!Valid(table, range) || range.size < sizeof(uint32_t) + stride ||
       (range.size - sizeof(uint32_t)) % (sizeof(uint32_t) + stride))
     return std::unexpected(Error{"invalid textbox PLC size"});
@@ -47,15 +46,7 @@ std::expected<Plc, Error> ReadPlc(Bytes table, Fib::Range range, size_t stride,
       (range.size - sizeof(uint32_t)) / (sizeof(uint32_t) + stride);
   if (count > kMaxDrawingRecords)
     return std::unexpected(Error{"textbox PLC count exceeds limit"});
-  Plc plc{table.subspan(range.offset, range.size), count, stride, limit};
-  // The last FTXBXS/Tbkd is reusable. Some Word writers leave its final
-  // guard CP outside ccpTxbx; no text is read from that range.
-  if (plc.Cp(0) != 0 || plc.Cp(count - 1) > limit)
-    return std::unexpected(Error{"textbox PLC CP outside story"});
-  for (size_t i = 0; i < count; i++) {
-    if (plc.Cp(i + 1) <= plc.Cp(i))
-      return std::unexpected(Error{"invalid textbox PLC CP order"});
-  }
+  Plc plc{table.subspan(range.offset, range.size), count, stride};
   return plc;
 }
 }  // namespace
@@ -79,12 +70,49 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
   }
   if (!txt_range.size || !bkd_range.size)
     return std::unexpected(Error{"missing textbox PLC"});
-  auto txt = ReadPlc(table, txt_range, kFtxbxsSize, count_chars);
+  auto txt = ReadPlc(table, txt_range, kFtxbxsSize);
   if (!txt)
     return std::unexpected(txt.error());
-  auto bkd = ReadPlc(table, bkd_range, kTbkdSize, count_chars);
+  auto bkd = ReadPlc(table, bkd_range, kTbkdSize);
   if (!bkd)
     return std::unexpected(bkd.error());
+  // Each FTXBXS describes one story. A damaged range or break chain can be
+  // dropped without losing unrelated stories in the same textbox document.
+  std::map<size_t, uint32_t> next_break;
+  std::set<size_t> invalid_stories;
+  for (size_t i = 0; i + 1 < txt->count; ++i) {
+    if (U16(txt->Item(i), 8) & 1)
+      continue;
+    if (txt->Cp(i) >= txt->Cp(i + 1) || txt->Cp(i + 1) > count_chars ||
+        txt->Cp(i + 1) - txt->Cp(i) <= 1) {
+      invalid_stories.insert(i);
+    } else {
+      next_break[i] = txt->Cp(i);
+    }
+  }
+  for (size_t i = 0; i + 1 < bkd->count; ++i) {
+    const int index = S16(bkd->Item(i), 0);
+    if (index < 0 || static_cast<size_t>(index) + 1 >= txt->count)
+      return std::unexpected(Error{"textbox break index outside FTXBXS"});
+    const size_t f = static_cast<size_t>(index);
+    if (!next_break.contains(f))
+      continue;
+    if (bkd->Cp(i) != next_break[f] || bkd->Cp(i + 1) <= bkd->Cp(i) ||
+        bkd->Cp(i + 1) > txt->Cp(f + 1)) {
+      invalid_stories.insert(f);
+    } else {
+      next_break[f] = bkd->Cp(i + 1);
+    }
+  }
+  for (const auto& [f, end] : next_break) {
+    if (end != txt->Cp(f + 1))
+      invalid_stories.insert(f);
+  }
+  for (size_t f : invalid_stories) {
+    warnings->push_back(std::string("skipped ") +
+                        (header ? "header textbox" : "textbox") +
+                        " story PLC at FTXBXS " + std::to_string(f + 1));
+  }
   const uint64_t base = static_cast<uint64_t>(fib.ccp_text) + fib.ccp_ftn +
                         fib.ccp_hdd + fib.ccp_atn + fib.ccp_edn +
                         (header ? fib.ccp_txbx : 0);
@@ -100,6 +128,8 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
   // uses successive Tbkd ranges with the same FTXBXS index.
   std::map<size_t, size_t> by_ftxbxs;
   for (size_t i = 0; i + 1 < txt->count; i++) {
+    if (invalid_stories.contains(i))
+      continue;
     const Bytes item = txt->Item(i);
     if (U16(item, 8) & 1)
       continue;
@@ -144,8 +174,6 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     const size_t f = static_cast<size_t>(index);
     if (!by_ftxbxs.contains(f))
       continue;  // Reusable FTXBXS has no visible story.
-    if (bkd->Cp(i) < txt->Cp(f) || bkd->Cp(i + 1) > txt->Cp(f + 1))
-      return std::unexpected(Error{"textbox break outside text range"});
     // Only the final range has the paragraph guard. Interior flow breaks can
     // split a run, so include their final character in the first component.
     const uint32_t end =
