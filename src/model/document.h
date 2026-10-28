@@ -51,6 +51,7 @@ struct Shape {
   ImageAnchor anchor;
   std::string text;
   bool inline_shape = false;
+  uint32_t textbox_id = 0;  // OfficeArtClientTextbox: story and chain index.
 };
 
 struct OleObject {
@@ -219,6 +220,7 @@ struct Paragraph {
 struct Textbox {
   std::vector<Paragraph> paragraphs;
   uint32_t shape_id = 0;
+  uint16_t story_index = 0, chain_index = 0;
   int shape_type = 0;
   uint32_t anchor_cp = 0;
   int x = 0, y = 0, width = 0, height = 0;

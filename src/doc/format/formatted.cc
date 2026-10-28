@@ -179,6 +179,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   }
   std::map<uint32_t, size_t> textbox_anchors;
   for (size_t i = 0; i < doc.textboxes.size(); i++) {
+    if (!doc.textboxes[i].floating)
+      continue;
     if (!textbox_anchors.emplace(doc.textboxes[i].anchor_cp, i).second)
       return std::unexpected(Error{"duplicate textbox anchor CP"});
   }
@@ -742,6 +744,33 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         auto shape = ReadInlineShape(data, r.object_offset);
         if (!shape)
           return std::unexpected(shape.error());
+        if (shape->textbox_id) {
+          const uint32_t story = shape->textbox_id >> 16;
+          const uint32_t chain = shape->textbox_id & 0xffff;
+          auto box = std::find_if(doc.textboxes.begin(), doc.textboxes.end(),
+                                  [&](const model::Textbox& candidate) {
+                                    return candidate.story_index == story &&
+                                           candidate.chain_index == chain;
+                                  });
+          if (box == doc.textboxes.end()) {
+            doc.warnings.push_back("inline textbox story range missing");
+            model::Textbox empty;
+            empty.story_index = static_cast<uint16_t>(story);
+            empty.chain_index = static_cast<uint16_t>(chain);
+            empty.floating = false;
+            doc.textboxes.push_back(std::move(empty));
+            box = std::prev(doc.textboxes.end());
+          }
+          box->shape_id = shape->id;
+          box->shape_type = shape->type;
+          box->width = shape->width;
+          box->height = shape->height;
+          box->floating = false;
+          r.textbox_index = static_cast<int>(box - doc.textboxes.begin());
+          para.runs.push_back(std::move(r));
+          remember_run();
+          continue;
+        }
         r.shape_index = static_cast<int>(doc.shapes.size());
         doc.shapes.push_back(std::move(*shape));
         para.runs.push_back(std::move(r));

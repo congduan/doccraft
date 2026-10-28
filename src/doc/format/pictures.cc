@@ -346,6 +346,7 @@ struct DrawingIndex {
   struct ShapeInfo {
     uint16_t type = 0;
     std::string text;
+    uint32_t textbox_id = 0;
   };
   std::map<uint32_t, ShapeInfo> shapes;
   size_t records = 0;
@@ -366,7 +367,7 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
         return std::unexpected(Error{"truncated drawing FBSE"});
       index.blips.push_back(r->body);
     } else if (r->type == detail::kSpContainer) {
-      uint32_t id = 0, pib = 0;
+      uint32_t id = 0, pib = 0, textbox_id = 0;
       uint16_t shape_type = 0;
       std::string shape_text;
       Bytes children = r->body;
@@ -381,6 +382,12 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
             return std::unexpected(Error{"invalid drawing FSP"});
           id = U32(child->body, 0);
           shape_type = child->instance;
+        } else if (child->type == detail::kClientTextbox) {
+          // [MS-DOC] 2.9.170: high word is the 1-based FTXBXS index;
+          // low word is the zero-based position in the linked chain.
+          if (child->body.size() != sizeof(uint32_t) || child->version != 0)
+            return std::unexpected(Error{"invalid drawing client textbox"});
+          textbox_id = U32(child->body, 0);
         } else if (child->type == detail::kFopt ||
                    child->type == detail::kTertiaryFopt) {
           if (child->instance > child->body.size() / detail::kFopteSize)
@@ -429,11 +436,11 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
       }
       if (pib && !index.pictures.emplace(id, pib).second)
         return std::unexpected(Error{"duplicate drawing shape id"});
-      if (id &&
-          !index.shapes
-               .emplace(id, DrawingIndex::ShapeInfo{shape_type,
-                                                    std::move(shape_text)})
-               .second)
+      if (id && !index.shapes
+                     .emplace(id, DrawingIndex::ShapeInfo{shape_type,
+                                                          std::move(shape_text),
+                                                          textbox_id})
+                     .second)
         return std::unexpected(Error{"duplicate drawing shape id"});
     } else if (r->version == detail::kEscherContainerVersion) {
       auto nested = IndexArt(r->body, index, depth + 1,
@@ -483,6 +490,7 @@ std::expected<model::Shape, Error> ReadInlineShape(Bytes data,
     return std::unexpected(Error{"invalid PICF dimensions"});
   model::Shape shape;
   shape.id = index.shapes.begin()->first;
+  shape.textbox_id = index.shapes.begin()->second.textbox_id;
   shape.type = index.shapes.begin()->second.type;
   shape.text = index.shapes.begin()->second.text;
   shape.width = std::clamp(goal_width * scale_width / detail::kPicfScaleUnit, 1,
@@ -630,6 +638,7 @@ std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
                                 static_cast<int>(height),
                                 anchor,
                                 shape->second.text};
+      item.shape->textbox_id = shape->second.textbox_id;
     }
     result.push_back(std::move(item));
   }

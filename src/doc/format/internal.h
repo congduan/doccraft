@@ -105,6 +105,7 @@ inline constexpr size_t kMaxDrawingRecords = 65536;
 inline constexpr uint16_t kDggContainer = 0xF000, kBStoreContainer = 0xF001;
 inline constexpr uint16_t kDgContainer = 0xF002, kSpContainer = 0xF004;
 inline constexpr uint16_t kFsp = 0xF00A, kFopt = 0xF00B;
+inline constexpr uint16_t kClientTextbox = 0xF00D;
 inline constexpr uint16_t kTertiaryFopt = 0xF122;
 inline constexpr size_t kFopteSize = 6, kFbseDelayOffset = 28;
 inline constexpr uint16_t kPropertyIdMask = 0x3FFF;

@@ -110,6 +110,7 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
       return std::unexpected(Error{"duplicate textbox index"});
     model::Textbox box;
     box.shape_id = shape;
+    box.story_index = static_cast<uint16_t>(i + 1);
     boxes.push_back(std::move(box));
   }
   // Validate the textbox story PLC before reading its independent field PLC.
@@ -153,8 +154,11 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     for (auto& paragraph : paragraphs)
       target.push_back(std::move(paragraph));
   }
-  if (!spa_range.size)
-    return std::unexpected(Error{"textbox without shape anchors"});
+  if (!spa_range.size) {
+    for (auto& box : boxes)
+      box.floating = false;
+    return boxes;
+  }
   if (!Valid(table, spa_range) || spa_range.size < sizeof(uint32_t) ||
       (spa_range.size - sizeof(uint32_t)) % (kSpaSize + sizeof(uint32_t)))
     return std::unexpected(Error{"invalid textbox shape anchor PLC"});
@@ -189,7 +193,7 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
       found = true;
     }
     if (!found)
-      return std::unexpected(Error{"textbox shape anchor not found"});
+      box.floating = false;
   }
   return boxes;
 }

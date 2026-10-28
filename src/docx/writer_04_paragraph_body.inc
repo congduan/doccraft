@@ -225,8 +225,10 @@ void WriteTextbox(pugi::xml_node run, int index, WriteContext& ctx) {
     return std::to_string(twips / 20.0) + "pt";
   };
   Attr(rect, "style",
-       "position:absolute;left:" + points(box.x) + ";top:" + points(box.y) +
-           ";width:" + points(box.width) + ";height:" + points(box.height));
+       (box.floating ? "position:absolute;left:" + points(box.x) +
+                           ";top:" + points(box.y) + ";"
+                     : std::string()) +
+           "width:" + points(box.width) + ";height:" + points(box.height));
   auto content = rect.append_child("v:textbox").append_child("w:txbxContent");
   for (const auto& paragraph : box.paragraphs)
     WriteParagraph(content, paragraph, nullptr, ctx);
