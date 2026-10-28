@@ -116,7 +116,7 @@
 |---|---|---|---|---|
 | ✅ | `0x4600` | sprmPIstd | An unsigned integer that specifies the istd of a paragraph style to apply. | 段落 PAP §2.6.2 |
 | N/A | `0xC601` | sprmPIstdPermute | Paragraph style permutation mapping; changes the applied paragraph style when the current style is in the map. | 段落 PAP §2.6.2；编辑期样式置换表；同 sprmCIstdPermute |
-| ◐ | `0x2602` | sprmPIncLvl | A signed 8-bit integer value. | 段落 PAP §2.6.2；istd 1–9 增量并夹紧，显式轮廓级别增量（受 grpprl 顺序约束），直接编号 ilvl 路径保留；样式继承轮廓级别仍未求值，见 KNOWN-SIMPLIFICATIONS；M3Batch7.ParagraphStyleLevelIncrementWithoutList、M3Batch7.ParagraphStyleLevelIncrementClampsAndOffsetsOutline、M3Batch7.ParagraphNestAndListLevelIncrement |
+| ✅ | `0x2602` | sprmPIncLvl | A signed 8-bit integer value. | 段落 PAP §2.6.2；istd 1–9 增量并夹紧，显式轮廓级别增量（受 grpprl 顺序约束），直接编号 ilvl 路径保留；缺显式轮廓级别时按最终样式的 based-on 链求值并对非标题样式应用增量；M3Batch7.ParagraphStyleLevelIncrementWithoutList、M3Batch7.ParagraphStyleLevelIncrementClampsAndOffsetsOutline、M3Batch7.ParagraphNestAndListLevelIncrement、M3Batch7.ParagraphStyleIncrementInheritsTargetOutline |
 | ✅ | `0x2403` | sprmPJc80 | An unsigned 8-bit integer that specifies the physical justification of the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0x2405` | sprmPFKeep | A Bool8 value that specifies whether an application SHOULD<148> keep this paragraph on a single page. | 段落 PAP §2.6.2 |
 | ✅ | `0x2406` | sprmPFKeepFollow | A Bool8 value that specifies whether an application SHOULD<149> keep the end of this paragraph on the same page as the beginning of the next paragraph. | 段落 PAP §2.6.2 |
@@ -360,16 +360,16 @@
 | 类别 | 总数 | ✅ | ◐ | ☐ | N/A | 覆盖率（✅ / 适用项） |
 |---|---:|---:|---:|---:|---:|---:|
 | 字符 CHP | 84 | 64 | 0 | 0 | 20 | 100% |
-| 段落 PAP | 91 | 77 | 1 | 0 | 13 | 98.7% |
+| 段落 PAP | 91 | 78 | 0 | 0 | 13 | 100% |
 | 表格 TAP | 80 | 73 | 0 | 0 | 7 | 100% |
 | 节 SEP | 59 | 55 | 0 | 0 | 4 | 100% |
-| **合计** | 314 | 269 | 1 | 0 | 44 | 99.6% |
+| **合计** | 314 | 270 | 0 | 0 | 44 | 100% |
 
 **口径说明（重要）**：本表只统计 [MS-DOC] §2.6 四张 sprm 表的**属性**覆盖。✅ 表示该 opcode 的解析、IR 字段与 OOXML 输出齐备且有一条断言（相当比例是合成位流断言，而非真实 Word 文档）。它**不等于**格式还原率或产品完成度：结构级特性（图片、文本框、OLE、脚注尾注批注书签、嵌套表格、多节页眉页脚、fast-save、加密）不在本表计数内，见 `DESIGN.md` §6 与 `KNOWN-SIMPLIFICATIONS.md`。
 
 M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们不对应 sprm opcode，因此不改变本表的覆盖计数。
 
-基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现；M19 把修订作者三个 sprm（0x4804/0x4863/0xCA89）从 N/A 拉回实现。M20 按行级状态重算，并将尚缺继承轮廓级别求值的 sprmPIncLvl 记为 ◐（269 / 270 适用项）。
+基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现；M19 把修订作者三个 sprm（0x4804/0x4863/0xCA89）从 N/A 拉回实现。M20 按行级状态重算，并将当时尚缺继承轮廓级别求值的 sprmPIncLvl 记为 ◐（269 / 270 适用项）；M21 补齐该分支后为 270 / 270。
 
 ## Word 6/95 旧版 opcode（不计入 314）
 
@@ -430,7 +430,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0x842E` | sprmPDyaFromText | `frame_v_space` | `w:framePr/@w:vSpace` |
 | `0x842F` | sprmPDxaFromText | `frame_h_space` | `w:framePr/@w:hSpace` |
 | `0x442D` | sprmPShd80 | 调色板索引转 RGB | `<w:pPr><w:shd/>` |
-| `0x2602` | sprmPIncLvl | `style`/`outline`/`list_level_inc` | `w:pStyle`（istd 1–9 增量）/`w:outlineLvl`（显式轮廓级别增量，受 grpprl 顺序约束）/`w:ilvl`（直接编号，夹到 0–8） |
+| `0x2602` | sprmPIncLvl | `style`/`outline`/`list_level_inc` | `w:pStyle`（istd 1–9 增量）/`w:outlineLvl`（显式或样式继承轮廓级别增量，受 grpprl 顺序约束）/`w:ilvl`（直接编号，夹到 0–8） |
 | `0x4610` | sprmPNest80 | `nest` | `<w:ind w:left/>`（与 `sprmPDxaLeft80` 相加） |
 | `0x465F` | sprmPNest | `nest` | `<w:ind w:left/>` |
 | `0x6646` | sprmPHugePapx | `WalkParagraph` 递归 Data 流 | 嵌套 sprm 照常展开 |
@@ -450,7 +450,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 
 ### 5.1 本批已知简化
 
-- `sprmPIncLvl` 已处理 istd 1–9 与显式轮廓级别增量（受 grpprl 顺序约束：仅同一 PAPX 中 `sprmPOutLvl` 先于 `sprmPIncLvl` 时可见；规范 ispmd 序 2 < 64 下，后应用的 `sprmPOutLvl` 覆盖增量）；规范要求的样式继承轮廓级别仍未求值，见 KNOWN-SIMPLIFICATIONS。
+- `sprmPIncLvl` 已处理 istd 1–9 与显式轮廓级别增量（受 grpprl 顺序约束：仅同一 PAPX 中 `sprmPOutLvl` 先于 `sprmPIncLvl` 时可见；规范 ispmd 序 2 < 64 下，后应用的 `sprmPOutLvl` 覆盖增量）；无显式级别时按最终样式的 based-on 链求值；非标题样式对继承级别应用增量。
 - `sprmPNest`/`sprmPNest80` 只折算进 `w:ind/@w:left`，不参与悬挂/首行缩进重算。
 - 浮动表格：`sprmTPc`（`0x360D`）未实现，`w:tblpPr` 的 `w:horzAnchor`/`w:vertAnchor` 固定输出 `margin`。
 - 非等宽分栏：缺宽度 sprm 的列不再丢弃，按 LibreOffice `.doc` 导入兜底值 1440 twips 补宽并保留 `w:space`（等宽节仍忽略列宽/间距 sprm，规范规定仅非等宽时生效）；兜底为常量、不按剩余空间均分，Word 行为未验证。
