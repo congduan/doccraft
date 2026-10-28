@@ -224,6 +224,32 @@ TEST(M3Batch7, ParagraphStyleLevelIncrementWithoutList) {
   EXPECT_NE(Xml(*listed).find("<w:ilvl w:val=\"2\"/>"), std::string::npos);
 }
 
+TEST(M3Batch7, ParagraphStyleLevelIncrementClampsAndOffsetsOutline) {
+  // istd 1..9: clamp to [1, 9].
+  auto hi = Synthetic(Prl(0x2602, {1}), {}, {}, 9);
+  ASSERT_TRUE(hi) << hi.error().message;
+  EXPECT_EQ(hi->paragraphs[0].style, 9);
+  auto lo = Synthetic(Prl(0x2602, {0xFF}), {}, {}, 1);
+  ASSERT_TRUE(lo) << lo.error().message;
+  EXPECT_EQ(lo->paragraphs[0].style, 1);
+
+  // Other styles: offset an explicit outline level and clamp to [0, 9].
+  auto out = Synthetic(Sprms({Prl(0x2640, {4}), Prl(0x2602, {2})}), {});
+  ASSERT_TRUE(out) << out.error().message;
+  EXPECT_EQ(out->paragraphs[0].outline, 6);
+  EXPECT_NE(Xml(*out).find("<w:outlineLvl w:val=\"6\"/>"), std::string::npos);
+
+  // Outline level 9 is body text and is not incremented.
+  auto body = Synthetic(Sprms({Prl(0x2640, {9}), Prl(0x2602, {1})}), {});
+  ASSERT_TRUE(body) << body.error().message;
+  EXPECT_EQ(body->paragraphs[0].outline, 9);
+
+  // Canonical ispmd order applies POutLvl after PIncLvl.
+  auto canon = Synthetic(Sprms({Prl(0x2602, {2}), Prl(0x2640, {4})}), {});
+  ASSERT_TRUE(canon) << canon.error().message;
+  EXPECT_EQ(canon->paragraphs[0].outline, 4);
+}
+
 TEST(M3Batch7, EmbeddedObjectWithoutOleUsesPlaceholder) {
   auto document = Synthetic({}, Prl(0x0856, {1}));
   ASSERT_TRUE(document) << document.error().message;

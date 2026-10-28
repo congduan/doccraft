@@ -116,7 +116,7 @@
 |---|---|---|---|---|
 | ✅ | `0x4600` | sprmPIstd | An unsigned integer that specifies the istd of a paragraph style to apply. | 段落 PAP §2.6.2 |
 | N/A | `0xC601` | sprmPIstdPermute | Paragraph style permutation mapping; changes the applied paragraph style when the current style is in the map. | 段落 PAP §2.6.2；编辑期样式置换表；同 sprmCIstdPermute |
-| ◐ | `0x2602` | sprmPIncLvl | A signed 8-bit integer value. | 段落 PAP §2.6.2；istd 1–9 增量并夹紧，显式轮廓级别增量，直接编号 ilvl 路径保留；未显式轮廓级别的继承限制见 KNOWN-SIMPLIFICATIONS；M3Batch7.ParagraphStyleLevelIncrementWithoutList、M3Batch7.ParagraphNestAndListLevelIncrement |
+| ◐ | `0x2602` | sprmPIncLvl | A signed 8-bit integer value. | 段落 PAP §2.6.2；istd 1–9 增量并夹紧，显式轮廓级别增量，直接编号 ilvl 路径保留；未显式轮廓级别的继承限制见 KNOWN-SIMPLIFICATIONS；M3Batch7.ParagraphStyleLevelIncrementWithoutList、M3Batch7.ParagraphStyleLevelIncrementClampsAndOffsetsOutline、M3Batch7.ParagraphNestAndListLevelIncrement |
 | ✅ | `0x2403` | sprmPJc80 | An unsigned 8-bit integer that specifies the physical justification of the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0x2405` | sprmPFKeep | A Bool8 value that specifies whether an application SHOULD<148> keep this paragraph on a single page. | 段落 PAP §2.6.2 |
 | ✅ | `0x2406` | sprmPFKeepFollow | A Bool8 value that specifies whether an application SHOULD<149> keep the end of this paragraph on the same page as the beginning of the next paragraph. | 段落 PAP §2.6.2 |
