@@ -85,7 +85,7 @@ bool Toggle(bool old, uint8_t v) {
 }
 
 bool ReadBorder(model::Border& b, Bytes v, bool old) {
-  size_t start = old ? 0 : 1;
+  size_t start = old ? 0 : kCbPrefixSize;
   if (v.size() != (old ? kBrc80Size : kBrcPrefixedSize) ||
       (!old && v[0] != kBrcCb))
     return false;
@@ -103,9 +103,9 @@ bool ReadBorder(model::Border& b, Bytes v, bool old) {
 bool ReadShade(int& back, int& fore, int& pattern, Bytes v) {
   if (v.size() != kShdPrefixedSize || v[0] != kShdCb)
     return false;
-  fore = static_cast<int>(U32(v, 1));
-  back = static_cast<int>(U32(v, kShdBackOffset));
-  pattern = U16(v, kShdPatternOffset);
+  fore = static_cast<int>(U32(v, kCbPrefixSize + kShdForeOffset));
+  back = static_cast<int>(U32(v, kCbPrefixSize + kShdBackOffset));
+  pattern = U16(v, kCbPrefixSize + kShdPatternOffset);
   return true;
 }
 
@@ -131,11 +131,11 @@ bool TableBorder(model::Border& b, Bytes v, bool old) {
 }
 
 bool TableShade(model::CellProperties& c, Bytes v) {
-  if (v.size() != kTableShadeSize)
+  if (v.size() != kShdSize)
     return false;
-  c.shade_fore = static_cast<int>(U32(v, 0));
-  c.shade = static_cast<int>(U32(v, 4));
-  c.shade_pattern = U16(v, 8);
+  c.shade_fore = static_cast<int>(U32(v, kShdForeOffset));
+  c.shade = static_cast<int>(U32(v, kShdBackOffset));
+  c.shade_pattern = U16(v, kShdPatternOffset);
   return true;
 }
 
@@ -157,7 +157,7 @@ OpResult ApplyTableDefinition(model::Table& table, model::RowProperties& row,
   if (op == kSprmTDefTable || op == kSprmTDefTableObsolete) {
     if (v.size() < kTDefMinSize)
       return OpResult::kError;
-    size_t count = v[2];
+    size_t count = v[kTDefCountOffset];
     if (count > kMaxTableCells ||
         kTDefHeaderSize + kTableRangeSize * (count + 1) > v.size())
       return OpResult::kError;
@@ -237,7 +237,7 @@ OpResult ApplyTableLayout(model::Table& table, uint16_t op, Bytes v) {
         (v[0] != kFtsNil && v[0] != kFtsPct && v[0] != kFtsDxa))
       return OpResult::kError;
     table.width_type = v[0];
-    table.width = U16(v, 1);
+    table.width = U16(v, kTableWidthValueOffset);
     return OpResult::kOk;
   }
   if (op == kSprmTFAutofit) {
@@ -247,7 +247,7 @@ OpResult ApplyTableLayout(model::Table& table, uint16_t op, Bytes v) {
   if (op == kSprmTWidthIndent) {
     if (v.size() != kTableWidthSize || v[0] != kFtsDxa)
       return OpResult::kError;
-    table.indent = U16(v, 1);
+    table.indent = U16(v, kTableWidthValueOffset);
     return OpResult::kOk;
   }
   if (op == kSprmTIstd) {
@@ -297,18 +297,17 @@ OpResult ApplyTableLayout(model::Table& table, uint16_t op, Bytes v) {
     return OpResult::kOk;
   }
   if (op == kSprmTCellSpacingDefault) {
-    if (v.size() != kCellSpacingSize || v[0] != kCellSpacingCb ||
-        v[1] != kRangeFirstCell || v[2] != kRangeAllCells ||
-        v[kCellSpacingSidesOffset] != kCellSpacingAllSides ||
-        (v[kCellSpacingTypeOffset] != kFtsDxa &&
-         v[kCellSpacingTypeOffset] != kFtsNil &&
-         v[kCellSpacingTypeOffset] != kCellSpacingDxaAlt) ||
-        S16(v, kCellSpacingValueOffset) < 0 ||
-        S16(v, kCellSpacingValueOffset) > kMaxCellSpacingTwips)
+    if (v.size() != kCssaSize || v[0] != kCssaCb ||
+        v[1] != kCssaFixedItcFirst || v[2] != kCssaFixedItcLim ||
+        v[kCssaSidesOffset] != kCssaSidesOnly ||
+        (v[kCssaWidthTypeOffset] != kFtsDxa &&
+         v[kCssaWidthTypeOffset] != kFtsNil &&
+         v[kCssaWidthTypeOffset] != kCellSpacingDxaAlt) ||
+        S16(v, kCssaWidthOffset) < 0 ||
+        S16(v, kCssaWidthOffset) > kMaxCellSpacingTwips)
       return OpResult::kError;
-    table.cell_spacing = v[kCellSpacingTypeOffset] == kFtsNil
-                             ? 0
-                             : S16(v, kCellSpacingValueOffset);
+    table.cell_spacing =
+        v[kCssaWidthTypeOffset] == kFtsNil ? 0 : S16(v, kCssaWidthOffset);
     return OpResult::kOk;
   }
   if (op == kSprmTFBiDi || op == kSprmTFBiDi90) {
@@ -355,8 +354,9 @@ OpResult ApplyTableStyleOptions(model::Table& table, uint16_t op, Bytes v) {
   }
   if (op == kSprmTCellPaddingStyle) {
     // CSSAOperand defaulted on the whole row: it belongs to the table.
-    if (v.size() != kCssaSize || v[0] != kCssaCb || v[1] != 0 || v[2] != 1 ||
-        (v[kCssaSidesOffset] & ~kCssaAllSides) ||
+    if (v.size() != kCssaSize || v[0] != kCssaCb ||
+        v[1] != kCssaFixedItcFirst || v[2] != kCssaFixedItcLim ||
+        (v[kCssaSidesOffset] & ~kCssaSidesOnly) ||
         v[kCssaWidthTypeOffset] != kFtsDxa ||
         U16(v, kCssaWidthOffset) > kMaxTwips)
       return OpResult::kError;
@@ -377,11 +377,11 @@ OpResult ApplyTableBorders(model::Table& table, uint16_t op, Bytes v) {
   if (op == kSprmTTableBorders80 || op == kSprmTTableBorders) {
     bool old = op == kSprmTTableBorders80;
     size_t size = old ? kBrc80Size : kBrcSize;
-    if (v.size() != kTableBorderPrefixSize + kTableBorderCount * size ||
+    if (v.size() != kCbPrefixSize + kTableBorderCount * size ||
         v[0] != kTableBorderCount * size)
       return OpResult::kError;
     for (size_t i = 0; i < kTableBorderCount; i++) {
-      Bytes b = v.subspan(1 + i * size, size);
+      Bytes b = v.subspan(kCbPrefixSize + i * size, size);
       if (!old || U32(b, 0) != kUndefinedU32)
         if (!TableBorder(table.borders[i], b, old))
           return OpResult::kError;
@@ -401,7 +401,7 @@ OpResult ApplyTableStructure(model::Table& table, model::RowProperties& row,
     cells.insert(cells.begin() + v[0], v[1], model::CellProperties{});
     table.columns.insert(
         table.columns.begin() + std::min<size_t>(v[0], table.columns.size()),
-        v[1], U16(v, 2));
+        v[1], U16(v, kTableInsertWidthOffset));
     return OpResult::kOk;
   }
   if (op == kSprmTDelete) {
@@ -420,9 +420,9 @@ OpResult ApplyTableStructure(model::Table& table, model::RowProperties& row,
         !TableRange(row, v, 0, first, limit))
       return OpResult::kError;
     for (size_t i = first; i < limit; i++) {
-      cells[i].width = U16(v, 2);
+      cells[i].width = U16(v, kTableColumnWidthOffset);
       if (i < table.columns.size())
-        table.columns[i] = U16(v, 2);
+        table.columns[i] = U16(v, kTableColumnWidthOffset);
     }
     return OpResult::kOk;
   }
@@ -451,25 +451,32 @@ OpResult ApplyCellWidthAndMerge(model::RowProperties& row, uint16_t op,
     if (!TableRange(row, v, 0, first, limit))
       return OpResult::kError;
     for (size_t i = first; i < limit; i++)
-      cells[i].horizontal_merge = op == kSprmTSplit ? 0 : i == first ? 2 : 1;
+      cells[i].horizontal_merge = op == kSprmTSplit ? 0
+                                  : i == first      ? kTcMergeStart
+                                                    : kTcMergeContinue;
     return OpResult::kOk;
   }
   if (op == kSprmTVertMerge) {
     if (v.size() != kVertMergeSize || v[0] != kVertMergeCb ||
-        v[1] >= cells.size() ||
-        (v[2] != 0 && v[2] != kTcMergeContinue && v[2] != kTcVertMergeRestart))
+        v[kVertMergeCellOffset] >= cells.size() ||
+        (v[kVertMergeValueOffset] != 0 &&
+         v[kVertMergeValueOffset] != kTcMergeContinue &&
+         v[kVertMergeValueOffset] != kTcVertMergeRestart))
       return OpResult::kError;
-    cells[v[1]].vertical_merge =
-        v[2] == kTcVertMergeRestart ? kTcMergeStart : v[2];
+    cells[v[kVertMergeCellOffset]].vertical_merge =
+        v[kVertMergeValueOffset] == kTcVertMergeRestart
+            ? kTcMergeStart
+            : v[kVertMergeValueOffset];
     return OpResult::kOk;
   }
   if (op == kSprmTTextFlow) {
     size_t first, limit;
     if (!TableRange(row, v, 0, first, limit) || v.size() != kCellTextFlowSize ||
-        U16(v, 2) > kTcTextFlowMax || U16(v, 2) == kFlowReserved)
+        U16(v, kCellTextFlowValueOffset) > kTcTextFlowMax ||
+        U16(v, kCellTextFlowValueOffset) == kFlowReserved)
       return OpResult::kError;
     for (size_t i = first; i < limit; i++)
-      cells[i].text_direction = U16(v, 2);
+      cells[i].text_direction = U16(v, kCellTextFlowValueOffset);
     return OpResult::kOk;
   }
   return OpResult::kUnmatched;
@@ -483,15 +490,16 @@ OpResult ApplyCellLayout(model::RowProperties& row, uint16_t op, Bytes v) {
     if (v.size() != kCellLayoutSize || v[0] != kCellLayoutCb ||
         !TableRange(row, v, 1, first, limit))
       return OpResult::kError;
-    if (op == kSprmTVertAlign && v[3] > kMaxCellVerticalAlign)
+    if (op == kSprmTVertAlign &&
+        v[kCellLayoutValueOffset] > kMaxCellVerticalAlign)
       return OpResult::kError;
     for (size_t i = first; i < limit; i++) {
       if (op == kSprmTVertAlign)
-        cells[i].vertical_align = v[3];
+        cells[i].vertical_align = v[kCellLayoutValueOffset];
       else if (op == kSprmTFCellNoWrap)
-        cells[i].no_wrap = v[3] != 0;
+        cells[i].no_wrap = v[kCellLayoutValueOffset] != 0;
       else
-        cells[i].hide_mark = v[3] != 0;
+        cells[i].hide_mark = v[kCellLayoutValueOffset] != 0;
     }
     return OpResult::kOk;
   }
@@ -500,24 +508,28 @@ OpResult ApplyCellLayout(model::RowProperties& row, uint16_t op, Bytes v) {
     if (v.size() != kCellFitTextSize || !TableRange(row, v, 0, first, limit))
       return OpResult::kError;
     for (size_t i = first; i < limit; i++)
-      cells[i].fit_text = v[2] != 0;
+      cells[i].fit_text = v[kCellFitTextValueOffset] != 0;
     return OpResult::kOk;
   }
   if (op == kSprmTCellPadding || op == kSprmTCellPaddingDefault) {
-    if (v.size() != kCellPaddingSize || v[0] != kCellPaddingCb ||
-        (v[3] & ~kCssaAllSides) || (v[4] != kFtsNil && v[4] != kFtsDxa))
+    if (v.size() != kCssaSize || v[0] != kCssaCb ||
+        (v[kCssaSidesOffset] & ~kCssaSidesOnly) ||
+        (v[kCssaWidthTypeOffset] != kFtsNil &&
+         v[kCssaWidthTypeOffset] != kFtsDxa))
       return OpResult::kError;
-    if (op == kSprmTCellPaddingDefault && (v[1] != 0 || v[2] != 1))
+    if (op == kSprmTCellPaddingDefault &&
+        (v[1] != kCssaFixedItcFirst || v[2] != kCssaFixedItcLim))
       return OpResult::kError;
     size_t first = 0, limit = cells.size();
     if (op == kSprmTCellPadding && !TableRange(row, v, 1, first, limit))
       return OpResult::kError;
-    int width = v[4] == kFtsDxa ? U16(v, 5) : 0;
+    int width =
+        v[kCssaWidthTypeOffset] == kFtsDxa ? U16(v, kCssaWidthOffset) : 0;
     if (width > kMaxTwips)
       return OpResult::kError;
     for (size_t i = first; i < limit; i++)
       for (size_t side = 0; side < kCellSideCount; side++)
-        if (v[3] & (1 << side))
+        if (v[kCssaSidesOffset] & (1 << side))
           cells[i].margins[side] = width;
     return OpResult::kOk;
   }
@@ -533,8 +545,7 @@ OpResult ApplyCellShading(model::RowProperties& row, uint16_t op, Bytes v) {
       return OpResult::kError;
     for (size_t i = first; i < limit; i++)
       if (op == kSprmTSetShd || ((i - first) & 1) == 0)
-        if (!TableShade(cells[i],
-                        v.subspan(kCellShadingOffset, kTableShadeSize)))
+        if (!TableShade(cells[i], v.subspan(kCellShadingOffset, kShdSize)))
           return OpResult::kError;
     return OpResult::kOk;
   }
@@ -544,7 +555,7 @@ OpResult ApplyCellShading(model::RowProperties& row, uint16_t op, Bytes v) {
       return OpResult::kError;
     // SHD80 carries palette indices; a later modern SHD operand overrides it.
     for (size_t i = 0; i < v[0] / kShd80Size && i < cells.size(); i++) {
-      unsigned sh = U16(v, 1 + kShd80Size * i);
+      unsigned sh = U16(v, kCbPrefixSize + kShd80Size * i);
       cells[i].shade_fore = Ico(sh & kShd80ColorMask);
       cells[i].shade = Ico((sh >> kShd80BackShift) & kShd80ColorMask);
       cells[i].shade_pattern = (sh >> kShd80PatternShift) & kShd80PatternMask;
@@ -561,12 +572,11 @@ OpResult ApplyCellShading(model::RowProperties& row, uint16_t op, Bytes v) {
             ? 2 * kShadingCellGroupSize
             : 0;
     if (v.empty() || static_cast<size_t>(v[0]) + 1 != v.size() ||
-        v[0] % kTableShadeSize)
+        v[0] % kShdSize)
       return OpResult::kError;
-    for (size_t i = 0; i < v[0] / kTableShadeSize && first + i < cells.size();
-         i++)
+    for (size_t i = 0; i < v[0] / kShdSize && first + i < cells.size(); i++)
       if (!TableShade(cells[first + i],
-                      v.subspan(1 + i * kTableShadeSize, kTableShadeSize)))
+                      v.subspan(kCbPrefixSize + i * kShdSize, kShdSize)))
         return OpResult::kError;
     return OpResult::kOk;
   }
@@ -588,7 +598,7 @@ OpResult ApplyCellBorders(model::RowProperties& row, uint16_t op, Bytes v) {
                                             : 3;
     for (size_t i = 0; i < v[0] / kBrcCvColorSize; i++)
       cells[i].borders[side].color =
-          static_cast<int>(U32(v, 1 + kBrcCvColorSize * i));
+          static_cast<int>(U32(v, kCbPrefixSize + kBrcCvColorSize * i));
     return OpResult::kOk;
   }
   if (op == kSprmTSetBrc || op == kSprmTSetBrc80) {
@@ -596,14 +606,16 @@ OpResult ApplyCellBorders(model::RowProperties& row, uint16_t op, Bytes v) {
     if (v.size() !=
             (op == kSprmTSetBrc ? kCellBorderSize : kCellBorder80Size) ||
         v[0] != v.size() - 1 || !TableRange(row, v, 1, first, limit) ||
-        (v[3] & ~kCellBorderSidesMask))
+        (v[kCellBorderSidesOffset] & ~kCellBorderSidesMask))
       return OpResult::kError;
     bool old = op == kSprmTSetBrc80;
     for (size_t i = first; i < limit; i++)
       for (size_t side = 0; side < kTableBorderCount; side++)
-        if (v[3] & (1 << side))
-          if (!TableBorder(cells[i].borders[side],
-                           v.subspan(4, old ? kBrc80Size : kBrcSize), old))
+        if (v[kCellBorderSidesOffset] & (1 << side))
+          if (!TableBorder(
+                  cells[i].borders[side],
+                  v.subspan(kCellBorderBrcOffset, old ? kBrc80Size : kBrcSize),
+                  old))
             return OpResult::kError;
     return OpResult::kOk;
   }
@@ -922,7 +934,7 @@ void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v) {
     for (size_t i = 0; i < added; i++) {
       int pos = S16(v, x + 2 * i), tbd = v[x + 2 * added + i];
       p.tabs.push_back(
-          {pos, tbd & kTabKindMask, (tbd >> kTabLeaderShift) & kTabKindMask});
+          {pos, tbd & kTabKindMask, (tbd >> kTabLeaderShift) & kTabLeaderMask});
     }
     return;
   }
@@ -1113,9 +1125,9 @@ void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v) {
         p.style = std::clamp(p.style + p.list_level_inc,
                              static_cast<int>(kFirstHeadingStyle),
                              static_cast<int>(kLastHeadingStyle));
-      else if (p.outline >= 0 && p.outline < kLastHeadingStyle)
+      else if (p.outline >= 0 && p.outline < kMaxOutlineLevel)
         p.outline = std::clamp(p.outline + p.list_level_inc, 0,
-                               static_cast<int>(kLastHeadingStyle));
+                               static_cast<int>(kMaxOutlineLevel));
       break;
     case kSprmPNest80:
     case kSprmPNest:
@@ -1420,7 +1432,7 @@ bool ApplyConditionalTable(model::ConditionalProperties& c, uint16_t op,
   if (ApplyTableOp(table, row, op, v) == OpResult::kError)
     return false;
   const auto& cell = row.cells[0];
-  for (size_t i = 0; i < 4; i++)
+  for (size_t i = 0; i < kCellSideCount; i++)
     if (cell.borders[i].set)
       c.borders[i] = cell.borders[i];
   if (cell.borders[4].set)
@@ -1438,7 +1450,7 @@ bool ApplyConditionalTable(model::ConditionalProperties& c, uint16_t op,
     c.no_wrap = true;
     c.no_wrap_set = true;
   }
-  for (size_t i = 0; i < 4; i++)
+  for (size_t i = 0; i < kCellSideCount; i++)
     if (cell.margins[i] >= 0)
       c.margins[i] = cell.margins[i];
   return true;
@@ -1453,26 +1465,27 @@ bool ApplyConditional(model::Style& style, uint16_t op, Bytes v,
   if (v.size() < kCnfMinSize)
     return true;
   size_t cb = v[0];
-  if (cb != v.size() - 1 || cb < kCnfHeaderSize)
+  if (cb != v.size() - 1 || cb < kCnfCnfcSize)
     return true;
   model::ConditionalProperties* conditional = FindConditional(style, S16(v, 1));
   bool valid = true;
-  Walk(v.subspan(3, cb - kCnfHeaderSize), [&](uint16_t nested, Bytes nv) {
-    switch ((nested >> kSprmSgcShift) & kSprmSgcMask) {
-      case kSgcParagraph:
-        ApplyPara(conditional->paragraph, nested, nv);
-        break;
-      case kSgcCharacter:
-        ApplyRun(conditional->run, nested, nv, fonts);
-        break;
-      case kSgcTable:
-        valid &= ApplyConditionalCell(*conditional, nested, nv) ||
-                 ApplyConditionalTable(*conditional, nested, nv);
-        break;
-      default:
-        break;
-    }
-  });
+  Walk(v.subspan(kCnfMinSize, cb - kCnfCnfcSize),
+       [&](uint16_t nested, Bytes nv) {
+         switch ((nested >> kSprmSgcShift) & kSprmSgcMask) {
+           case kSgcParagraph:
+             ApplyPara(conditional->paragraph, nested, nv);
+             break;
+           case kSgcCharacter:
+             ApplyRun(conditional->run, nested, nv, fonts);
+             break;
+           case kSgcTable:
+             valid &= ApplyConditionalCell(*conditional, nested, nv) ||
+                      ApplyConditionalTable(*conditional, nested, nv);
+             break;
+           default:
+             break;
+         }
+       });
   return valid;
 }
 }  // namespace doccraft::doc::detail

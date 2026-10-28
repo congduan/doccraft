@@ -122,7 +122,10 @@ inline constexpr uint16_t kUndefinedU16 = 0xFFFF;
 inline constexpr uint32_t kUndefinedU32 = 0xFFFFFFFF;
 
 // sprm operand structure constants, from [MS-DOC] §2.9 (operand definitions).
-// BRC/BRC80 and SHD operands: cb prefixes, field positions and border flags.
+// Operands prefixed with a cb byte count the bytes that follow that byte.
+inline constexpr size_t kCbPrefixSize = 1;
+// BRC80: width, type, unused, flags. BRC: leading COLORREF, then width, type
+// and flags; the flag byte packs a five-bit space, then shadow and frame.
 inline constexpr size_t kBrc80Size = 4, kBrcSize = 8;
 inline constexpr size_t kBrcPrefixedSize = 9;
 inline constexpr uint8_t kBrcCb = 8;
@@ -130,15 +133,20 @@ inline constexpr size_t kBrcColorSize = 4;
 inline constexpr size_t kBrcTypeOffset = 5, kBrcFlagsOffset = 6;
 inline constexpr uint8_t kBrcSpaceMask = 31;
 inline constexpr uint8_t kBrcShadow = 32, kBrcFrame = 64;
+// SHD: fore COLORREF, back COLORREF, then a two-byte pattern; the sprm
+// operand prefixes one cb byte. SHD80 packs two five-bit palette indices
+// and a six-bit pattern.
 inline constexpr size_t kShdSize = 10, kShdPrefixedSize = 11;
 inline constexpr uint8_t kShdCb = 10;
-inline constexpr size_t kShdBackOffset = 5, kShdPatternOffset = 9;
-// SHD80 packs two five-bit palette indices and a six-bit pattern.
+inline constexpr size_t kShdForeOffset = 0, kShdBackOffset = 4,
+                        kShdPatternOffset = 8;
 inline constexpr uint16_t kShd80ColorMask = 31, kShd80PatternMask = 63;
 inline constexpr int kShd80BackShift = 5, kShd80PatternShift = 10;
 inline constexpr size_t kShd80Size = 2;
 
-// TC80 in the TDefTable operand: flag fields, cell width and four BRC80s.
+// TDefTable operand: the cell count at offset 2 precedes the two-byte cell
+// grid; each TC80 cell carries flag fields, a width and four BRC80s.
+inline constexpr size_t kTDefCountOffset = 2;
 inline constexpr size_t kTDefHeaderSize = 3, kTDefMinSize = 5;
 inline constexpr size_t kTDefCellSize = 20, kTDefWidthOffset = 2;
 inline constexpr size_t kTDefBordersOffset = 4, kCellSideCount = 4;
@@ -151,45 +159,42 @@ inline constexpr unsigned kTcMergeStart = 2, kTcMergeContinue = 1;
 inline constexpr unsigned kTcVertMergeRestart = 3;
 inline constexpr unsigned kTcTextFlowMax = 5;
 
-// Table layout, CSSA and cell spacing operands in [MS-DOC] §2.9.
+// Table layout operands in [MS-DOC] §2.9: fts plus a 16-bit width, the six
+// table borders, and the two-byte itcFirst/itcLim cell range.
 inline constexpr size_t kTableWidthSize = 3, kTableWidthValueOffset = 1;
 inline constexpr uint8_t kFtsNil = 0, kFtsPct = 2;
-inline constexpr size_t kCellSpacingSize = 7;
-inline constexpr uint8_t kCellSpacingCb = 6;
-inline constexpr size_t kCellSpacingSidesOffset = 3;
-inline constexpr size_t kCellSpacingTypeOffset = 4;
-inline constexpr size_t kCellSpacingValueOffset = 5;
-inline constexpr uint8_t kCellSpacingAllSides = 15;
-inline constexpr uint8_t kCellSpacingDxaAlt = 0x13;
-inline constexpr int kMaxCellSpacingTwips = 15840;
 inline constexpr size_t kTableBorderCount = 6;
-inline constexpr size_t kTableBorderPrefixSize = 1;
 inline constexpr size_t kTableRangeSize = 2;
-inline constexpr uint8_t kRangeFirstCell = 0, kRangeAllCells = 1;
 
 // Table cell operations and their cb-prefixed operand layouts, [MS-DOC] §2.9.
+inline constexpr size_t kTableInsertSize = 4, kTableInsertWidthOffset = 2;
+inline constexpr size_t kTableColumnWidthSize = 4, kTableColumnWidthOffset = 2;
 inline constexpr size_t kCellWidthSize = 6, kCellWidthCb = 5;
 inline constexpr size_t kCellWidthTypeOffset = 3, kCellWidthValueOffset = 4;
 inline constexpr size_t kVertMergeSize = 3, kVertMergeCb = 2;
-inline constexpr size_t kCellTextFlowSize = 4;
+inline constexpr size_t kVertMergeCellOffset = 1, kVertMergeValueOffset = 2;
+inline constexpr size_t kCellTextFlowSize = 4, kCellTextFlowValueOffset = 2;
 inline constexpr size_t kCellLayoutSize = 4, kCellLayoutCb = 3;
-inline constexpr size_t kCellPaddingSize = 7, kCellPaddingCb = 6;
+inline constexpr size_t kCellLayoutValueOffset = 3;
+inline constexpr size_t kCellFitTextSize = 3, kCellFitTextValueOffset = 2;
 inline constexpr size_t kCellShadingSize = 13, kCellShadingCb = 12;
 inline constexpr size_t kCellShadingOffset = 3;
 inline constexpr size_t kCellBorderSize = 12, kCellBorder80Size = 8;
+inline constexpr size_t kCellBorderSidesOffset = 3, kCellBorderBrcOffset = 4;
 inline constexpr uint8_t kCellBorderSidesMask = 63;
 inline constexpr size_t kShadingCellGroupSize = 22;
-inline constexpr size_t kTableShadeSize = 10;
-inline constexpr size_t kCnfMinSize = 3, kCnfHeaderSize = 2;
+// CNFOperand: cb, cnfc, then the nested grpprl.
+inline constexpr size_t kCnfMinSize = 3, kCnfCnfcSize = 2;
 // Boolean toggle operands and text flow values, [MS-DOC] §2.9.
 inline constexpr uint8_t kToggleKeep = 0x80, kToggleInvert = 0x81;
 inline constexpr unsigned kFlowHorizontal = 0, kFlowVertical = 1;
 inline constexpr unsigned kFlowReserved = 2, kFlowVerticalBackwards = 3;
 inline constexpr unsigned kFlowRotateLeft = 4, kFlowRotateRight = 5;
 // Limits and packed fields in paragraph, section and cell sprms, §2.9.
+// TBD: three-bit tab kind, then three-bit tab leader.
 inline constexpr size_t kTabChangeMinSize = 3, kTabEntrySize = 3;
 inline constexpr size_t kMaxTabStops = 64;
-inline constexpr uint8_t kTabKindMask = 7;
+inline constexpr uint8_t kTabKindMask = 7, kTabLeaderMask = 7;
 inline constexpr int kTabLeaderShift = 3;
 inline constexpr uint8_t kEmphasisCount = 5;
 inline constexpr uint16_t kMaxTableAlignment = 2;
@@ -200,10 +205,10 @@ inline constexpr uint16_t kMaxGridMode = 3;
 inline constexpr uint32_t kMaxPageStart = 2147483646u;
 inline constexpr uint8_t kMaxFrameWrap = 5;
 inline constexpr uint8_t kFirstHeadingStyle = 1, kLastHeadingStyle = 9;
+// sprmPOutLvl: 0-8 are outline levels, 9 is body text.
+inline constexpr uint8_t kMaxOutlineLevel = 9;
 inline constexpr uint8_t kDropCapNormal = 1, kDropCapMargin = 2;
 inline constexpr uint8_t kMaxDropCapLines = 10;
-inline constexpr size_t kTableInsertSize = 4, kTableColumnWidthSize = 4;
-inline constexpr size_t kCellFitTextSize = 3;
 inline constexpr size_t kRevisionAuthorMinSize = 2;
 inline constexpr size_t kRevisionPropertyMinSize = 4;
 
@@ -273,14 +278,21 @@ inline constexpr uint16_t kFatlBandCol = 0x0400;
 inline constexpr int kLookNoHBand = 0x0200;
 inline constexpr int kLookNoVBand = 0x0400;
 
-// sprmTCellPaddingStyle / CSSAOperand: cb = 6, cb sides mask, ftsDxa = 3.
+// CSSAOperand, shared by sprmTCellPaddingStyle, sprmTCellPadding and the
+// row-wide spacing/padding defaults: cb, itcFirst, itcLim, a side mask, fts,
+// then a 16-bit width. The row-wide variants fix itcFirst = 0 and
+// itcLim = 1; the spacing default additionally requires every side bit set
+// (fbrcSidesOnly) and accepts the fts alias 0x13 for ftsDxa.
 inline constexpr uint8_t kCssaCb = 6;
 inline constexpr size_t kCssaSize = 7;
 inline constexpr uint8_t kCssaSidesOffset = 3;
 inline constexpr uint8_t kCssaWidthTypeOffset = 4;
 inline constexpr size_t kCssaWidthOffset = 5;
 inline constexpr uint8_t kFtsDxa = 3;
-inline constexpr uint8_t kCssaAllSides = 15;
+inline constexpr uint8_t kCssaSidesOnly = 15;
+inline constexpr uint8_t kCssaFixedItcFirst = 0, kCssaFixedItcLim = 1;
+inline constexpr uint8_t kCellSpacingDxaAlt = 0x13;
+inline constexpr int kMaxCellSpacingTwips = 15840;
 
 // sprmPItap: nested tables deeper than this are clamped (Word stops at 4).
 inline constexpr int kMaxTableDepth = 8;
