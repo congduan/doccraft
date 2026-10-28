@@ -54,11 +54,46 @@ std::vector<uint8_t> Sprms(std::initializer_list<std::vector<uint8_t>> list) {
     out.insert(out.end(), item.begin(), item.end());
   return out;
 }
+
+std::vector<uint8_t> OutlineStyles() {
+  std::vector<uint8_t> stsh(20, 0);
+  Put16(stsh, 0, 18);
+  Put16(stsh, 2, 11);
+  Put16(stsh, 4, 10);
+  for (int i = 0; i < 11; ++i) {
+    std::vector<uint8_t> record(10, 0);
+    Put16(record, 2, static_cast<uint16_t>(1 | ((i ? i - 1 : 0x0FFF) << 4)));
+    Put16(record, 4, 1);
+    const std::string name = i ? "Heading " + std::to_string(i) : "Normal";
+    record.push_back(static_cast<uint8_t>(name.size()));
+    record.push_back(0);
+    for (char c : name) {
+      record.push_back(static_cast<uint8_t>(c));
+      record.push_back(0);
+    }
+    record.insert(record.end(), {0, 0});
+    if (record.size() & 1)
+      record.push_back(0);
+    const auto sprms = i == 1 ? Prl(0x2640, {5}) : std::vector<uint8_t>{};
+    const size_t upx = record.size();
+    record.resize(upx + 4 + sprms.size());
+    Put16(record, upx, static_cast<uint16_t>(2 + sprms.size()));
+    std::copy(sprms.begin(), sprms.end(), record.begin() + upx + 4);
+    if (record.size() & 1)
+      record.push_back(0);
+    const size_t pos = stsh.size();
+    stsh.resize(pos + 2 + record.size());
+    Put16(stsh, pos, static_cast<uint16_t>(record.size()));
+    std::copy(record.begin(), record.end(), stsh.begin() + pos + 2);
+  }
+  return stsh;
+}
 // Minimal single-paragraph document: one piece "X\r" with one CHPX and one
 // PAPX.
 std::expected<model::Document, doc::Error> Synthetic(
     std::vector<uint8_t> pap, std::vector<uint8_t> chp,
-    std::vector<uint8_t> data = {}, uint16_t style = 0) {
+    std::vector<uint8_t> data = {}, uint16_t style = 0,
+    const std::vector<uint8_t>& stsh = {}) {
   std::vector<uint8_t> word(1536), table(64);
   word[1024] = 'X';
   word[1025] = '\r';
@@ -98,6 +133,11 @@ std::expected<model::Document, doc::Error> Synthetic(
   fib.lcb_clx = 21;
   fib.papx_bte = {32, 12};
   fib.chpx_bte = {48, 12};
+  if (!stsh.empty()) {
+    fib.stsh = {64, static_cast<uint32_t>(stsh.size())};
+    table.resize(64 + stsh.size());
+    std::copy(stsh.begin(), stsh.end(), table.begin() + 64);
+  }
   return doc::ParseFormatted(word, table, fib, Bytes(data));
 }
 
@@ -248,6 +288,31 @@ TEST(M3Batch7, ParagraphStyleLevelIncrementClampsAndOffsetsOutline) {
   auto canon = Synthetic(Sprms({Prl(0x2602, {2}), Prl(0x2640, {4})}), {});
   ASSERT_TRUE(canon) << canon.error().message;
   EXPECT_EQ(canon->paragraphs[0].outline, 4);
+}
+
+TEST(M3Batch7, ParagraphStyleIncrementInheritsTargetOutline) {
+  const auto stsh = OutlineStyles();
+  auto inherited = Synthetic(Prl(0x2602, {1}), {}, {}, 2, stsh);
+  ASSERT_TRUE(inherited) << inherited.error().message;
+  ASSERT_FALSE(inherited->paragraphs.empty());
+  EXPECT_EQ(inherited->paragraphs[0].style, 3);
+  EXPECT_EQ(inherited->paragraphs[0].outline, 5);
+  EXPECT_NE(Xml(*inherited).find("<w:outlineLvl w:val=\"5\"/>"),
+            std::string::npos);
+
+  auto explicit_level =
+      Synthetic(Sprms({Prl(0x2602, {1}), Prl(0x2640, {2})}), {}, {}, 2, stsh);
+  ASSERT_TRUE(explicit_level) << explicit_level.error().message;
+  EXPECT_EQ(explicit_level->paragraphs[0].outline, 2);
+  EXPECT_NE(Xml(*explicit_level).find("<w:outlineLvl w:val=\"2\"/>"),
+            std::string::npos);
+
+  auto non_heading = Synthetic(Prl(0x2602, {1}), {}, {}, 10, stsh);
+  ASSERT_TRUE(non_heading) << non_heading.error().message;
+  EXPECT_EQ(non_heading->paragraphs[0].style, 10);
+  EXPECT_EQ(non_heading->paragraphs[0].outline, 6);
+  EXPECT_NE(Xml(*non_heading).find("<w:outlineLvl w:val=\"6\"/>"),
+            std::string::npos);
 }
 
 TEST(M3Batch7, EmbeddedObjectWithoutOleUsesPlaceholder) {

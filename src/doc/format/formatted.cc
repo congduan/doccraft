@@ -900,6 +900,39 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         target->odd_even_different = true;
     }
   }
+  // Direct PAPX and piece PRMs have already selected the final istd. Resolve
+  // only missing outline levels from that style's based-on chain.
+  auto inherit_outline = [&](std::vector<model::Paragraph>& paragraphs) {
+    for (auto& paragraph : paragraphs) {
+      if (paragraph.outline >= 0 || paragraph.style < 0 ||
+          static_cast<size_t>(paragraph.style) >= doc.styles.size())
+        continue;
+      const auto& style = doc.styles[paragraph.style];
+      if (style.type == 1 && !style.name.empty() &&
+          style.resolved_paragraph.outline >= 0) {
+        paragraph.outline = style.resolved_paragraph.outline;
+        if (paragraph.style < 1 || paragraph.style > 9) {
+          if (paragraph.outline < 9) {
+            paragraph.outline =
+                std::clamp(paragraph.outline + paragraph.list_level_inc, 0, 9);
+          }
+        }
+      }
+    }
+  };
+  inherit_outline(doc.paragraphs);
+  for (auto& note : doc.notes)
+    inherit_outline(note.paragraphs);
+  for (auto& comment : doc.comments)
+    inherit_outline(comment.paragraphs);
+  for (auto& textbox : doc.textboxes)
+    inherit_outline(textbox.paragraphs);
+  for (auto& story : doc.section.headers)
+    inherit_outline(story);
+  for (auto& section_break : doc.section_breaks) {
+    for (auto& story : section_break.second.headers)
+      inherit_outline(story);
+  }
   detail::ValidateRevisionAuthors(doc, &doc.warnings);
   return doc;
 }
