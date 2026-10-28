@@ -116,7 +116,8 @@ struct WriteContext {
   size_t max_part_bytes = detail::kMaxWriterPartBytes;
   size_t max_buffer_bytes = detail::kMaxWriterBufferBytes;
   size_t buffered = 0;
-  std::expected<void, Error> AddPart(std::string name, std::string data) {
+  std::expected<void, Error> AddPart(std::string name, std::string data,
+                                     std::vector<Part>* destination = nullptr) {
     if (data.size() > max_part_bytes) {
       return std::unexpected(Error{"writer part limit exceeded: " + name +
                                    " (" + std::to_string(data.size()) +
@@ -125,7 +126,8 @@ struct WriteContext {
     if (data.size() > max_buffer_bytes - buffered)
       return std::unexpected(Error{"writer buffer limit exceeded"});
     buffered += data.size();
-    parts.push_back({std::move(name), std::move(data)});
+    (destination ? *destination : parts)
+        .push_back({std::move(name), std::move(data)});
     return {};
   }
 };
@@ -347,32 +349,39 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   pugi::xml_document numbering = WriteNumbering(document);
   pugi::xml_document docrels = BuildRelationships(ctx);
 
-  auto result = ctx.AddPart("[Content_Types].xml", BuildContentTypes(ctx));
+  std::vector<Part> core_parts;
+  auto result =
+      ctx.AddPart("[Content_Types].xml", BuildContentTypes(ctx), &core_parts);
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("_rels/.rels", kRootRelationships);
+  result = ctx.AddPart("_rels/.rels", kRootRelationships, &core_parts);
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("word/_rels/document.xml.rels", Save(docrels));
+  result =
+      ctx.AddPart("word/_rels/document.xml.rels", Save(docrels), &core_parts);
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("word/document.xml", Save(doc));
+  result = ctx.AddPart("word/document.xml", Save(doc), &core_parts);
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("word/styles.xml", Save(styles));
+  result = ctx.AddPart("word/styles.xml", Save(styles), &core_parts);
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("word/numbering.xml", Save(numbering));
+  result = ctx.AddPart("word/numbering.xml", Save(numbering), &core_parts);
   if (!result)
     return std::unexpected(result.error());
 
+  core_parts.reserve(core_parts.size() + ctx.parts.size() +
+                     (ctx.odd_even ? 1 : 0));
+  for (auto& part : ctx.parts)
+    core_parts.push_back(std::move(part));
   if (ctx.odd_even) {
-    result = ctx.AddPart("word/settings.xml", kSettingsPart);
+    result = ctx.AddPart("word/settings.xml", kSettingsPart, &core_parts);
     if (!result)
       return std::unexpected(result.error());
   }
   const auto t_xml = Clock::now();
-  auto archive = PackParts(ctx.parts);
+  auto archive = PackParts(core_parts);
   if (std::getenv("DOCCRAFT_PROFILE")) {
     auto ms = [](Clock::time_point a, Clock::time_point b) {
       return std::chrono::duration<double, std::milli>(b - a).count();
