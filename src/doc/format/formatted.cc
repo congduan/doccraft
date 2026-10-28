@@ -164,8 +164,9 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   auto bookmarks = ReadBookmarks(table, fib);
   if (!bookmarks)
     return std::unexpected(bookmarks.error());
-  auto textboxes = detail::ReadTextboxes(word, table, fib, *chpx, *papx,
-                                         doc.fonts, *bookmarks, &doc.warnings);
+  auto textboxes =
+      detail::ReadTextboxes(word, table, fib, *chpx, *papx, doc.fonts,
+                            *floating, *bookmarks, &doc.warnings);
   if (!textboxes)
     return std::unexpected(textboxes.error());
   doc.textboxes = std::move(*textboxes);
@@ -177,12 +178,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         box.shape_type = item.shape->type;
     }
   }
-  std::map<uint32_t, size_t> textbox_anchors;
+  std::multimap<uint32_t, size_t> textbox_anchors;
   for (size_t i = 0; i < doc.textboxes.size(); i++) {
     if (!doc.textboxes[i].floating)
       continue;
-    if (!textbox_anchors.emplace(doc.textboxes[i].anchor_cp, i).second)
-      return std::unexpected(Error{"duplicate textbox anchor CP"});
+    textbox_anchors.emplace(doc.textboxes[i].anchor_cp, i);
   }
   auto walk_piece_prm = [&](uint16_t prm, auto fn) {
     if (!prm)
@@ -534,7 +534,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       }
       last_run_count = 0;
     }
-    if (auto box = textbox_anchors.find(ch.cp); box != textbox_anchors.end()) {
+    auto [box_begin, box_end] = textbox_anchors.equal_range(ch.cp);
+    for (auto box = box_begin; box != box_end; ++box) {
       model::Run textbox_run;
       textbox_run.textbox_index = static_cast<int>(box->second);
       para.runs.push_back(std::move(textbox_run));

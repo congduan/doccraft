@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -114,6 +115,23 @@ std::string Part(const std::vector<uint8_t>& archive, const char* name) {
   }
   mz_zip_reader_end(&zip);
   return content;
+}
+
+void AddLinkedAnchor(std::vector<uint8_t>* table, doc::Fib* fib) {
+  const auto old = fib->spa_main;
+  const uint32_t cp = base::U32(*table, old.offset);
+  constexpr size_t kSpa = doc::detail::kSpaSize;
+  std::vector<uint8_t> anchors(12 + 2 * kSpa);
+  Put32(anchors, 0, cp);
+  Put32(anchors, 4, cp + 1);
+  Put32(anchors, 8, fib->ccp_text);
+  std::copy_n(table->begin() + old.offset + 8, kSpa, anchors.begin() + 12);
+  std::copy_n(table->begin() + old.offset + 8, kSpa,
+              anchors.begin() + 12 + kSpa);
+  Put32(anchors, 12 + kSpa, 500);
+  fib->spa_main = {static_cast<uint32_t>(table->size()),
+                   static_cast<uint32_t>(anchors.size())};
+  table->insert(table->end(), anchors.begin(), anchors.end());
 }
 
 TEST(M4Textbox, LibreOfficeFloatingTextboxKeepsStoryAtAnchor) {
@@ -255,40 +273,38 @@ TEST(M18Bookmarks, LinkedTextboxBreakEmitsBookmarkEndOnce) {
   fib->txbx_bkd = {static_cast<uint32_t>(table->size()),
                    static_cast<uint32_t>(breaks.size())};
   table->insert(table->end(), breaks.begin(), breaks.end());
+  AddLinkedAnchor(&*table, &*fib);
 
   const uint32_t base =
       fib->ccp_text + fib->ccp_ftn + fib->ccp_hdd + fib->ccp_atn + fib->ccp_edn;
   PutBookmark(&*table, &*fib, base, base + 2, "BreakEnd");
   auto parsed = doc::ParseFormatted(*word, *table, *fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
-  ASSERT_EQ(parsed->textboxes.size(), 1u);
+  ASSERT_EQ(parsed->textboxes.size(), 2u);
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
-  const size_t box_start = xml.find("<w:txbxContent>");
-  const size_t box_end = xml.find("</w:txbxContent>", box_start);
-  ASSERT_NE(box_start, std::string::npos);
-  ASSERT_NE(box_end, std::string::npos);
-  const std::string box = xml.substr(box_start, box_end - box_start);
+  EXPECT_NE(xml.find("<w:txbxContent>", xml.find("<w:txbxContent>") + 1),
+            std::string::npos);
   const std::string start = "<w:bookmarkStart w:id=\"0\" w:name=\"BreakEnd\"/>";
   const std::string end = "<w:bookmarkEnd w:id=\"0\"/>";
-  EXPECT_EQ(box.find(start), box.rfind(start));
-  EXPECT_EQ(box.find(end), box.rfind(end));
-  EXPECT_NE(box.find(start), std::string::npos);
-  EXPECT_NE(box.find(end), std::string::npos);
-  EXPECT_LT(box.find(start), box.find(end));
+  EXPECT_EQ(xml.find(start), xml.rfind(start));
+  EXPECT_EQ(xml.find(end), xml.rfind(end));
+  EXPECT_NE(xml.find(start), std::string::npos);
+  EXPECT_NE(xml.find(end), std::string::npos);
+  EXPECT_LT(xml.find(start), xml.find(end));
 
   // A start at the same break belongs before the next segment's first char.
   PutBookmark(&*table, &*fib, base + 2, base + 4, "BreakStart");
   auto starts_at_break = doc::ParseFormatted(*word, *table, *fib);
   ASSERT_TRUE(starts_at_break) << starts_at_break.error().message;
-  ASSERT_EQ(starts_at_break->textboxes.size(), 1u);
-  const auto& paragraphs = starts_at_break->textboxes[0].paragraphs;
-  ASSERT_EQ(paragraphs.size(), 2u);
-  ASSERT_GE(paragraphs[1].runs.size(), 2u);
-  EXPECT_TRUE(paragraphs[1].runs[0].bookmark_start);
-  EXPECT_EQ(paragraphs[1].runs[0].bookmark_id, 0);
-  EXPECT_EQ(paragraphs[1].runs[1].text, "x ");
+  ASSERT_EQ(starts_at_break->textboxes.size(), 2u);
+  const auto& paragraphs = starts_at_break->textboxes[1].paragraphs;
+  ASSERT_EQ(paragraphs.size(), 1u);
+  ASSERT_GE(paragraphs[0].runs.size(), 2u);
+  EXPECT_TRUE(paragraphs[0].runs[0].bookmark_start);
+  EXPECT_EQ(paragraphs[0].runs[0].bookmark_id, 0);
+  EXPECT_EQ(paragraphs[0].runs[1].text, "x ");
   auto start_zip = docx::Write(*starts_at_break);
   ASSERT_TRUE(start_zip) << start_zip.error().message;
   const std::string start_xml = Part(*start_zip, "word/document.xml");
@@ -321,12 +337,14 @@ TEST(M4Textbox, SyntheticFlowBreaksStayInStoryOrder) {
   fib->txbx_bkd = {static_cast<uint32_t>(table->size()),
                    static_cast<uint32_t>(breaks.size())};
   table->insert(table->end(), breaks.begin(), breaks.end());
+  AddLinkedAnchor(&*table, &*fib);
   auto parsed = doc::ParseFormatted(*word, *table, *fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
-  ASSERT_EQ(parsed->textboxes.size(), 1U);
-  ASSERT_EQ(parsed->textboxes[0].paragraphs.size(), 2U);
+  ASSERT_EQ(parsed->textboxes.size(), 2U);
+  ASSERT_EQ(parsed->textboxes[0].paragraphs.size(), 1U);
+  ASSERT_EQ(parsed->textboxes[1].paragraphs.size(), 1U);
   EXPECT_EQ(parsed->textboxes[0].paragraphs[0].runs[0].text +
-                parsed->textboxes[0].paragraphs[1].runs[0].text,
+                parsed->textboxes[1].paragraphs[0].runs[0].text,
             "Box sample line");
 
   // Duplicate CPs are malformed and must never be used as offsets.

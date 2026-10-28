@@ -16,11 +16,14 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
 #include "miniz.h"
 
+#include "cfb/cfb_reader.h"
 #include "doc/fib.h"
 #include "doc/format.h"
 #include "doc/format/internal.h"
@@ -137,5 +140,100 @@ TEST(M14InlineTextbox, MissingStoryWarnsAndKeepsEmptyShape) {
   ASSERT_TRUE(zip) << zip.error().message;
   const auto xml = Xml(*zip);
   EXPECT_NE(xml.find("<w:txbxContent/>"), std::string::npos);
+}
+
+TEST(M14LinkedTextbox, EachTbkdUsesItsOwnShapeAnchor) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb);
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word);
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib);
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table);
+  // One FTXBXS story [0, 17), two linked Tbkd components [0, 8),
+  // [8, 17), and the final reusable guard [17, 18).
+  std::vector<uint8_t> breaks(34);
+  Put32(breaks, 4, 8);
+  Put32(breaks, 8, 17);
+  Put32(breaks, 12, 18);
+  fib->txbx_bkd = {static_cast<uint32_t>(table->size()),
+                   static_cast<uint32_t>(breaks.size())};
+  table->insert(table->end(), breaks.begin(), breaks.end());
+  constexpr size_t kSpa = doc::detail::kSpaSize;
+  const auto old = fib->spa_main;
+  ASSERT_GE(old.size, 8 + kSpa);
+  const uint32_t cp = base::U32(*table, old.offset);
+  ASSERT_LT(cp + 2, fib->ccp_text);
+  std::vector<uint8_t> anchors(16 + 3 * kSpa);
+  Put32(anchors, 0, cp);
+  Put32(anchors, 4, cp + 1);
+  Put32(anchors, 8, cp + 2);
+  Put32(anchors, 12, fib->ccp_text);
+  const size_t original = old.offset + 8;
+  const uint32_t first_id = base::U32(*table, original);
+  for (size_t i = 0; i < 3; i++)
+    std::copy_n(table->begin() + original, kSpa,
+                anchors.begin() + 16 + i * kSpa);
+  Put32(anchors, 16 + kSpa, 700);  // An unrelated FSPA between chain links.
+  Put32(anchors, 16 + 2 * kSpa, 500);
+  Put32(anchors, 16 + 2 * kSpa + 4, 2400);
+  Put32(anchors, 16 + 2 * kSpa + 12, 3840);
+  fib->spa_main = {static_cast<uint32_t>(table->size()),
+                   static_cast<uint32_t>(anchors.size())};
+  table->insert(table->end(), anchors.begin(), anchors.end());
+  // [MS-DOC] OfficeArtClientTextbox names the FTXBXS and chain position;
+  // the second linked shape is deliberately nonconsecutive in PlcfSpa.
+  std::vector<uint8_t> art(17 + 2 * 36);
+  Put16(art, 0, 0x000f);
+  Put16(art, 2, doc::detail::kDggContainer);
+  art[8] = 0;
+  Put16(art, 9, 0x000f);
+  Put16(art, 11, doc::detail::kDgContainer);
+  Put32(art, 13, 72);
+  for (size_t i = 0; i < 2; i++) {
+    const size_t sp = 17 + i * 36;
+    Put16(art, sp, 0x000f);
+    Put16(art, sp + 2, doc::detail::kSpContainer);
+    Put32(art, sp + 4, 28);
+    Put16(art, sp + 8, 0x0012);
+    Put16(art, sp + 10, doc::detail::kFsp);
+    Put32(art, sp + 12, 8);
+    Put32(art, sp + 16, i ? 500 : first_id);
+    Put16(art, sp + 26, doc::detail::kClientTextbox);
+    Put32(art, sp + 28, 4);
+    Put32(art, sp + 32, 0x00010000u + i);
+  }
+  fib->drawing_group = {static_cast<uint32_t>(table->size()),
+                        static_cast<uint32_t>(art.size())};
+  table->insert(table->end(), art.begin(), art.end());
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->warnings.empty());
+  ASSERT_EQ(parsed->textboxes.size(), 2u);
+  EXPECT_EQ(parsed->textboxes[0].anchor_cp, cp);
+  EXPECT_EQ(parsed->textboxes[1].anchor_cp, cp + 2);
+  EXPECT_EQ(parsed->textboxes[1].shape_id, 500u);
+  EXPECT_EQ(parsed->textboxes[1].x, 2400);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const auto xml = Xml(*zip);
+  const size_t first = xml.find("<w:txbxContent>");
+  const size_t second = xml.find("<w:txbxContent>", first + 1);
+  ASSERT_NE(first, std::string::npos);
+  ASSERT_NE(second, std::string::npos);
+  EXPECT_EQ(xml.find("<w:txbxContent>", second + 1), std::string::npos);
+  EXPECT_NE(xml.substr(first, second - first).find("Box samp"),
+            std::string::npos);
+  EXPECT_EQ(xml.substr(first, second - first).find("le line"),
+            std::string::npos);
+  EXPECT_NE(xml.substr(second).find("le line"), std::string::npos);
+  EXPECT_EQ(xml.substr(second).find("Box samp"), std::string::npos);
+  EXPECT_NE(xml.find("left:120.000000pt"), std::string::npos);
 }
 }  // namespace

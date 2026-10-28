@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -62,7 +63,8 @@ std::expected<Plc, Error> ReadPlc(Bytes table, Fib::Range range, size_t stride,
 std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts, bool header,
+    const std::vector<std::string>& fonts,
+    const std::vector<FloatingPicture>& drawings, bool header,
     const BookmarkMarks& bookmarks, std::vector<std::string>* warnings) {
   std::vector<model::Textbox> boxes;
   const uint32_t count_chars = header ? fib.ccp_hdr_txbx : fib.ccp_txbx;
@@ -134,6 +136,7 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
   const BookmarkMarks story_bookmarks =
       FilterStoryBookmarks(bookmarks, bookmark_ranges,
                            header ? "header textbox" : "textbox", warnings);
+  std::map<size_t, uint16_t> chain_positions;
   for (size_t i = 0; i + 1 < bkd->count; i++) {
     const int index = S16(bkd->Item(i), 0);
     if (index < 0 || static_cast<size_t>(index) + 1 >= txt->count)
@@ -150,7 +153,17 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     auto paragraphs = ReadStoryParagraphs(
         *chars, chpx, papx, fonts, prcs, base, bkd->Cp(i), end, &field_status,
         &story_bookmarks, bkd->Cp(i + 1) == txt->Cp(f + 1));
-    auto& target = boxes[by_ftxbxs.at(f)].paragraphs;
+    const uint16_t chain = chain_positions[f]++;
+    size_t target_index = by_ftxbxs.at(f);
+    if (chain) {
+      model::Textbox next = boxes[target_index];
+      next.paragraphs.clear();
+      next.chain_index = chain;
+      next.shape_id = 0;
+      boxes.push_back(std::move(next));
+      target_index = boxes.size() - 1;
+    }
+    auto& target = boxes[target_index].paragraphs;
     for (auto& paragraph : paragraphs)
       target.push_back(std::move(paragraph));
   }
@@ -167,7 +180,42 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
       (spa.size() - sizeof(uint32_t)) / (kSpaSize + sizeof(uint32_t));
   if (count > kMaxDrawingRecords)
     return std::unexpected(Error{"textbox anchor count exceeds limit"});
+  std::set<uint32_t> used_shapes;
   for (auto& box : boxes) {
+    if (box.chain_index) {
+      const uint32_t text_id =
+          (static_cast<uint32_t>(box.story_index) << 16) | box.chain_index;
+      for (const auto& drawing : drawings) {
+        if (drawing.shape && drawing.shape->textbox_id == text_id) {
+          if (box.shape_id)
+            return std::unexpected(Error{"duplicate linked textbox pointer"});
+          box.shape_id = drawing.shape->id;
+          box.shape_type = drawing.shape->type;
+          break;
+        }
+      }
+      if (!box.shape_id) {
+        // Older producers can omit OfficeArtClientTextbox. Their linked
+        // components occupy consecutive anchors after the FTXBXS.lid shape.
+        const uint32_t first_shape =
+            boxes[by_ftxbxs.at(box.story_index - 1)].shape_id;
+        for (size_t i = 0; i + box.chain_index < count; i++) {
+          const Bytes entry = spa.subspan(
+              (count + 1) * sizeof(uint32_t) + i * kSpaSize, kSpaSize);
+          if (U32(entry, 0) != first_shape)
+            continue;
+          const size_t linked = i + box.chain_index;
+          box.shape_id =
+              U32(spa, (count + 1) * sizeof(uint32_t) + linked * kSpaSize);
+          warnings->push_back("linked textbox shape inferred from FSPA order");
+          break;
+        }
+      }
+      if (!box.shape_id)
+        return std::unexpected(Error{"linked textbox shape anchor missing"});
+    }
+    if (!used_shapes.insert(box.shape_id).second)
+      return std::unexpected(Error{"duplicate textbox shape id"});
     bool found = false;
     for (size_t i = 0; i < count; i++) {
       const Bytes entry =
@@ -192,6 +240,8 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
       box.height = static_cast<int>(height);
       found = true;
     }
+    if (!found && box.chain_index)
+      return std::unexpected(Error{"linked textbox shape anchor missing"});
     if (!found)
       box.floating = false;
   }
@@ -201,10 +251,11 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
 std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts, const BookmarkMarks& bookmarks,
-    std::vector<std::string>* warnings) {
-  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, false, bookmarks,
-                          warnings);
+    const std::vector<std::string>& fonts,
+    const std::vector<FloatingPicture>& drawings,
+    const BookmarkMarks& bookmarks, std::vector<std::string>* warnings) {
+  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, drawings, false,
+                          bookmarks, warnings);
 }
 
 std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
@@ -212,7 +263,7 @@ std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
     const std::vector<std::string>& fonts, const BookmarkMarks& bookmarks,
     std::vector<std::string>* warnings) {
-  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, true, bookmarks,
-                          warnings);
+  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, {}, true,
+                          bookmarks, warnings);
 }
 }  // namespace doccraft::doc::detail
