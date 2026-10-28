@@ -157,6 +157,11 @@ std::vector<CommentRange> ReadCommentRanges(
   const size_t count = (starts.size() - 4) / 8;
   if (ends.size() / 4 - 1 != count)
     return invalid();
+  for (size_t i = 0; i < count; ++i) {
+    if (U32(starts, 4 * i) > U32(starts, 4 * (i + 1)) ||
+        U32(ends, 4 * i) > U32(ends, 4 * (i + 1)))
+      return invalid();
+  }
   std::map<uint32_t, size_t> tag_to_bookmark;
   if (fib.atn_bkmk.size) {
     if (!Valid(table, fib.atn_bkmk) || fib.atn_bkmk.size < 6)
@@ -202,8 +207,12 @@ std::vector<CommentRange> ReadCommentRanges(
       return invalid();
     const uint32_t first = U32(starts, 4 * index);
     const uint32_t last = U32(ends, 4 * end_index);
-    if (first > last || last > fib.ccp_text || last > (*anchors)[i].cp)
-      return invalid();
+    if (first > last || last > fib.ccp_text) {
+      if (warnings)
+        warnings->push_back("skipped invalid comment range: id " +
+                            std::to_string(i + 1));
+      continue;
+    }
     if (first < last)
       out.push_back({first, last, static_cast<int>(i) + 1});
   }
