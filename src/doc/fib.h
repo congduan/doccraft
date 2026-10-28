@@ -46,6 +46,9 @@ struct Fib {
   // Comment anchors (PlcfandRef), comment text (PlcfandTxt) and the author
   // name array (GrpXstAtnOwners).
   Range and_ref, and_txt, atn_owners;
+  // Annotation range bookmarks and their tag table (FibRgFcLcb97 pairs
+  // 42/43 and 39). A comment without one is a point annotation.
+  Range atn_bkf, atn_bkl, atn_bkmk;
   // Bookmark name table (SttbfBkmk) and the start/end PLCs (PlcfBkf/PlcfBkl).
   Range sttb_bkmk, bkf, bkl;
   // Revision author names (SttbfRMark = FibRgFcLcb97 pair(51), right after

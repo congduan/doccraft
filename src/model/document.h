@@ -153,6 +153,9 @@ struct Run {
   int note_ref_mark = 0;
   // Comment anchor: index into Document::comments + 1 (w:commentReference id).
   int comment_ref = -1;
+  bool comment_ref_has_range = false;
+  // Paragraph-level range boundaries. The reference remains at the 0x05 CP.
+  int comment_range_start = -1, comment_range_end = -1;
   // Bookmark marker: w:bookmarkStart / w:bookmarkEnd with this id and name.
   int bookmark_id = -1;
   bool bookmark_start = false;

@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <functional>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -49,6 +50,7 @@ using detail::kSprmPItap;
 using detail::ReadBookmarks;
 using detail::ReadChars;
 using detail::ReadCommentAnchors;
+using detail::ReadCommentRanges;
 using detail::ReadComments;
 using detail::ReadFkps;
 using detail::ReadFonts;
@@ -246,6 +248,19 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   for (size_t i = 0; i < comment_anchors->size(); i++) {
     comment_index.emplace((*comment_anchors)[i], static_cast<int>(i) + 1);
   }
+  const auto comment_ranges =
+      comment_anchors->empty() ? std::vector<detail::CommentRange>{}
+                               : ReadCommentRanges(table, fib, &doc.warnings);
+  std::map<uint32_t, std::vector<model::Run>> comment_marks;
+  std::set<int> ranged_comments;
+  for (const auto& range : comment_ranges) {
+    model::Run start, end;
+    start.comment_range_start = range.id;
+    end.comment_range_end = range.id;
+    comment_marks[range.start].push_back(std::move(start));
+    comment_marks[range.end].push_back(std::move(end));
+    ranged_comments.insert(range.id);
+  }
   // CP -> note index, so a 0x02 in the main story can be resolved to the note
   // whose body was read into Document::notes.
   struct NoteSite {
@@ -352,6 +367,18 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       para.runs.push_back(std::move(run));
     }
   };
+  auto emit_comments = [&](uint32_t cp) {
+    auto found = comment_marks.find(cp);
+    if (found == comment_marks.end())
+      return;
+    // A closing boundary comes before an opening one at adjacent ranges.
+    for (const auto& mark : found->second)
+      if (mark.comment_range_end >= 0)
+        para.runs.push_back(mark);
+    for (const auto& mark : found->second)
+      if (mark.comment_range_start >= 0)
+        para.runs.push_back(mark);
+  };
   // In fast-saved files the text and its terminating paragraph mark can live
   // at unrelated FCs. PAPX belongs to the terminating mark for the whole
   // paragraph, including its table membership and row-end state.
@@ -406,6 +433,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       skipping_damaged_table = false;
     }
     emit_bookmarks(ch.cp);
+    emit_comments(ch.cp);
     // The hyperlink/page target of a field applies to the runs after its
     // separator; pop restores the enclosing field's target.
     auto sync_field_state = [&]() {
@@ -677,6 +705,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       if (found != comment_index.end()) {
         model::Run mark;
         mark.comment_ref = found->second;
+        mark.comment_ref_has_range = ranged_comments.contains(found->second);
         para.runs.push_back(std::move(mark));
       }
       continue;
@@ -831,6 +860,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     close_table();
   const bool final_para_has_runs = !para.runs.empty();
   emit_bookmarks(fib.ccp_text);
+  emit_comments(fib.ccp_text);
   if (!final_para_has_runs && !doc.paragraphs.empty()) {
     auto& last_runs = doc.paragraphs.back().runs;
     for (auto& run : para.runs)

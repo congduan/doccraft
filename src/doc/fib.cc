@@ -195,6 +195,9 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.and_ref = pair(4);
   f.and_txt = pair(5);
   f.atn_owners = pair(36);
+  f.atn_bkmk = pair(39);
+  f.atn_bkf = pair(42);
+  f.atn_bkl = pair(43);
   f.sttb_bkmk = pair(21);
   f.bkf = pair(22);
   f.bkl = pair(23);

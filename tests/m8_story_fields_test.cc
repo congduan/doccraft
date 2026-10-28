@@ -799,6 +799,58 @@ TEST(M15StoryPlc, EqualCommentAnchorCpsKeepBothBodies) {
   EXPECT_EQ(Count(Part(*zip, "word/comments.xml"), "<w:comment w:id="), 2u);
 }
 
+TEST(M15StoryPlc, AdjacentCommentRangesCrossRunsAndControl) {
+  Synthetic s = Build(
+      "Aab\tcd\x05"
+      "ef\x05\r",
+      "", "", "One\rTwo\r\r", "");
+  size_t at = s.table.size();
+  s.table.resize(at + 72);
+  Put32(s.table, at, 6);
+  Put32(s.table, at + 4, 9);
+  Put32(s.table, at + 8, 10);
+  s.fib.and_ref = {static_cast<uint32_t>(at), 72};
+  at = s.table.size();
+  s.table.resize(at + 12);
+  Put32(s.table, at, 0);
+  Put32(s.table, at + 4, 4);
+  Put32(s.table, at + 8, s.fib.ccp_atn);
+  s.fib.and_txt = {static_cast<uint32_t>(at), 12};
+  at = s.table.size();
+  s.table.resize(at + 20);
+  Put32(s.table, at, 1);
+  Put32(s.table, at + 4, 6);
+  Put32(s.table, at + 8, 10);
+  Put16(s.table, at + 12, 0);
+  Put16(s.table, at + 16, 1);
+  s.fib.atn_bkf = {static_cast<uint32_t>(at), 20};
+  at = s.table.size();
+  s.table.resize(at + 12);
+  Put32(s.table, at, 6);
+  Put32(s.table, at + 4, 9);
+  Put32(s.table, at + 8, 10);
+  s.fib.atn_bkl = {static_cast<uint32_t>(at), 12};
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 2u);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t start1 = xml.find("<w:commentRangeStart w:id=\"1\"/>");
+  const size_t end1 = xml.find("<w:commentRangeEnd w:id=\"1\"/>");
+  const size_t start2 = xml.find("<w:commentRangeStart w:id=\"2\"/>");
+  const size_t end2 = xml.find("<w:commentRangeEnd w:id=\"2\"/>");
+  ASSERT_NE(start1, std::string::npos);
+  ASSERT_NE(end1, std::string::npos);
+  ASSERT_NE(start2, std::string::npos);
+  ASSERT_NE(end2, std::string::npos);
+  EXPECT_LT(start1, xml.find("<w:tab/>", start1));
+  EXPECT_LT(xml.find("<w:tab/>", start1), end1);
+  EXPECT_LT(end1, start2);
+  EXPECT_LT(start2, end2);
+  EXPECT_LT(end2, xml.find("<w:commentReference w:id=\"2\"/>"));
+}
+
 TEST(M15StoryPlc, CommentOwnersTrailingByteKeepsAuthor) {
   Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
   s.fib.and_ref = PutCommentRefPlc(s, 1);

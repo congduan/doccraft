@@ -29,11 +29,14 @@ namespace {
 constexpr size_t kAtrdSize = 30;
 constexpr size_t kAuthorIndexOffset = 20;
 constexpr size_t kInitialsSize = 10;
+constexpr size_t kBookmarkTagOffset = 26;
+constexpr size_t kAtnbeSize = 10;
 
 struct CommentAnchor {
   uint32_t cp = 0;
   std::string initials;
   int author = -1;
+  uint32_t bookmark_tag = UINT32_MAX;
 };
 
 std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(Bytes table,
@@ -64,6 +67,7 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(Bytes table,
     }
     const uint16_t author = U16(plc, atrd + kAuthorIndexOffset);
     anchor.author = author == 0xFFFF ? -1 : static_cast<int>(author);
+    anchor.bookmark_tag = U32(plc, atrd + kBookmarkTagOffset);
     out.push_back(std::move(anchor));
   }
   if (U32(plc, 4 * count) <= previous)
@@ -126,6 +130,81 @@ std::expected<void, Error> ValidateCommentStory(Bytes table, const Fib& fib) {
 }
 
 }  // namespace
+
+std::vector<CommentRange> ReadCommentRanges(
+    Bytes table, const Fib& fib, std::vector<std::string>* warnings) {
+  std::vector<CommentRange> out;
+  if (!fib.atn_bkf.size && !fib.atn_bkl.size)
+    return out;
+  auto invalid = [&]() {
+    if (warnings)
+      warnings->push_back(
+          "skipped comment range PLC: invalid annotation "
+          "bookmark range");
+    return std::vector<CommentRange>{};
+  };
+  if (!Valid(table, fib.atn_bkf) || !Valid(table, fib.atn_bkl) ||
+      fib.atn_bkf.size < 12 || (fib.atn_bkf.size - 4) % 8 ||
+      fib.atn_bkl.size < 8 || fib.atn_bkl.size % 4)
+    return invalid();
+  auto anchors = ReadAnchors(table, fib.and_ref);
+  if (!anchors)
+    return invalid();
+  if (anchors->empty())
+    return out;
+  const Bytes starts = table.subspan(fib.atn_bkf.offset, fib.atn_bkf.size);
+  const Bytes ends = table.subspan(fib.atn_bkl.offset, fib.atn_bkl.size);
+  const size_t count = (starts.size() - 4) / 8;
+  if (ends.size() / 4 - 1 != count)
+    return invalid();
+  std::map<uint32_t, size_t> tag_to_bookmark;
+  if (fib.atn_bkmk.size) {
+    if (!Valid(table, fib.atn_bkmk) || fib.atn_bkmk.size < 6)
+      return invalid();
+    const Bytes names = table.subspan(fib.atn_bkmk.offset, fib.atn_bkmk.size);
+    const size_t entries = U16(names, 2), extra = U16(names, 4);
+    if (entries != count || extra < kAtnbeSize)
+      return invalid();
+    size_t p = 6;
+    for (size_t i = 0; i < entries; ++i) {
+      if (p + 2 + extra > names.size())
+        return invalid();
+      const size_t chars = U16(names, p);
+      if (chars != 0)
+        return invalid();
+      const uint32_t tag = U32(names, p + 2 + 2);
+      if (!tag_to_bookmark.emplace(tag, i).second)
+        return invalid();
+      p += 2 + extra + 2 * chars;
+      if (p > names.size())
+        return invalid();
+    }
+  }
+  for (size_t i = 0; i < anchors->size(); ++i) {
+    if ((*anchors)[i].bookmark_tag == UINT32_MAX)
+      continue;
+    size_t index = i;
+    if (!tag_to_bookmark.empty()) {
+      auto found = tag_to_bookmark.find((*anchors)[i].bookmark_tag);
+      if (found == tag_to_bookmark.end())
+        continue;
+      index = found->second;
+    } else if (count != anchors->size()) {
+      continue;
+    }
+    const size_t record = 4 * (count + 1) + 4 * index;
+    const size_t end_index = U16(starts, record);
+    if (end_index >= count)
+      return invalid();
+    const uint32_t first = U32(starts, 4 * index);
+    const uint32_t last = U32(ends, 4 * end_index);
+    if (first > last || last > fib.ccp_text || last > (*anchors)[i].cp)
+      return invalid();
+    if (first < last)
+      out.push_back({first, last, static_cast<int>(i) + 1});
+  }
+  return out;
+}
 
 std::expected<std::vector<uint32_t>, Error> ReadCommentAnchors(
     Bytes table, const Fib& fib, std::vector<std::string>* warnings) {

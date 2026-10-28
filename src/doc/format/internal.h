@@ -505,6 +505,13 @@ BookmarkMarks FilterStoryBookmarks(
 std::expected<std::vector<uint32_t>, Error> ReadCommentAnchors(
     Bytes table, const Fib& fib, std::vector<std::string>* warnings);
 
+struct CommentRange {
+  uint32_t start = 0, end = 0;
+  int id = 0;
+};
+std::vector<CommentRange> ReadCommentRanges(Bytes table, const Fib& fib,
+                                            std::vector<std::string>* warnings);
+
 // Fills Document::comments with the comment bodies and their authors.
 std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
                                         Bytes table, const Fib& fib,
