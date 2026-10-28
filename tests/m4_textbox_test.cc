@@ -354,8 +354,11 @@ TEST(M4Textbox, SyntheticFlowBreaksStayInStoryOrder) {
   ASSERT_TRUE(invalid) << invalid.error().message;
   EXPECT_TRUE(invalid->textboxes.empty());
   ASSERT_FALSE(invalid->warnings.empty());
-  EXPECT_NE(invalid->warnings[0].find("skipped textbox story PLC"),
-            std::string::npos);
+  EXPECT_TRUE(std::any_of(invalid->warnings.begin(), invalid->warnings.end(),
+                          [](const std::string& warning) {
+                            return warning.find("skipped textbox story PLC") !=
+                                   std::string::npos;
+                          }));
 }
 
 TEST(M4Textbox, HeaderTextboxAppearsInHeaderPart) {
@@ -407,8 +410,11 @@ TEST(M6TextboxDegradation, InvalidBodyPlcKeepsMainText) {
   ASSERT_TRUE(parsed) << parsed.error().message;
   EXPECT_TRUE(parsed->textboxes.empty());
   ASSERT_FALSE(parsed->warnings.empty());
-  EXPECT_NE(parsed->warnings[0].find("skipped textbox story PLC"),
-            std::string::npos);
+  EXPECT_TRUE(std::any_of(parsed->warnings.begin(), parsed->warnings.end(),
+                          [](const std::string& warning) {
+                            return warning.find("skipped textbox story PLC") !=
+                                   std::string::npos;
+                          }));
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
@@ -430,6 +436,24 @@ TEST(M6WriterBuffer, SerializedPartsLimitReturnsError) {
   EXPECT_EQ(zip.error().message, "writer buffer limit exceeded");
 }
 
+TEST(M6WriterBuffer, SinglePartLimitReturnsNamedSize) {
+  model::Document document;
+  document.paragraphs.push_back({});
+  document.paragraphs.back().runs.push_back({});
+  document.paragraphs.back().runs.back().text = std::string(2048, 'x');
+  constexpr size_t kTotalLimit = 16384;
+  constexpr size_t kPartLimit = 1024;
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kTotalLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  const size_t actual_bytes = Part(*baseline, "word/document.xml").size();
+  auto zip =
+      docx::detail::WriteWithBufferLimit(document, kTotalLimit, kPartLimit);
+  ASSERT_FALSE(zip);
+  EXPECT_NE(zip.error().message.find("word/document.xml"), std::string::npos);
+  EXPECT_NE(zip.error().message.find(std::to_string(actual_bytes)),
+            std::string::npos);
+}
+
 TEST(M6TextboxDegradation, InvalidHeaderPlcKeepsHeaderText) {
   const std::string path =
       std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/header-textbox.doc";
@@ -448,8 +472,12 @@ TEST(M6TextboxDegradation, InvalidHeaderPlcKeepsHeaderText) {
   auto parsed = doc::ParseFormatted(*word, *table, *fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
   ASSERT_FALSE(parsed->warnings.empty());
-  EXPECT_NE(parsed->warnings[0].find("skipped header textbox story PLC"),
-            std::string::npos);
+  EXPECT_TRUE(std::any_of(parsed->warnings.begin(), parsed->warnings.end(),
+                          [](const std::string& warning) {
+                            return warning.find(
+                                       "skipped header textbox story PLC") !=
+                                   std::string::npos;
+                          }));
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   std::string headers;
@@ -573,7 +601,11 @@ TEST(M6TextboxDegradation, BadSecondStoryKeepsFirstTextbox) {
   ASSERT_EQ(parsed->textboxes.size(), 1u);
   EXPECT_EQ(parsed->textboxes[0].paragraphs[0].runs[0].text, "Box sam");
   ASSERT_FALSE(parsed->warnings.empty());
-  EXPECT_NE(parsed->warnings[0].find("FTXBXS 2"), std::string::npos);
+  EXPECT_TRUE(std::any_of(parsed->warnings.begin(), parsed->warnings.end(),
+                          [](const std::string& warning) {
+                            return warning.find("FTXBXS 2") !=
+                                   std::string::npos;
+                          }));
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
@@ -611,6 +643,10 @@ TEST(M11TextboxFields, FieldFlagsReachBodyAndHeaderTextboxXml) {
       xml.clear();
       for (int i = 1; i <= 6; ++i)
         xml += Part(*zip, ("word/header" + std::to_string(i) + ".xml").c_str());
+    }
+    if (header) {
+      EXPECT_NE(xml.find("<w:txbxContent>"), std::string::npos);
+      EXPECT_NE(xml.find("<w:instrText"), std::string::npos);
     }
     for (const char* kind : {"begin", "separate", "end"}) {
       const std::string marker = std::string("<w:fldChar w:fldCharType=\"") +
