@@ -636,9 +636,20 @@ void ApplyRun(model::Run& r, uint16_t op, Bytes v,
     case kSprmCFRMarkIns:
       r.revision_insert = Toggle(r.revision_insert, v[0]);
       break;
+    case kSprmCIbstRMark:
+      if (v.size() >= 2)
+        r.revision_author_insert = S16(v, 0);
+      break;
+    case kSprmCIbstRMarkDel:
+      if (v.size() >= 2)
+        r.revision_author_delete = S16(v, 0);
+      break;
     case kSprmCPropRMark:
       if (v.size() > 1)
         r.property_revision = v[1] != 0;
+      // PropRMarkOperand ([MS-DOC] 2.9.218): cb, fPropRMark, ibst(2), dttm.
+      if (v.size() >= 4)
+        r.revision_property = S16(v, 2);
       break;
     case kSprmCPicLocation:
       r.object_offset = static_cast<int>(U32(v, 0));

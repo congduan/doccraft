@@ -220,7 +220,17 @@ void WriteRunEastAsianLayout(pugi::xml_node n, const model::Run& r) {
   }
 }
 
-void RunPr(pugi::xml_node parent, const model::Run& r) {
+const std::string& RevisionAuthor(const model::Document* document, int index) {
+  static const std::string kPlaceholderAuthor = "doccraft";
+  if (document == nullptr || index < 0 ||
+      static_cast<size_t>(index) >= document->revision_authors.size()) {
+    return kPlaceholderAuthor;
+  }
+  return document->revision_authors[index];
+}
+
+void RunPr(pugi::xml_node parent, const model::Run& r,
+           const model::Document* document) {
   pugi::xml_node n = parent.append_child("w:rPr");
   if (r.style >= 0) {
     Attr(n.append_child("w:rStyle"), "w:val", Id(r.style));
@@ -267,7 +277,13 @@ void RunPr(pugi::xml_node parent, const model::Run& r) {
   if (r.revision_insert || r.revision_delete || r.property_revision) {
     auto change = n.append_child("w:rPrChange");
     IntAttr(change, "w:id", 0);
-    Attr(change, "w:author", "doccraft");
+    // sprmCPropRMark names its own author; insert/delete-marked runs keep
+    // the marking author as the closest available name.
+    Attr(change, "w:author",
+         RevisionAuthor(document, r.property_revision ? r.revision_property
+                                  : r.revision_insert
+                                      ? r.revision_author_insert
+                                      : r.revision_author_delete));
     change.append_child("w:rPr");
   }
 }

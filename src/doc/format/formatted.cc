@@ -161,6 +161,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     doc.fonts = ReadFonts(table, fib.fonts);
     doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
   }
+  auto revision_authors = detail::ReadRevisionAuthors(table, fib.rmark_authors);
+  if (!revision_authors) {
+    doc.warnings.push_back(revision_authors.error().message +
+                           "; revision authors default to \"doccraft\"");
+  } else {
+    doc.revision_authors = std::move(*revision_authors);
+  }
   auto bookmarks = ReadBookmarks(table, fib);
   if (!bookmarks)
     return std::unexpected(bookmarks.error());
@@ -884,6 +891,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         target->odd_even_different = true;
     }
   }
+  detail::ValidateRevisionAuthors(doc, &doc.warnings);
   return doc;
 }
 }  // namespace doccraft::doc

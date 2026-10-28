@@ -282,6 +282,16 @@ const FormatRange* Find(const std::vector<FormatRange>& a, uint32_t fc);
 
 std::vector<std::string> ReadFonts(Bytes table, Fib::Range r);
 
+// Reads the revision-author string table (SttbfRMark). A zero-sized range
+// is a valid empty table; structural violations are errors so the caller
+// can fall back to the placeholder author with a warning.
+std::expected<std::vector<std::string>, Error> ReadRevisionAuthors(
+    Bytes table, Fib::Range range);
+
+// Warns about revision marks whose author index cannot be resolved.
+void ValidateRevisionAuthors(const model::Document& doc,
+                             std::vector<std::string>* warnings);
+
 std::vector<model::Style> ReadStyles(Bytes table, Fib::Range r,
                                      const std::vector<std::string>& fonts);
 

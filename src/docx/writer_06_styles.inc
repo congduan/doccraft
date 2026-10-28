@@ -84,7 +84,8 @@ void WriteConditionalCellPr(pugi::xml_node tcpr,
 }
 
 void WriteStyleConditional(pugi::xml_node sn,
-                           const model::ConditionalProperties& c) {
+                           const model::ConditionalProperties& c,
+                           const model::Document& document) {
   const char* type = ConditionalType(c.type);
   if (type == nullptr) {
     return;
@@ -93,7 +94,7 @@ void WriteStyleConditional(pugi::xml_node sn,
   Attr(block, "w:type", type);
   // CT_TblStylePr keeps the ECMA-376 child order: pPr, rPr, tblPr, trPr, tcPr.
   ParaPr(block, c.paragraph, true);
-  RunPr(block, c.run);
+  RunPr(block, c.run, &document);
   WriteConditionalCellPr(block.append_child("w:tcPr"), c);
 }
 
@@ -150,13 +151,13 @@ void WriteStyle(pugi::xml_node styles, const model::Document& document,
   if (style.type == 1 || style.type == 3 || style.type == 4) {
     ParaPr(sn, style.paragraph, true);
   }
-  RunPr(sn, style.run);
+  RunPr(sn, style.run, &document);
   // CT_Style places w:tblPr after w:pPr/w:rPr.
   if (style.type == 3) {
     WriteStyleTablePr(sn, style);
   }
   for (const auto& conditional : style.conditionals) {
-    WriteStyleConditional(sn, conditional);
+    WriteStyleConditional(sn, conditional, document);
   }
 }
 
@@ -169,7 +170,7 @@ pugi::xml_document WriteStyles(const model::Document& document) {
   default_run.font = "Liberation Serif";
   default_run.size = 24;
   auto run_defaults = defaults.append_child("w:rPrDefault");
-  RunPr(run_defaults, default_run);
+  RunPr(run_defaults, default_run, &document);
   Value(run_defaults.child("w:rPr"), "w:kern", 2);
   for (size_t i = 0; i < document.styles.size(); i++) {
     const auto& style = document.styles[i];

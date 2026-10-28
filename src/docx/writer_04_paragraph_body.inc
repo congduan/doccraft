@@ -318,16 +318,20 @@ void WriteParagraph(pugi::xml_node parent, const model::Paragraph& p,
       if (r.field_dirty)
         Attr(owner, "w:dirty", "1");
     }
-    // sprmCFRMarkDel / sprmCFRMarkIns: tracked text lives inside w:del / w:ins.
+    // sprmCFRMarkDel / sprmCFRMarkIns: tracked text lives inside w:del / w:ins,
+    // attributed to the author named by the matching sprmCIbstRMark index.
     pugi::xml_node wrapper = owner;
     bool deleted = r.revision_delete;
     if (deleted || r.revision_insert) {
       wrapper = owner.append_child(deleted ? "w:del" : "w:ins");
       IntAttr(wrapper, "w:id", ++ctx.revision_id);
-      Attr(wrapper, "w:author", "doccraft");
+      Attr(wrapper, "w:author",
+           RevisionAuthor(ctx.document,
+                          deleted ? r.revision_author_delete
+                                  : r.revision_author_insert));
     }
     auto rn = wrapper.append_child("w:r");
-    RunPr(rn, r);
+    RunPr(rn, r, ctx.document);
     if (r.bookmark_id >= 0) {
       // Bookmarks are paragraph-level markers, not run content.
       auto mark = pn.append_child(r.bookmark_start ? "w:bookmarkStart"

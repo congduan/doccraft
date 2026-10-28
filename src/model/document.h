@@ -134,6 +134,11 @@ struct Run {
   bool binary_data = false, ole_object = false, embedded_object = false;
   bool revision_insert = false, revision_delete = false,
        property_revision = false;
+  // sprmCIbstRMark / sprmCIbstRMarkDel / the ibst inside sprmCPropRMark's
+  // PropRMarkOperand: zero-based index into Document::revision_authors
+  // (SttbfRMark). 0 is the spec default and names the "Unknown" author.
+  int revision_author_insert = 0, revision_author_delete = 0,
+      revision_property = 0;
   // Footnote/endnote reference: id within its own note class, as written to
   // w:footnoteReference / w:endnoteReference. -1 = not a reference.
   int note_ref = -1;
@@ -372,6 +377,9 @@ struct Document {
   Section section;
   std::vector<std::pair<size_t, Section>> section_breaks;
   std::vector<std::string> fonts;
+  // SttbfRMark (FIB pair 24): author names shared by insert/delete/property
+  // revision marks. Empty when the document carries no table.
+  std::vector<std::string> revision_authors;
   std::vector<List> lists;
   std::vector<Note> notes;
   std::vector<Comment> comments;

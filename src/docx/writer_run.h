@@ -18,7 +18,13 @@
 #include "third_party/pugixml/pugixml.hpp"
 namespace doccraft::docx {
 
-void RunPr(pugi::xml_node parent, const model::Run& run);
+// Resolves a SttbfRMark index to its author name. `document` null, an empty
+// table, or an out-of-range index (already warned about at parse time)
+// degrades to the historical placeholder author "doccraft".
+const std::string& RevisionAuthor(const model::Document* document, int index);
+
+void RunPr(pugi::xml_node parent, const model::Run& run,
+           const model::Document* document);
 
 }  // namespace doccraft::docx
 
