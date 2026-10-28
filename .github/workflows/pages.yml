@@ -1,0 +1,39 @@
+name: Pages
+
+# Builds the static site from README.md and publishes it to the gh-pages
+# branch. GitHub serves gh-pages on a URL like
+# https://congduan.github.io/doccraft/ once Pages is enabled in
+# Settings > Pages (source: deploy from branch, gh-pages, / (root)).
+# NOTE: on the free plan Pages requires the repository to be public.
+
+on:
+  push:
+    branches: [main]
+    paths: [README.md, docs/gallery/**, tools/gen_site.py]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate site
+        run: |
+          mkdir -p site
+          python3 tools/gen_site.py README.md site/index.html
+          cp -r docs/gallery site/gallery
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "pages: publish site from ${{ github.sha }}"
