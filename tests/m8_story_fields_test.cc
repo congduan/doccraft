@@ -1077,14 +1077,14 @@ TEST(M15StoryPlc, CommentOwnersTrailingByteKeepsAuthor) {
             std::string::npos);
 }
 
-TEST(M15StoryPlc, CommentInitialsUseByteCountAndUtf16Payload) {
+TEST(M15StoryPlc, CommentInitialsUseTwoByteCountAndUtf16Payload) {
   Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
   s.fib.and_ref = PutCommentRefPlc(s, 1);
   s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
   const size_t record = s.fib.and_ref.offset + 8;
-  s.table[record] = 2;
-  Put16(s.table, record + 1, 'A');
-  Put16(s.table, record + 3, 'B');
+  Put16(s.table, record, 2);
+  Put16(s.table, record + 2, 'A');
+  Put16(s.table, record + 4, 'B');
   Put16(s.table, record + 20, 0xffff);
   auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
@@ -1098,11 +1098,32 @@ TEST(M15StoryPlc, CommentInitialsUseByteCountAndUtf16Payload) {
             std::string::npos);
 }
 
+TEST(M15StoryPlc, CommentInitialsFillNineCharacterBuffer) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  const size_t record = s.fib.and_ref.offset + 8;
+  Put16(s.table, record, 9);
+  for (size_t i = 0; i < 9; ++i)
+    Put16(s.table, record + 2 + 2 * i, 'A' + i);
+  Put16(s.table, record + 20, 0xffff);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  EXPECT_EQ(parsed->comments[0].initials, "ABCDEFGHI");
+  EXPECT_EQ(parsed->comments[0].author, "ABCDEFGHI");
+  EXPECT_TRUE(parsed->warnings.empty());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/comments.xml").find("w:initials=\"ABCDEFGHI\""),
+            std::string::npos);
+}
+
 TEST(M15StoryPlc, OversizedCommentInitialsWarnAndKeepComment) {
   Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
   s.fib.and_ref = PutCommentRefPlc(s, 1);
   s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
-  s.table[s.fib.and_ref.offset + 8] = 5;
+  Put16(s.table, s.fib.and_ref.offset + 8, 10);
   auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
   ASSERT_EQ(parsed->comments.size(), 1u);
