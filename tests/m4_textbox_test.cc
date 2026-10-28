@@ -35,6 +35,36 @@ void Put32(std::vector<uint8_t>& bytes, size_t at, uint32_t value) {
     bytes[at + i] = static_cast<uint8_t>(value >> (8 * i));
 }
 
+void Put16(std::vector<uint8_t>& bytes, size_t at, uint16_t value) {
+  bytes[at] = static_cast<uint8_t>(value);
+  bytes[at + 1] = static_cast<uint8_t>(value >> 8);
+}
+
+void PutBookmark(std::vector<uint8_t>* table, doc::Fib* fib, uint32_t begin,
+                 uint32_t end, const std::string& name) {
+  size_t at = table->size();
+  fib->sttb_bkmk = {static_cast<uint32_t>(at),
+                    static_cast<uint32_t>(8 + name.size() * 2)};
+  table->resize(at + fib->sttb_bkmk.size);
+  Put16(*table, at, 0xffff);
+  Put16(*table, at + 2, 1);
+  Put16(*table, at + 4, 0);
+  Put16(*table, at + 6, static_cast<uint16_t>(name.size()));
+  for (size_t i = 0; i < name.size(); ++i)
+    Put16(*table, at + 8 + 2 * i, static_cast<uint8_t>(name[i]));
+  at = table->size();
+  fib->bkf = {static_cast<uint32_t>(at), 12};
+  table->resize(at + 12);
+  Put32(*table, at, begin);
+  Put32(*table, at + 4, end + 1);
+  Put16(*table, at + 8, 0);
+  at = table->size();
+  fib->bkl = {static_cast<uint32_t>(at), 8};
+  table->resize(at + 8);
+  Put32(*table, at, end);
+  Put32(*table, at + 4, end + 1);
+}
+
 void PutFieldPlc(std::vector<uint8_t>& table, doc::Fib::Range* range,
                  uint8_t flags) {
   const size_t at = table.size();
@@ -112,6 +142,91 @@ TEST(M4Textbox, LibreOfficeFloatingTextboxKeepsStoryAtAnchor) {
   EXPECT_NE(xml.find("<w:txbxContent>"), std::string::npos);
   EXPECT_NE(xml.find("Box sample line"), std::string::npos);
   EXPECT_NE(xml.find("<w:pict>"), std::string::npos);
+}
+
+TEST(M18Bookmarks, WholeMainStoryEndsAtCcpText) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb);
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word);
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib);
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table);
+  auto baseline = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  PutBookmark(&*table, &*fib, 0, fib->ccp_text, "WholeMain");
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->warnings.empty());
+  EXPECT_EQ(parsed->paragraphs.size(), baseline->paragraphs.size());
+  ASSERT_FALSE(parsed->paragraphs.empty());
+  const auto& last = parsed->paragraphs.back().runs;
+  ASSERT_FALSE(last.empty());
+  EXPECT_EQ(last.back().bookmark_id, 0);
+  EXPECT_FALSE(last.back().bookmark_start);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t start =
+      xml.find("<w:bookmarkStart w:id=\"0\" w:name=\"WholeMain\"/>");
+  const size_t end = xml.find("<w:bookmarkEnd w:id=\"0\"/>");
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  EXPECT_LT(start, end);
+}
+
+TEST(M18Bookmarks, BodyAndHeaderTextboxStoryBookmarks) {
+  for (bool header : {false, true}) {
+    const std::string filename = header ? "header-textbox.doc" : "textbox.doc";
+    const std::string path =
+        std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/" + filename;
+    std::ifstream input(path, std::ios::binary);
+    ASSERT_TRUE(input);
+    std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+    auto cfb = cfb::CfbReader::Open(bytes);
+    ASSERT_TRUE(cfb);
+    auto word = cfb->ReadStream("WordDocument");
+    ASSERT_TRUE(word);
+    auto fib = doc::ParseFib(*word);
+    ASSERT_TRUE(fib);
+    auto table = cfb->ReadStream(fib->table_stream());
+    ASSERT_TRUE(table);
+    const uint32_t base = fib->ccp_text + fib->ccp_ftn + fib->ccp_hdd +
+                          fib->ccp_atn + fib->ccp_edn +
+                          (header ? fib->ccp_txbx : 0);
+    const uint32_t length = header ? fib->ccp_hdr_txbx : fib->ccp_txbx;
+    const auto range = header ? fib->hdr_txbx_txt : fib->txbx_txt;
+    ASSERT_GT(length, 0u);
+    const uint32_t box_end = base::U32(*table, range.offset + 4);
+    PutBookmark(&*table, &*fib, base, base + box_end - 1, "BoxMark");
+    auto parsed = doc::ParseFormatted(*word, *table, *fib);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_TRUE(parsed->warnings.empty());
+    ASSERT_EQ(parsed->textboxes.size(), 1u);
+    ASSERT_FALSE(parsed->textboxes[0].paragraphs.empty());
+    const auto& first = parsed->textboxes[0].paragraphs.front().runs;
+    EXPECT_TRUE(first.front().bookmark_start);
+    const auto& last = parsed->textboxes[0].paragraphs.back().runs;
+    EXPECT_FALSE(last.back().bookmark_start);
+    EXPECT_EQ(last.back().bookmark_id, 0);
+    auto zip = docx::Write(*parsed);
+    ASSERT_TRUE(zip);
+    std::string xml = Part(*zip, "word/document.xml");
+    if (header) {
+      xml.clear();
+      for (int i = 1; i <= 6; ++i)
+        xml += Part(*zip, ("word/header" + std::to_string(i) + ".xml").c_str());
+    }
+    EXPECT_NE(xml.find("<w:bookmarkStart w:id=\"0\" w:name=\"BoxMark\"/>"),
+              std::string::npos);
+    EXPECT_NE(xml.find("<w:bookmarkEnd w:id=\"0\"/>"), std::string::npos);
+  }
 }
 
 TEST(M4Textbox, SyntheticFlowBreaksStayInStoryOrder) {
