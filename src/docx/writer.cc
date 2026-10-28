@@ -275,10 +275,10 @@ uint32_t Crc32(std::string_view bytes) {
 
 std::expected<std::vector<uint8_t>, Error> Write(
     const model::Document& document) {
-  return WriteWithBufferLimit(document, detail::kMaxWriterBufferBytes);
+  return detail::WriteWithBufferLimit(document, detail::kMaxWriterBufferBytes);
 }
 
-std::expected<std::vector<uint8_t>, Error> WriteWithBufferLimit(
+std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
     const model::Document& document, size_t max_buffer_bytes) {
   using Clock = std::chrono::steady_clock;
   const auto t_start = Clock::now();

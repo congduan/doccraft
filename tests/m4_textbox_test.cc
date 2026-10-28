@@ -26,6 +26,7 @@
 #include "doc/fib.h"
 #include "doc/format.h"
 #include "doc/format/internal.h"
+#include "docx/internal.h"
 #include "docx/writer.h"
 
 namespace {
@@ -419,12 +420,12 @@ TEST(M6TextboxDegradation, InvalidBodyPlcKeepsMainText) {
 TEST(M6WriterBuffer, SerializedPartsLimitReturnsError) {
   model::Document document;
   constexpr size_t kTestLimit = 8192;
-  auto baseline = docx::WriteWithBufferLimit(document, kTestLimit);
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kTestLimit);
   ASSERT_TRUE(baseline) << baseline.error().message;
   document.paragraphs.push_back({});
   document.paragraphs.back().runs.push_back({});
   document.paragraphs.back().runs.back().text = std::string(16384, 'x');
-  auto zip = docx::WriteWithBufferLimit(document, kTestLimit);
+  auto zip = docx::detail::WriteWithBufferLimit(document, kTestLimit);
   ASSERT_FALSE(zip);
   EXPECT_EQ(zip.error().message, "writer buffer limit exceeded");
 }

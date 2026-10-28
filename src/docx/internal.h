@@ -17,9 +17,14 @@
 
 #include <cstddef>
 
+#include "docx/writer.h"
+
 namespace doccraft::docx::detail {
 // Maximum sum of serialized OPC part payloads held before ZIP packing.
 inline constexpr size_t kMaxWriterBufferBytes = 512 * 1024 * 1024;
+// Internal limit injection for writer tests; production callers use Write().
+std::expected<std::vector<uint8_t>, Error> WriteWithBufferLimit(
+    const model::Document& document, size_t max_buffer_bytes);
 }  // namespace doccraft::docx::detail
 
 #endif  // SRC_DOCX_INTERNAL_H_
