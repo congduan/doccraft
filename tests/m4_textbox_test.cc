@@ -356,9 +356,10 @@ TEST(M4Textbox, SyntheticFlowBreaksStayInStoryOrder) {
   ASSERT_FALSE(invalid->warnings.empty());
   EXPECT_TRUE(std::any_of(invalid->warnings.begin(), invalid->warnings.end(),
                           [](const std::string& warning) {
-                            return warning.find("skipped textbox story PLC") !=
-                                   std::string::npos;
-                          }));
+                            return warning ==
+                                   "skipped textbox story PLC at FTXBXS 1";
+                          }))
+      << ::testing::PrintToString(invalid->warnings);
 }
 
 TEST(M4Textbox, HeaderTextboxAppearsInHeaderPart) {
@@ -412,9 +413,10 @@ TEST(M6TextboxDegradation, InvalidBodyPlcKeepsMainText) {
   ASSERT_FALSE(parsed->warnings.empty());
   EXPECT_TRUE(std::any_of(parsed->warnings.begin(), parsed->warnings.end(),
                           [](const std::string& warning) {
-                            return warning.find("skipped textbox story PLC") !=
-                                   std::string::npos;
-                          }));
+                            return warning ==
+                                   "skipped textbox story PLC at FTXBXS 1";
+                          }))
+      << ::testing::PrintToString(parsed->warnings);
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
@@ -449,9 +451,29 @@ TEST(M6WriterBuffer, SinglePartLimitReturnsNamedSize) {
   auto zip =
       docx::detail::WriteWithBufferLimit(document, kTotalLimit, kPartLimit);
   ASSERT_FALSE(zip);
-  EXPECT_NE(zip.error().message.find("word/document.xml"), std::string::npos);
-  EXPECT_NE(zip.error().message.find(std::to_string(actual_bytes)),
-            std::string::npos);
+  EXPECT_EQ(zip.error().message,
+            "writer part limit exceeded: word/document.xml (" +
+                std::to_string(actual_bytes) + " bytes)");
+}
+
+TEST(M6WriterBuffer, LastSectionHeaderPartLimitReturnsError) {
+  model::Document document;
+  model::Paragraph header;
+  model::Run run;
+  run.text = std::string(4096, 'h');
+  header.runs.push_back(std::move(run));
+  document.section.headers[1].push_back(std::move(header));
+  constexpr size_t kTotalLimit = 16384;
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kTotalLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  const size_t header_bytes = Part(*baseline, "word/header1.xml").size();
+  ASSERT_GT(header_bytes, Part(*baseline, "word/document.xml").size());
+  auto zip = docx::detail::WriteWithBufferLimit(document, kTotalLimit,
+                                                header_bytes - 1);
+  ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized header";
+  EXPECT_EQ(zip.error().message,
+            "writer part limit exceeded: word/header1.xml (" +
+                std::to_string(header_bytes) + " bytes)");
 }
 
 TEST(M6TextboxDegradation, InvalidHeaderPlcKeepsHeaderText) {
@@ -603,9 +625,10 @@ TEST(M6TextboxDegradation, BadSecondStoryKeepsFirstTextbox) {
   ASSERT_FALSE(parsed->warnings.empty());
   EXPECT_TRUE(std::any_of(parsed->warnings.begin(), parsed->warnings.end(),
                           [](const std::string& warning) {
-                            return warning.find("FTXBXS 2") !=
-                                   std::string::npos;
-                          }));
+                            return warning ==
+                                   "skipped textbox story PLC at FTXBXS 2";
+                          }))
+      << ::testing::PrintToString(parsed->warnings);
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
