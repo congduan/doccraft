@@ -851,6 +851,125 @@ TEST(M15StoryPlc, AdjacentCommentRangesCrossRunsAndControl) {
   EXPECT_LT(end2, xml.find("<w:commentReference w:id=\"2\"/>"));
 }
 
+// The FIB pair table is read from WordDocument so this test covers the
+// SttbfAtnBkmk slot as well as the tag-to-bookmark lookup.
+Synthetic TaggedComments() {
+  Synthetic s = Build("Aabcdef\x05gh\x05\r", "", "", "One\rTwo\r\r", "");
+  size_t at = s.table.size();
+  s.table.resize(at + 72, 0);
+  Put32(s.table, at, 7);
+  Put32(s.table, at + 4, 10);
+  Put32(s.table, at + 8, 12);
+  Put32(s.table, at + 12 + 26, 100);       // A, second bookmark.
+  Put32(s.table, at + 12 + 30 + 26, 200);  // B, first bookmark.
+  s.fib.and_ref = {static_cast<uint32_t>(at), 72};
+  at = s.table.size();
+  s.table.resize(at + 12, 0);
+  Put32(s.table, at + 4, 4);
+  Put32(s.table, at + 8, s.fib.ccp_atn);
+  s.fib.and_txt = {static_cast<uint32_t>(at), 12};
+  at = s.table.size();
+  s.table.resize(at + 20, 0);
+  Put32(s.table, at, 1);  // B begins before A.
+  Put32(s.table, at + 4, 3);
+  Put32(s.table, at + 8, 12);
+  Put16(s.table, at + 12, 1);  // B ends at 9.
+  s.fib.atn_bkf = {static_cast<uint32_t>(at), 20};
+  at = s.table.size();
+  s.table.resize(at + 12, 0);
+  Put32(s.table, at, 6);  // A ends first.
+  Put32(s.table, at + 4, 9);
+  Put32(s.table, at + 8, 12);
+  s.fib.atn_bkl = {static_cast<uint32_t>(at), 12};
+  at = s.table.size();
+  s.table.resize(at + 30, 0);
+  Put16(s.table, at, 0xffff);
+  Put16(s.table, at + 2, 2);
+  Put16(s.table, at + 4, 10);
+  Put16(s.table, at + 8, 0x0100);
+  Put32(s.table, at + 10, 200);  // First bookmark belongs to B.
+  Put32(s.table, at + 14, UINT32_MAX);
+  Put16(s.table, at + 20, 0x0100);
+  Put32(s.table, at + 22, 100);  // Second bookmark belongs to A.
+  Put32(s.table, at + 26, UINT32_MAX);
+  s.fib.atn_bkmk = {static_cast<uint32_t>(at), 30};
+
+  Put16(s.word, 0, 0xa5ec);
+  Put16(s.word, 2, 0x00c1);
+  Put16(s.word, 10, 0x0004);  // Complex document, text from CLX.
+  Put16(s.word, 32, 0);       // csw
+  Put16(s.word, 34, 11);      // cslw
+  Put32(s.word, 48, s.fib.ccp_text);
+  Put32(s.word, 64, s.fib.ccp_atn);
+  Put16(s.word, 80, 44);  // pair count; pair table begins at byte 82.
+  const auto pair = [&](size_t index, doc::Fib::Range range) {
+    Put32(s.word, 82 + 8 * index, range.offset);
+    Put32(s.word, 86 + 8 * index, range.size);
+  };
+  pair(4, s.fib.and_ref);
+  pair(5, s.fib.and_txt);
+  pair(33, {s.fib.fc_clx, s.fib.lcb_clx});
+  pair(37, s.fib.atn_bkmk);
+  pair(42, s.fib.atn_bkf);
+  pair(43, s.fib.atn_bkl);
+  return s;
+}
+
+TEST(M15StoryPlc, CommentTagsPairReorderedBookmarks) {
+  Synthetic s = TaggedComments();
+  auto fib = doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto parsed = doc::ParseFormatted(s.word, s.table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 2u);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t b_start = xml.find("<w:commentRangeStart w:id=\"2\"/>");
+  const size_t a_start = xml.find("<w:commentRangeStart w:id=\"1\"/>");
+  const size_t a_end = xml.find("<w:commentRangeEnd w:id=\"1\"/>");
+  const size_t a_ref = xml.find("<w:commentReference w:id=\"1\"/>");
+  const size_t b_end = xml.find("<w:commentRangeEnd w:id=\"2\"/>");
+  const size_t b_ref = xml.find("<w:commentReference w:id=\"2\"/>");
+  ASSERT_NE(b_start, std::string::npos);
+  ASSERT_NE(a_start, std::string::npos);
+  ASSERT_NE(a_end, std::string::npos);
+  ASSERT_NE(a_ref, std::string::npos);
+  ASSERT_NE(b_end, std::string::npos);
+  ASSERT_NE(b_ref, std::string::npos);
+  EXPECT_LT(b_start, a_start);
+  EXPECT_LT(a_start, a_end);
+  EXPECT_LT(a_end, a_ref);
+  EXPECT_LT(a_ref, b_end);
+  EXPECT_LT(b_end, b_ref);
+}
+
+TEST(M15StoryPlc, UnmatchedCommentTagFallsBackToPointAnchor) {
+  Synthetic s = TaggedComments();
+  Put32(s.table, s.fib.atn_bkmk.offset + 22, 0x12345678);
+  auto fib = doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto parsed = doc::ParseFormatted(s.word, s.table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t a_start = xml.find("<w:commentRangeStart w:id=\"1\"/>");
+  const size_t a_ref = xml.find("<w:commentReference w:id=\"1\"/>");
+  const size_t a_end = xml.find("<w:commentRangeEnd w:id=\"1\"/>");
+  const size_t b_start = xml.find("<w:commentRangeStart w:id=\"2\"/>");
+  const size_t b_end = xml.find("<w:commentRangeEnd w:id=\"2\"/>");
+  ASSERT_NE(a_start, std::string::npos);
+  ASSERT_NE(a_ref, std::string::npos);
+  ASSERT_NE(a_end, std::string::npos);
+  ASSERT_NE(b_start, std::string::npos);
+  ASSERT_NE(b_end, std::string::npos);
+  EXPECT_LT(b_start, a_start);
+  EXPECT_LT(a_start, a_ref);
+  EXPECT_LT(a_ref, a_end);
+  EXPECT_LT(a_end, b_end);
+}
+
 TEST(M15StoryPlc, CommentOwnersTrailingByteKeepsAuthor) {
   Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
   s.fib.and_ref = PutCommentRefPlc(s, 1);
