@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Comments: PlcfandRef anchors (FIB pair 4) plus PlcfandTxt (pair 5) and the
-// GrpXstAtnOwners author array (pair 36) become comments.xml with
-// w:commentRangeStart/End + w:commentReference in the body.
+// Comments: PlcfandRef anchors (FIB pair 4), PlcfandTxt (pair 5), and
+// GrpXstAtnOwners (pair 36) produce comments.xml and body references.
+// Annotation bookmark PLCs (pairs 42/43) provide the range boundaries;
+// SttbfAtnBkmk (pair 37) supplies tags for matching bookmarks to anchors.
 
 #include <gtest/gtest.h>
 

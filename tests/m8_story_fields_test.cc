@@ -15,7 +15,9 @@
 // Non-main story fields: PlcfFldHdr/Ftn/Atn/Edn (FIB pairs 17/18/19/48) give
 // header, footnote, endnote and comment stories the same field semantics as
 // the main story - fldChar hierarchy, fldLock/dirty flags, and the top-level
-// HYPERLINK/PAGE mappings - in their own package parts.
+// HYPERLINK/PAGE mappings - in their own package parts. Comment range tests
+// cover adjacent and nested bookmarks, SttbfAtnBkmk tag matching, and point
+// anchor fallback when a tag or pairing table is missing.
 
 #include <gtest/gtest.h>
 
