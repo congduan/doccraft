@@ -53,6 +53,38 @@ TEST(M6WriterBuffer, SerializedPartsLimitReturnsError) {
   EXPECT_EQ(zip.error().message, "writer buffer limit exceeded");
 }
 
+TEST(M6WriterBuffer, HeaderPartCountsTowardTotalLimit) {
+  model::Document document;
+  model::Paragraph header;
+  model::Run run;
+  run.text = std::string(4096, 'h');
+  header.runs.push_back(std::move(run));
+  document.section.headers[1].push_back(std::move(header));
+
+  constexpr size_t kGenerousLimit = 16384;
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kGenerousLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  mz_zip_archive archive = {};
+  ASSERT_TRUE(
+      mz_zip_reader_init_mem(&archive, baseline->data(), baseline->size(), 0));
+  size_t total = 0;
+  size_t core = 0;
+  for (mz_uint index = 0; index < mz_zip_reader_get_num_files(&archive);
+       ++index) {
+    mz_zip_archive_file_stat stat = {};
+    ASSERT_TRUE(mz_zip_reader_file_stat(&archive, index, &stat));
+    total += stat.m_uncomp_size;
+    if (std::string(stat.m_filename) != "word/header1.xml")
+      core += stat.m_uncomp_size;
+  }
+  mz_zip_reader_end(&archive);
+  ASSERT_GT(total, core + 1);
+
+  auto zip = docx::detail::WriteWithBufferLimit(document, total - 1);
+  ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized total";
+  EXPECT_EQ(zip.error().message, "writer buffer limit exceeded");
+}
+
 TEST(M6WriterBuffer, SinglePartLimitReturnsNamedSize) {
   model::Document document;
   document.paragraphs.push_back({});

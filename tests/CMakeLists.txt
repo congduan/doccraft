@@ -160,6 +160,9 @@ gtest_discover_tests(m4_textbox_test)
 add_executable(docx_writer_test docx_writer_test.cc)
 target_link_libraries(docx_writer_test PRIVATE doccraft_docx gtest_main)
 gtest_discover_tests(docx_writer_test)
+add_test(NAME docx_zip_order COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/docx/validate_order.py
+  $<TARGET_FILE:doccraft> ${CMAKE_SOURCE_DIR}/tests/fixtures)
 
 add_executable(m6_textbox_degradation_test m6_textbox_degradation_test.cc)
 target_link_libraries(m6_textbox_degradation_test PRIVATE doccraft_cfb
