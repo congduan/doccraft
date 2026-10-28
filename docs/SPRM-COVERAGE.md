@@ -11,6 +11,7 @@
 > M18 标准书签 PLC：`M18Bookmarks.WholeMainStoryEndsAtCcpText` 与 `M18Bookmarks.BodyAndHeaderTextboxStoryBookmarks` 覆盖正文整域终点及正文/页眉文本框故事书签。它们不是 sprm，不改变本表 opcode 状态；§6.6 仍为 ◐。
 > M11 页眉 PLC 双重损坏：`M11HeaderFields.DoublyCorruptPlcsKeepBothWarnings` 断言故事 PLC 与域 PLC 同时损坏时各发一条警告；不改变 sprm 状态。
 > M4 第二批损坏降级：`degraded_fkp_warning`、`degraded_sprm_warning`、`degraded_header_warning` 验证局部跳过、stderr 警告及正文保留；它们不改变正常输入下的各 opcode 覆盖状态。
+> M6 文本框降级：`M6TextboxDegradation.*`、`m6_bad_textbox_cli`、`m6_bad_textbox_story_cli` 覆盖 FTXBXS/Tbkd 逐故事跳过、PLC 整表跳过及正文/页眉文字保留；`M6WriterBuffer.SerializedPartsLimitReturnsError` 以注入的 8 KiB 上限覆盖 writer 载荷超限错误路径，生产上限为 512 MiB。它们不是 sprm，不改变本表 opcode 状态；§6.6、§6.9 仍为 ◐。
 > M8 续批旧版图片：`LegacyWord.Word6PicfMetafileBecomesMediaPart` 验证旧版单字节 opcode 0x44 经 WordDocument 中 66 字节 PICF 输出 WMF 媒体部件；`LegacyWord.Word6BitmapPicfReportsUnsupportedType` 验证 MFPF 位图(99) 明确不支持。现代 `sprmCPicLocation` 状态不变。
 > M8 续批内联形状：`M5InlineShapes.PicfOfficeArtShapeWritesInlinePlaceholder` 验证 PICF 中无 BLIP 的 OfficeArtFSP 进入形状 IR 并写成内联 VML 占位；页眉 FTXBXS.lid 对 PlcfSpaHdr 的连接已由 `M4Textbox.HeaderTextboxAppearsInHeaderPart` 覆盖。文本框和形状仍为 §6.6 的 ◐。
 > M14 内联文本框：`M14InlineTextbox.StoryTextReachesInlineContent` 与 `MissingStoryWarnsAndKeepsEmptyShape` 覆盖 OfficeArtClientTextbox 指针连接 FTXBXS/Tbkd 故事，以及缺失范围的空框警告。它属于故事结构而非 sprm，§6.6 仍为 ◐。

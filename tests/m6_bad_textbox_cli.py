@@ -19,13 +19,14 @@ import tempfile
 import zipfile
 
 
-generator, converter, source = sys.argv[1:]
+generator, converter, source, mode = sys.argv[1:]
+assert mode in ("textbox", "textbox-story")
 with tempfile.TemporaryDirectory() as directory:
     root = pathlib.Path(directory)
     document = root / "bad-textbox.doc"
     output = root / "bad-textbox.docx"
     generated = subprocess.run(
-        [generator, source, str(document), "textbox"], capture_output=True
+        [generator, source, str(document), mode], capture_output=True
     )
     assert generated.returncode == 0, generated.stderr
     result = subprocess.run(
@@ -33,8 +34,14 @@ with tempfile.TemporaryDirectory() as directory:
         capture_output=True,
     )
     assert result.returncode == 0, (result.returncode, result.stderr)
-    assert b"warning: skipped textbox story PLC:" in result.stderr, result.stderr
+    warning = (
+        b"warning: skipped textbox story PLC at FTXBXS 1\n"
+        if mode == "textbox-story"
+        else b"warning: skipped textbox story PLC: invalid textbox PLC size\n"
+    )
+    assert result.stderr == warning, result.stderr
     with zipfile.ZipFile(output) as archive:
         xml = archive.read("word/document.xml")
         assert b"<w:body>" in xml
+        assert b"Before  After textbox." in xml
         assert b"Box sample line" not in xml

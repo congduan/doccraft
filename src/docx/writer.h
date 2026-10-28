@@ -14,6 +14,7 @@
 
 #ifndef SRC_DOCX_WRITER_H_
 #define SRC_DOCX_WRITER_H_
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -32,6 +33,7 @@ uint32_t Crc32(std::string_view bytes);
 
 std::expected<std::vector<uint8_t>, Error> Write(
     const model::Document& document);
+// Internal limit injection for writer tests; production callers use Write().
 std::expected<std::vector<uint8_t>, Error> WriteWithBufferLimit(
     const model::Document& document, size_t max_buffer_bytes);
 }  // namespace doccraft::docx

@@ -412,6 +412,7 @@ TEST(M6TextboxDegradation, InvalidBodyPlcKeepsMainText) {
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
   EXPECT_NE(xml.find("<w:body>"), std::string::npos);
+  EXPECT_NE(xml.find("Before  After textbox."), std::string::npos);
   EXPECT_EQ(xml.find("Box sample line"), std::string::npos);
 }
 
@@ -454,6 +455,7 @@ TEST(M6TextboxDegradation, InvalidHeaderPlcKeepsHeaderText) {
   for (int i = 1; i <= 6; ++i)
     headers += Part(*zip, ("word/header" + std::to_string(i) + ".xml").c_str());
   EXPECT_NE(headers.find("<w:hdr"), std::string::npos);
+  EXPECT_NE(headers.find(">Header <"), std::string::npos);
   EXPECT_EQ(headers.find("Header box text"), std::string::npos);
 }
 
@@ -501,13 +503,15 @@ TEST(M6TextboxDegradation, BadSecondStoryKeepsFirstTextbox) {
   auto parsed = doc::ParseFormatted(*word, *table, *fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
   ASSERT_EQ(parsed->textboxes.size(), 1u);
+  EXPECT_EQ(parsed->textboxes[0].paragraphs[0].runs[0].text, "Box sam");
   ASSERT_FALSE(parsed->warnings.empty());
   EXPECT_NE(parsed->warnings[0].find("FTXBXS 2"), std::string::npos);
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
   EXPECT_NE(xml.find("<w:txbxContent>"), std::string::npos);
-  EXPECT_NE(xml.find("Box"), std::string::npos);
+  EXPECT_NE(xml.find("Box sam"), std::string::npos);
+  EXPECT_EQ(xml.find("Box sample line"), std::string::npos);
 }
 
 TEST(M11TextboxFields, FieldFlagsReachBodyAndHeaderTextboxXml) {
