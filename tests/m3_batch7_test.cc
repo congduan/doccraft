@@ -325,6 +325,13 @@ TEST(M3Batch7, ParagraphStyleIncrementIgnoresHeadingStyleOutline) {
             std::string::npos);
 }
 
+TEST(M3Batch7, ParagraphWithoutIncrementKeepsInheritedOutlineInStyle) {
+  auto heading = Synthetic({}, {}, {}, 1, OutlineStyles());
+  ASSERT_TRUE(heading) << heading.error().message;
+  EXPECT_EQ(heading->paragraphs[0].outline, -1);
+  EXPECT_EQ(Xml(*heading).find("<w:outlineLvl"), std::string::npos);
+}
+
 TEST(M3Batch7, EmbeddedObjectWithoutOleUsesPlaceholder) {
   auto document = Synthetic({}, Prl(0x0856, {1}));
   ASSERT_TRUE(document) << document.error().message;

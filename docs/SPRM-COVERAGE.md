@@ -116,7 +116,7 @@
 |---|---|---|---|---|
 | ✅ | `0x4600` | sprmPIstd | An unsigned integer that specifies the istd of a paragraph style to apply. | 段落 PAP §2.6.2 |
 | N/A | `0xC601` | sprmPIstdPermute | Paragraph style permutation mapping; changes the applied paragraph style when the current style is in the map. | 段落 PAP §2.6.2；编辑期样式置换表；同 sprmCIstdPermute |
-| ✅ | `0x2602` | sprmPIncLvl | A signed 8-bit integer value. | 段落 PAP §2.6.2；istd 1–9 增量并夹紧，最终轮廓级别固定为 istd−1（忽略样式 sprmPOutLvl）；显式轮廓级别增量（受 grpprl 顺序约束），直接编号 ilvl 路径保留；缺显式轮廓级别时按最终样式的 based-on 链求值并对非标题样式应用增量；M3Batch7.ParagraphStyleLevelIncrementWithoutList、M3Batch7.ParagraphStyleLevelIncrementClampsAndOffsetsOutline、M3Batch7.ParagraphNestAndListLevelIncrement、M3Batch7.ParagraphStyleIncrementInheritsTargetOutline、M3Batch7.ParagraphStyleIncrementIgnoresHeadingStyleOutline |
+| ✅ | `0x2602` | sprmPIncLvl | A signed 8-bit integer value. | 段落 PAP §2.6.2；istd 1–9 增量并夹紧，最终轮廓级别固定为 istd−1（忽略样式 sprmPOutLvl）；显式轮廓级别增量（受 grpprl 顺序约束），直接编号 ilvl 路径保留；仅有该 sprm 且缺显式轮廓级别时按最终样式的 based-on 链求值，并对非标题样式应用增量；M3Batch7.ParagraphStyleLevelIncrementWithoutList、M3Batch7.ParagraphStyleLevelIncrementClampsAndOffsetsOutline、M3Batch7.ParagraphNestAndListLevelIncrement、M3Batch7.ParagraphStyleIncrementInheritsTargetOutline、M3Batch7.ParagraphStyleIncrementIgnoresHeadingStyleOutline、M3Batch7.ParagraphWithoutIncrementKeepsInheritedOutlineInStyle |
 | ✅ | `0x2403` | sprmPJc80 | An unsigned 8-bit integer that specifies the physical justification of the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0x2405` | sprmPFKeep | A Bool8 value that specifies whether an application SHOULD<148> keep this paragraph on a single page. | 段落 PAP §2.6.2 |
 | ✅ | `0x2406` | sprmPFKeepFollow | A Bool8 value that specifies whether an application SHOULD<149> keep the end of this paragraph on the same page as the beginning of the next paragraph. | 段落 PAP §2.6.2 |
@@ -450,7 +450,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 
 ### 5.1 本批已知简化
 
-- `sprmPIncLvl` 已处理 istd 1–9 与显式轮廓级别增量（受 grpprl 顺序约束：仅同一 PAPX 中 `sprmPOutLvl` 先于 `sprmPIncLvl` 时可见；规范 ispmd 序 2 < 64 下，后应用的 `sprmPOutLvl` 覆盖增量）；最终 istd 1–9 的轮廓级别固定为 istd−1，忽略样式的 `sprmPOutLvl`；无显式级别时按最终样式的 based-on 链求值；非标题样式对继承级别应用增量。
+- `sprmPIncLvl` 已处理 istd 1–9 与显式轮廓级别增量（受 grpprl 顺序约束：仅同一 PAPX 中 `sprmPOutLvl` 先于 `sprmPIncLvl` 时可见；规范 ispmd 序 2 < 64 下，后应用的 `sprmPOutLvl` 覆盖增量）；最终 istd 1–9 的轮廓级别固定为 istd−1，忽略样式的 `sprmPOutLvl`；仅有增量而无显式级别时按最终样式的 based-on 链求值；非标题样式对继承级别应用增量。没有增量的段落由样式表达继承轮廓级别，不另写段落 `w:outlineLvl`。
 - `sprmPNest`/`sprmPNest80` 只折算进 `w:ind/@w:left`，不参与悬挂/首行缩进重算。
 - 浮动表格：`sprmTPc`（`0x360D`）未实现，`w:tblpPr` 的 `w:horzAnchor`/`w:vertAnchor` 固定输出 `margin`。
 - 非等宽分栏：缺宽度 sprm 的列不再丢弃，按 LibreOffice `.doc` 导入兜底值 1440 twips 补宽并保留 `w:space`（等宽节仍忽略列宽/间距 sprm，规范规定仅非等宽时生效）；兜底为常量、不按剩余空间均分，Word 行为未验证。

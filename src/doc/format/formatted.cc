@@ -904,6 +904,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   // only missing outline levels from that style's based-on chain.
   auto inherit_outline = [&](std::vector<model::Paragraph>& paragraphs) {
     for (auto& paragraph : paragraphs) {
+      if (!paragraph.list_level_inc)
+        continue;
       if (paragraph.outline >= 0 || paragraph.style < 0 ||
           static_cast<size_t>(paragraph.style) >= doc.styles.size())
         continue;
