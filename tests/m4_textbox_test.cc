@@ -459,6 +459,73 @@ TEST(M6TextboxDegradation, InvalidHeaderPlcKeepsHeaderText) {
   EXPECT_EQ(headers.find("Header box text"), std::string::npos);
 }
 
+TEST(M6TextboxDegradation, HeaderAnchorOutsideStoriesKeepsOtherBox) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/header-textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb);
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word);
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib);
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table);
+
+  // Split one textbox story into two linked boxes. The second FSPA anchor
+  // points at the last header CP, outside the header PLC's story intervals.
+  const uint32_t story_end = base::U32(*table, fib->hdr_txbx_bkd.offset + 4);
+  ASSERT_GT(story_end, 4u);
+  auto original = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(original) << original.error().message;
+  std::vector<uint8_t> breaks(16 + 3 * doc::detail::kTbkdSize);
+  Put32(breaks, 0, 0);
+  Put32(breaks, 4, story_end / 2);
+  Put32(breaks, 8, story_end);
+  Put32(breaks, 12, fib->ccp_hdr_txbx);
+  fib->hdr_txbx_bkd = {static_cast<uint32_t>(table->size()),
+                       static_cast<uint32_t>(breaks.size())};
+  table->insert(table->end(), breaks.begin(), breaks.end());
+
+  const auto old = fib->spa_hdr;
+  constexpr size_t kSpa = doc::detail::kSpaSize;
+  std::vector<uint8_t> anchors(12 + 2 * kSpa);
+  Put32(anchors, 0, base::U32(*table, old.offset));
+  Put32(anchors, 4, fib->ccp_hdd - 1);
+  Put32(anchors, 8, fib->ccp_hdd);
+  std::copy_n(table->begin() + old.offset + 8, kSpa, anchors.begin() + 12);
+  std::copy_n(table->begin() + old.offset + 8, kSpa,
+              anchors.begin() + 12 + kSpa);
+  Put32(anchors, 12 + kSpa, 500);
+  fib->spa_hdr = {static_cast<uint32_t>(table->size()),
+                  static_cast<uint32_t>(anchors.size())};
+  table->insert(table->end(), anchors.begin(), anchors.end());
+
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->textboxes.size(), 1u);
+  EXPECT_EQ(parsed->textboxes[0].shape_id, base::U32(*table, old.offset + 8));
+  EXPECT_NE(std::find(parsed->warnings.begin(), parsed->warnings.end(),
+                      "skipped header textbox: anchor outside header stories"),
+            parsed->warnings.end());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:body>"), std::string::npos);
+  std::string body_text;
+  std::string original_body_text;
+  for (const auto& paragraph : parsed->paragraphs)
+    for (const auto& run : paragraph.runs)
+      body_text += run.text;
+  for (const auto& paragraph : original->paragraphs)
+    for (const auto& run : paragraph.runs)
+      original_body_text += run.text;
+  EXPECT_FALSE(original_body_text.empty());
+  EXPECT_EQ(body_text, original_body_text);
+}
+
 TEST(M6TextboxDegradation, BadSecondStoryKeepsFirstTextbox) {
   const std::string path =
       std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/textbox.doc";

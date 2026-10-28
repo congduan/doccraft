@@ -889,9 +889,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
             break;
           }
         }
-        if (!attached)
-          return std::unexpected(
-              Error{"header textbox anchor outside headers"});
+        if (!attached) {
+          doc.warnings.push_back(
+              "skipped header textbox: anchor outside header stories");
+          continue;
+        }
       }
     for (size_t k = 0; k < section_count; k++) {
       detail::SectionHeaders& stories = (*headers)[k];
