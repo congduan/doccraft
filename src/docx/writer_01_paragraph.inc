@@ -138,34 +138,49 @@ void WriteParagraphSpacing(pugi::xml_node pr, const model::Paragraph& p) {
   }
 }
 
-void WriteParagraphFlags(pugi::xml_node pr, const model::Paragraph& p) {
+// CT_PPr is a long xs:sequence: paragraph flags that look related belong to
+// different positions in it. These helpers are split so ParaPr() can emit them
+// in schema order (see the generated table: w:pPr particle).
+void WriteParagraphFlowFlags(pugi::xml_node pr, const model::Paragraph& p) {
   SpecBool(pr, "w:keepNext", p.keep_next, p.keep_next_set);
   SpecBool(pr, "w:keepLines", p.keep_lines, p.keep_lines_set);
   SpecBool(pr, "w:pageBreakBefore", p.page_break_before,
            p.page_break_before_set);
-  SpecBool(pr, "w:widowControl", p.widow_control, p.widow_control_set);
-  SpecBool(pr, "w:bidi", p.bidi, p.bidi_set);
+}
+
+// After w:tabs, before w:bidi/w:adjustRightInd/w:snapToGrid.
+void WriteParagraphEastAsianFlags(pugi::xml_node pr,
+                                 const model::Paragraph& p) {
   SpecBool(pr, "w:suppressAutoHyphens", p.suppress_hyphenation,
            p.suppress_hyphenation_set);
-  SpecBool(pr, "w:contextualSpacing", p.contextual_spacing,
-           p.contextual_spacing_set);
-  SpecBool(pr, "w:mirrorIndents", p.mirror_indents, p.mirror_indents_set);
-  SpecBool(pr, "w:snapToGrid", p.snap_to_grid, p.snap_to_grid_set);
-  SpecBool(pr, "w:adjustRightInd", p.adjust_right, p.adjust_right_set);
-  SpecBool(pr, "w:suppressLineNumbers", p.no_line_number, p.no_line_number_set);
-  SpecBool(pr, "w:wordWrap", p.word_wrap, p.word_wrap_set);
   SpecBool(pr, "w:kinsoku", p.kinsoku, p.kinsoku_set);
+  SpecBool(pr, "w:wordWrap", p.word_wrap, p.word_wrap_set);
   SpecBool(pr, "w:overflowPunct", p.overflow_punct, p.overflow_punct_set);
   SpecBool(pr, "w:topLinePunct", p.top_line_punct, p.top_line_punct_set);
   SpecBool(pr, "w:autoSpaceDE", p.auto_space_de, p.auto_space_de_set);
   SpecBool(pr, "w:autoSpaceDN", p.auto_space_dn, p.auto_space_dn_set);
-  if (p.outline >= 0 && p.outline <= 9) {
-    Value(pr, "w:outlineLvl", p.outline);
-  }
+  SpecBool(pr, "w:bidi", p.bidi, p.bidi_set);
+  SpecBool(pr, "w:adjustRightInd", p.adjust_right, p.adjust_right_set);
+  SpecBool(pr, "w:snapToGrid", p.snap_to_grid, p.snap_to_grid_set);
+}
+
+// After w:ind, before w:jc.
+void WriteParagraphPostIndentFlags(pugi::xml_node pr,
+                                  const model::Paragraph& p) {
+  SpecBool(pr, "w:contextualSpacing", p.contextual_spacing,
+           p.contextual_spacing_set);
+  SpecBool(pr, "w:mirrorIndents", p.mirror_indents, p.mirror_indents_set);
+}
+
+// After w:jc.
+void WriteParagraphTrailingPr(pugi::xml_node pr, const model::Paragraph& p) {
   if (p.text_alignment >= 0) {
     const char* align[] = {"top", "center", "baseline", "bottom", "auto"};
     Attr(pr.append_child("w:textAlignment"), "w:val",
          p.text_alignment < 5 ? align[p.text_alignment] : "auto");
+  }
+  if (p.outline >= 0 && p.outline <= 9) {
+    Value(pr, "w:outlineLvl", p.outline);
   }
 }
 
@@ -213,23 +228,28 @@ void ParaPr(pugi::xml_node parent, const model::Paragraph& p,
   if (!style_props && p.style >= 0) {
     Attr(pr.append_child("w:pStyle"), "w:val", Id(p.style));
   }
+  WriteParagraphFlowFlags(pr, p);
   WriteFramePr(pr, p);
-  if (p.align >= 0) {
-    const char* align[] = {"left", "center", "right", "both", "distribute"};
-    Attr(pr.append_child("w:jc"), "w:val",
-         p.align < 5 ? align[p.align] : "left");
-  }
-  WriteParagraphIndent(pr, p);
-  WriteParagraphSpacing(pr, p);
-  WriteParagraphFlags(pr, p);
-  WriteParagraphTabs(pr, p);
-  WriteParagraphBorders(pr, p);
-  ShadePr(pr, p.shade, p.shade_fore, p.shade_pattern);
+  SpecBool(pr, "w:widowControl", p.widow_control, p.widow_control_set);
   if (p.list_id > 0) {
     auto num = pr.append_child("w:numPr");
     Value(num, "w:ilvl", std::clamp(p.list_level + p.list_level_inc, 0, 8));
     Value(num, "w:numId", p.list_id);
   }
+  SpecBool(pr, "w:suppressLineNumbers", p.no_line_number, p.no_line_number_set);
+  WriteParagraphBorders(pr, p);
+  ShadePr(pr, p.shade, p.shade_fore, p.shade_pattern);
+  WriteParagraphTabs(pr, p);
+  WriteParagraphEastAsianFlags(pr, p);
+  WriteParagraphSpacing(pr, p);
+  WriteParagraphIndent(pr, p);
+  WriteParagraphPostIndentFlags(pr, p);
+  if (p.align >= 0) {
+    const char* align[] = {"left", "center", "right", "both", "distribute"};
+    Attr(pr.append_child("w:jc"), "w:val",
+         p.align < 5 ? align[p.align] : "left");
+  }
+  WriteParagraphTrailingPr(pr, p);
 }
 
 // `deleted` selects w:delText, which is required inside a w:del wrapper.

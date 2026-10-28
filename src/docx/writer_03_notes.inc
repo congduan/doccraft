@@ -64,9 +64,8 @@ std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
     if (!result)
       return std::unexpected(result.error());
   }
-  if (section.first_page_different) {
-    One(sec, "w:titlePg");
-  }
+  // w:titlePg sits after w:vAlign in CT_SectPr, so SectionPr() emits it;
+  // only the part/relationship bookkeeping stays here.
   if (section.odd_even_different) {
     ctx.odd_even = true;
   }

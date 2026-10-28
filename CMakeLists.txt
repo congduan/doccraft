@@ -38,6 +38,8 @@ if(CLANG_FORMAT_EXECUTABLE)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.h")
+  # Machine-written schema tables; tools/schema-gen owns their layout.
+  list(FILTER DOCCRAFT_FORMAT_SOURCES EXCLUDE REGEX "/generated/")
   add_custom_target(format
     COMMAND ${CLANG_FORMAT_EXECUTABLE} -i ${DOCCRAFT_FORMAT_SOURCES}
     COMMENT "clang-format: rewriting sources in place (Google style)")

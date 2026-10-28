@@ -360,6 +360,11 @@ std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
            RevisionAuthor(ctx.document, deleted ? r.revision_author_delete
                                                 : r.revision_author_insert));
     }
+    if (r.comment_ref >= 0) {
+      // commentRangeStart/commentRangeEnd are paragraph-level range markers
+      // (CT_P); only commentReference is run content (CT_R).
+      IntAttr(pn.append_child("w:commentRangeStart"), "w:id", r.comment_ref);
+    }
     auto rn = wrapper.append_child("w:r");
     RunPr(rn, r, ctx.document);
     if (r.bookmark_id >= 0) {
@@ -373,12 +378,9 @@ std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
       continue;
     }
     if (r.comment_ref >= 0) {
-      // The anchor is a point: the range opens and closes around this run.
-      IntAttr(pn.append_child("w:commentRangeStart"), "w:id", r.comment_ref);
-    }
-    if (r.comment_ref >= 0) {
-      IntAttr(rn.append_child("w:commentRangeEnd"), "w:id", r.comment_ref);
       IntAttr(rn.append_child("w:commentReference"), "w:id", r.comment_ref);
+      // Sibling of the run, so the range closes right after the anchor.
+      IntAttr(pn.append_child("w:commentRangeEnd"), "w:id", r.comment_ref);
     } else if (r.image_index >= 0) {
       auto result = WriteImage(rn, r.image_index, ctx);
       if (!result)

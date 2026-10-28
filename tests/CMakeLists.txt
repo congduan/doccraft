@@ -100,6 +100,16 @@ add_test(NAME m6_bad_textbox_story_cli COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:m15_bad_note_fixture> $<TARGET_FILE:doccraft>
   ${CMAKE_SOURCE_DIR}/tests/fixtures/textbox.doc textbox-story)
 
+add_executable(ooxml_converter_test ooxml/converter_schema_test.cc)
+target_link_libraries(ooxml_converter_test PRIVATE doccraft_cfb doccraft_doc
+  doccraft_docx doccraft_ooxml gtest_main)
+target_compile_definitions(ooxml_converter_test PRIVATE DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(ooxml_converter_test)
+
+add_executable(ooxml_validator_test ooxml/wml_validator_test.cc)
+target_link_libraries(ooxml_validator_test PRIVATE doccraft_ooxml gtest_main)
+gtest_discover_tests(ooxml_validator_test)
+
 add_executable(m3_batch6_test m3_batch6_test.cc)
 target_link_libraries(m3_batch6_test PRIVATE doccraft_doc doccraft_docx gtest_main)
 gtest_discover_tests(m3_batch6_test)

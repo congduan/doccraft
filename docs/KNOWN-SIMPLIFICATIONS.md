@@ -116,3 +116,30 @@
 - 锁定域的输出与正文逐字节同构：`w:fldLock` 写在 begin/separate/end 三个标记上；锁定 HYPERLINK 的结果 run 仍包在 `w:hyperlink` 里（沿用正文既有行为）。页眉/页脚/脚注/尾注/批注部件复用 `WriteParagraph`，无独立的域输出逻辑。
 - 仅含空结果域（例如 `\x13 PAGE \x14\x15`）的页眉没有文本 run；既有的 has-text 策略会丢弃该故事部件，若文档只靠此类页眉使用奇偶页设置，`settings.xml` 中的 `evenAndOddHeaders` 也不会输出。
 - 超链接关系（`w:hyperlink r:id`）在页眉/脚注等部件中仍指向 `word/_rels/document.xml.rels`：部件各自的关系文件尚未生成，这是 writer 全局的既有简化（页眉图片同样如此），非 M8 引入。
+
+## OOXML schema 校验器（`src/ooxml/`）
+
+- 覆盖范围只有 WordprocessingML 2006 main 命名空间的**元素**：子元素顺序、
+  出现次数、未知元素。属性（必填性、枚举、数值范围）与 part/关系引用尚未
+  校验，`OpenXmlValidator` 能报的属性类与关系类错误目前检不出来。
+- 校验器按「命名空间 + 本地名」匹配，而 SDK 按 CLR 类型区分实例。同一 QName
+  在不同上下文有不同内容模型时（`w:customXml` 作为 block/run/row/cell、
+  `w:align`/`w:bottom` 等），生成器把多份粒子合并成一个 choice，任一形态通过
+  即可，因此「只在另一形态下非法」的顺序错误会漏报。
+- 表内已知的跨命名空间元素（`wp:inline`/`wp:anchor`、`a:*`、`m:*`、`v:*`）
+  参与父元素的序列匹配，但其自身内容不递归校验。早期版本把非 WML 元素一律
+  过滤，导致 `w:drawing` 被误判为缺少必填的 `wp:inline`/`wp:anchor`。
+- 表内没有的扩展元素（`mc:AlternateContent`、`w14:*` 等）不参与序列匹配，
+  可出现在任意位置（MCE 语义），放错位置不会被发现。
+- 单个元素的子节点达到 65535 个时放弃该元素的序列校验（表用 16 位索引），
+  实际文档不会触及。
+- 批注范围退化为点锚点：`commentRangeStart`/`commentRangeEnd` 只包住
+  `commentReference` 所在的 run，被批注文本本身不高亮。IR 只有单个
+  `comment_ref` 标记，没有范围的起止位置。
+- `xs:all`（WordprocessingML 中共 3 处）按 `xs:sequence` 处理。
+- SDK 元数据用 0 表示 `xsd:maxOccurs="unbounded"`，生成器按此解释；升级 SDK
+  后需要人工核对这一编码假设。
+- 表由 `tools/schema-gen` 离线生成并入库（`src/ooxml/generated/`），构建和
+  运行不需要 .NET。升级 SDK 或修正生成器后要重跑：
+  `dotnet run --project tools/schema-gen/DumpSdkMetadata -- tools/schema-gen/wml-metadata.json`
+  然后 `python3 tools/schema-gen/gen_wml_schema.py tools/schema-gen/wml-metadata.json src/ooxml/generated`。

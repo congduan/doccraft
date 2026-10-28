@@ -119,6 +119,11 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
     不新增传递依赖，未找到时编译期退化到内置 CP1252 表）。见
     `src/base/charset.cc`。
   - 测试：googletest、libFuzzer
+  - **仅测试期**的 OOXML schema 校验：`src/ooxml/` 用
+    `tools/schema-gen` 离线导出的元素粒子表，在 `ctest` 中检查 writer 产出的
+    WordprocessingML 部件是否符合 ECMA-376 的元素顺序与出现次数。表由
+    `DocumentFormat.OpenXml` 3.3.0（MIT）的运行时元数据生成并已入库，构建和
+    运行不需要 .NET；校验器不链接进 CLI 产物。
 - 选库标准：业界广泛使用、license 宽松（public domain/MIT/Apache）、
   可 FetchContent 单一来源引入、不引入传递依赖
 
