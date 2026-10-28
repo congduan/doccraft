@@ -366,9 +366,10 @@ std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
   for (const auto& r : p.runs) {
     pugi::xml_node owner = pn;
     if (!r.hyperlink.empty()) {
-      auto [it, inserted] = ctx.hyperlinks[ctx.source].try_emplace(
-          r.hyperlink, ctx.NextRid());
-      (void)inserted;
+      auto& links = ctx.hyperlinks[ctx.source];
+      auto it = links.find(r.hyperlink);
+      if (it == links.end())
+        it = links.emplace(r.hyperlink, ctx.NextRid()).first;
       owner = pn.append_child("w:hyperlink");
       Attr(owner, "r:id", "rId" + std::to_string(it->second));
     } else if (r.page_field) {

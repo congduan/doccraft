@@ -401,7 +401,8 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   for (const auto& part : ctx.parts) {
     if (!part.name.ends_with(".xml"))
       continue;
-    const std::string source = part.name.substr(5);
+    constexpr std::string_view kWordPartPrefix = "word/";
+    const std::string source = part.name.substr(kWordPartPrefix.size());
     const bool has_relation =
         std::any_of(ctx.relations.begin(), ctx.relations.end(),
                     [&](const Relationship& relation) {

@@ -18,6 +18,20 @@ std::string Save(const pugi::xml_document& d) {
   return out.str();
 }
 
+void StoryNamespaces(pugi::xml_node root) {
+  Attr(root, "xmlns:w", kWordmlNamespace);
+  Attr(root, "xmlns:r", kRelationshipsNamespace);
+  Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
+  Attr(root, "xmlns:o", "urn:schemas-microsoft-com:office:office");
+  Attr(root, "xmlns:w10", "urn:schemas-microsoft-com:office:word");
+  Attr(root, "xmlns:wp",
+       "http://schemas.openxmlformats.org/drawingml/2006/"
+       "wordprocessingDrawing");
+  Attr(root, "xmlns:a", "http://schemas.openxmlformats.org/drawingml/2006/main");
+  Attr(root, "xmlns:pic",
+       "http://schemas.openxmlformats.org/drawingml/2006/picture");
+}
+
 // Emits the w:headerReference / w:footerReference of one section and registers
 // its part plus relationship, so every section carries its own stories.
 std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
@@ -43,37 +57,7 @@ std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
     ctx.SetSource(name);
     pugi::xml_document part;
     auto root = part.append_child(is_header ? "w:hdr" : "w:ftr");
-    Attr(root, "xmlns:w", kWordmlNamespace);
-    Attr(root, "xmlns:r", kRelationshipsNamespace);
-    const bool header_has_vml = std::any_of(
-        section.headers[i].begin(), section.headers[i].end(),
-        [](const model::Paragraph& paragraph) {
-          return std::any_of(paragraph.runs.begin(), paragraph.runs.end(),
-                             [](const model::Run& run) {
-                               return run.textbox_index >= 0 ||
-                                      run.shape_index >= 0;
-                             });
-        });
-    if (header_has_vml) {
-      Attr(root, "xmlns:v", "urn:schemas-microsoft-com:vml");
-    }
-    const bool header_has_image = std::any_of(
-        section.headers[i].begin(), section.headers[i].end(),
-        [](const model::Paragraph& paragraph) {
-          return std::any_of(paragraph.runs.begin(), paragraph.runs.end(),
-                             [](const model::Run& run) {
-                               return run.image_index >= 0;
-                             });
-        });
-    if (header_has_image) {
-      Attr(root, "xmlns:wp",
-           "http://schemas.openxmlformats.org/drawingml/2006/"
-           "wordprocessingDrawing");
-      Attr(root, "xmlns:a",
-           "http://schemas.openxmlformats.org/drawingml/2006/main");
-      Attr(root, "xmlns:pic",
-           "http://schemas.openxmlformats.org/drawingml/2006/picture");
-    }
+    StoryNamespaces(root);
     for (const auto& paragraph : section.headers[i]) {
       auto result = WriteParagraph(root, paragraph, nullptr, ctx);
       if (!result)
@@ -130,8 +114,7 @@ std::expected<void, Error> WriteNoteParts(const model::Document& document,
     const char* note_name = endnote ? "w:endnote" : "w:footnote";
     pugi::xml_document doc;
     auto root = doc.append_child(root_name);
-    Attr(root, "xmlns:w", kWordmlNamespace);
-    Attr(root, "xmlns:r", kRelationshipsNamespace);
+    StoryNamespaces(root);
     const std::string previous_source = ctx.source;
     ctx.SetSource(part);
     // Word requires the two separator notes; they carry negative ids.
@@ -213,8 +196,7 @@ std::expected<void, Error> WriteCommentPart(const model::Document& document,
   }
   pugi::xml_document doc;
   auto root = doc.append_child("w:comments");
-  Attr(root, "xmlns:w", kWordmlNamespace);
-  Attr(root, "xmlns:r", kRelationshipsNamespace);
+  StoryNamespaces(root);
   const std::string previous_source = ctx.source;
   ctx.SetSource("comments.xml");
   int id = 0;
