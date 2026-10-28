@@ -1,27 +1,32 @@
 {
   "1": {
     "size_bytes": 1052160,
-    "wall_seconds": 0.036011,
-    "peak_rss_kb": 14184
+    "wall_seconds": 0.059837,
+    "peak_rss_kb": 14316
   },
   "5": {
     "size_bytes": 5244928,
-    "wall_seconds": 0.169917,
-    "peak_rss_kb": 54824
+    "wall_seconds": 0.28835,
+    "peak_rss_kb": 55340
   },
   "20": {
     "size_bytes": 20975104,
-    "wall_seconds": 0.711161,
-    "peak_rss_kb": 207300
+    "wall_seconds": 1.176241,
+    "peak_rss_kb": 208580
   },
   "50": {
     "size_bytes": 52679680,
-    "wall_seconds": 0.795091,
-    "peak_rss_kb": 237984
+    "wall_seconds": 1.26343,
+    "peak_rss_kb": 239268
   },
   "100": {
     "size_bytes": 104845312,
-    "wall_seconds": 3.912719,
-    "peak_rss_kb": 1014188
+    "wall_seconds": 6.366793,
+    "peak_rss_kb": 1020080
+  },
+  "_meta": {
+    "recorded_at_utc": "2026-10-28T09:10:21+00:00",
+    "commit": "a1708748e2427b21d2082a27494f377bb509a090",
+    "method": "clean Release build; idle machine; five conversions per size; median wall seconds and maximum peak RSS KB"
   }
 }
