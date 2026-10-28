@@ -114,14 +114,18 @@ struct WriteContext {
   std::vector<std::pair<int, std::string>> relations;  // rId -> part name
   std::vector<Part> parts;
   size_t max_part_bytes = detail::kMaxWriterPartBytes;
-  std::expected<void, Error> AddPart(std::string name, std::string data,
-                                     std::vector<Part>& destination) {
+  size_t max_buffer_bytes = detail::kMaxWriterBufferBytes;
+  size_t buffered = 0;
+  std::expected<void, Error> AddPart(std::string name, std::string data) {
     if (data.size() > max_part_bytes) {
       return std::unexpected(Error{"writer part limit exceeded: " + name +
                                    " (" + std::to_string(data.size()) +
                                    " bytes)"});
     }
-    destination.push_back({std::move(name), std::move(data)});
+    if (data.size() > max_buffer_bytes - buffered)
+      return std::unexpected(Error{"writer buffer limit exceeded"});
+    buffered += data.size();
+    parts.push_back({std::move(name), std::move(data)});
     return {};
   }
 };
@@ -301,6 +305,7 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   WriteContext ctx;
   ctx.document = &document;
   ctx.max_part_bytes = max_part_bytes;
+  ctx.max_buffer_bytes = max_buffer_bytes;
   ctx.image_rids.resize(document.images.size());
   ctx.ole_rids.resize(document.ole_objects.size());
   pugi::xml_document doc;
@@ -342,49 +347,32 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   pugi::xml_document numbering = WriteNumbering(document);
   pugi::xml_document docrels = BuildRelationships(ctx);
 
-  std::vector<Part> parts;
-  size_t buffered = 0;
-  auto add_part = [&](std::string name,
-                      std::string data) -> std::expected<void, Error> {
-    if (data.size() > max_buffer_bytes - buffered)
-      return std::unexpected(Error{"writer buffer limit exceeded"});
-    auto added = ctx.AddPart(std::move(name), std::move(data), parts);
-    if (!added)
-      return std::unexpected(added.error());
-    buffered += parts.back().data.size();
-    return {};
-  };
-  auto result = add_part("[Content_Types].xml", BuildContentTypes(ctx));
+  auto result = ctx.AddPart("[Content_Types].xml", BuildContentTypes(ctx));
   if (!result)
     return std::unexpected(result.error());
-  result = add_part("_rels/.rels", kRootRelationships);
+  result = ctx.AddPart("_rels/.rels", kRootRelationships);
   if (!result)
     return std::unexpected(result.error());
-  result = add_part("word/_rels/document.xml.rels", Save(docrels));
+  result = ctx.AddPart("word/_rels/document.xml.rels", Save(docrels));
   if (!result)
     return std::unexpected(result.error());
-  result = add_part("word/document.xml", Save(doc));
+  result = ctx.AddPart("word/document.xml", Save(doc));
   if (!result)
     return std::unexpected(result.error());
-  result = add_part("word/styles.xml", Save(styles));
+  result = ctx.AddPart("word/styles.xml", Save(styles));
   if (!result)
     return std::unexpected(result.error());
-  result = add_part("word/numbering.xml", Save(numbering));
+  result = ctx.AddPart("word/numbering.xml", Save(numbering));
   if (!result)
     return std::unexpected(result.error());
 
-  for (const auto& part : ctx.parts) {
-    result = add_part(part.name, part.data);
-    if (!result)
-      return std::unexpected(result.error());
-  }
   if (ctx.odd_even) {
-    result = add_part("word/settings.xml", kSettingsPart);
+    result = ctx.AddPart("word/settings.xml", kSettingsPart);
     if (!result)
       return std::unexpected(result.error());
   }
   const auto t_xml = Clock::now();
-  auto archive = PackParts(parts);
+  auto archive = PackParts(ctx.parts);
   if (std::getenv("DOCCRAFT_PROFILE")) {
     auto ms = [](Clock::time_point a, Clock::time_point b) {
       return std::chrono::duration<double, std::milli>(b - a).count();

@@ -60,7 +60,7 @@ std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
       if (!result)
         return std::unexpected(result.error());
     }
-    auto result = ctx.AddPart("word/" + name, Save(part), ctx.parts);
+    auto result = ctx.AddPart("word/" + name, Save(part));
     if (!result)
       return std::unexpected(result.error());
   }
@@ -123,7 +123,7 @@ std::expected<void, Error> WriteNoteParts(const model::Document& document,
     }
     const int rid = ctx.next_rid++;
     ctx.relations.emplace_back(rid, part);
-    return ctx.AddPart("word/" + std::string(part), Save(doc), ctx.parts);
+    return ctx.AddPart("word/" + std::string(part), Save(doc));
   };
   if (has_footnotes) {
     auto result = write_class(false);
@@ -168,5 +168,5 @@ std::expected<void, Error> WriteCommentPart(const model::Document& document,
   }
   const int rid = ctx.next_rid++;
   ctx.relations.emplace_back(rid, "comments.xml");
-  return ctx.AddPart("word/comments.xml", Save(doc), ctx.parts);
+  return ctx.AddPart("word/comments.xml", Save(doc));
 }

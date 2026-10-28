@@ -38,8 +38,7 @@ std::expected<void, Error> RegisterImage(int index, WriteContext& ctx) {
     ctx.image_rids[index] = ctx.next_rid++;
     ctx.relations.emplace_back(ctx.image_rids[index], name);
     auto result = ctx.AddPart(
-        "word/" + name, std::string(image.bytes.begin(), image.bytes.end()),
-        ctx.parts);
+        "word/" + name, std::string(image.bytes.begin(), image.bytes.end()));
     if (!result)
       return std::unexpected(result.error());
   }
@@ -188,8 +187,7 @@ std::expected<void, Error> WriteOle(pugi::xml_node run, int index,
     ctx.ole_rids[index] = ctx.next_rid++;
     ctx.relations.emplace_back(ctx.ole_rids[index], name);
     auto result = ctx.AddPart(
-        "word/" + name, std::string(object.bytes.begin(), object.bytes.end()),
-        ctx.parts);
+        "word/" + name, std::string(object.bytes.begin(), object.bytes.end()));
     if (!result)
       return std::unexpected(result.error());
   }
