@@ -18,9 +18,12 @@
 #include <string>
 #include <vector>
 
+#include "miniz.h"
+
 #include "doc/fib.h"
 #include "doc/format.h"
 #include "doc/text.h"
+#include "docx/writer.h"
 
 namespace {
 void Put16(std::vector<uint8_t>& b, size_t p, uint16_t v) {
@@ -30,6 +33,89 @@ void Put16(std::vector<uint8_t>& b, size_t p, uint16_t v) {
 void Put32(std::vector<uint8_t>& b, size_t p, uint32_t v) {
   Put16(b, p, static_cast<uint16_t>(v));
   Put16(b, p + 2, static_cast<uint16_t>(v >> 16));
+}
+
+std::string Part(const std::vector<uint8_t>& bytes, const char* name) {
+  mz_zip_archive zip = {};
+  if (!mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0))
+    return {};
+  size_t size = 0;
+  void* data = mz_zip_reader_extract_file_to_heap(&zip, name, &size, 0);
+  std::string result;
+  if (data) {
+    result.assign(static_cast<const char*>(data), size);
+    mz_free(data);
+  }
+  mz_zip_reader_end(&zip);
+  return result;
+}
+
+TEST(LegacyWord, Word6PicfMetafileBecomesMediaPart) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 770);
+  Put32(word, 52, 2);
+  word[768] = 1;
+  word[769] = '\r';
+  Put32(word, 88 + 12 * 8, 2048);
+  Put32(word, 92 + 12 * 8, 10);
+  Put32(word, 2048, 768);
+  Put32(word, 2052, 770);
+  Put16(word, 2056, 2);
+  Put32(word, 1024, 768);
+  Put32(word, 1028, 770);
+  word[1032] = 250;
+  word[1524] = 5;
+  word[1525] = 0x44;  // Word 6 sprmCPicLocation, four-byte FC.
+  Put32(word, 1526, 2200);
+  word[1535] = 1;
+  constexpr size_t kPic = 2200;
+  constexpr size_t kHeader = 66;
+  constexpr size_t kWmf = 18;
+  Put32(word, kPic, kHeader + kWmf);
+  Put16(word, kPic + 4, kHeader);
+  Put16(word, kPic + 6, 8);  // MFPF anisotropic metafile.
+  Put16(word, kPic + 28, 1440);
+  Put16(word, kPic + 30, 720);
+  Put16(word, kPic + 32, 1000);
+  Put16(word, kPic + 34, 1000);
+  Put16(word, kPic + kHeader, 1);      // WMF memory metafile.
+  Put16(word, kPic + kHeader + 2, 9);  // Header size in words.
+  Put16(word, kPic + kHeader + 4, 0x0300);
+  Put32(word, kPic + kHeader + 6, 9);
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto parsed = doccraft::doc::ParseFormatted(word, word, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->images.size(), 1u);
+  EXPECT_EQ(parsed->images[0].format, doccraft::model::ImageFormat::kWmf);
+  EXPECT_EQ(parsed->images[0].width, 1440);
+  EXPECT_EQ(parsed->images[0].height, 720);
+  ASSERT_EQ(parsed->paragraphs[0].runs.size(), 1u);
+  EXPECT_EQ(parsed->paragraphs[0].runs[0].image_index, 0);
+  auto zip = doccraft::docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_EQ(
+      Part(*zip, "word/media/image1.wmf"),
+      std::string(reinterpret_cast<const char*>(word.data() + kPic + kHeader),
+                  kWmf));
+}
+
+TEST(LegacyWord, Word6BitmapPicfReportsUnsupportedType) {
+  std::vector<uint8_t> word(100);
+  Put32(word, 0, 100);
+  Put16(word, 4, 66);
+  Put16(word, 6, 99);  // MFPF bitmap.
+  Put16(word, 28, 1440);
+  Put16(word, 30, 720);
+  Put16(word, 32, 1000);
+  Put16(word, 34, 1000);
+  auto image = doccraft::doc::ReadLegacyPicture(word, 0);
+  ASSERT_FALSE(image);
+  EXPECT_EQ(image.error().message, "unsupported Word 6/95 bitmap PICF");
 }
 
 TEST(LegacyWord, SimpleWord6TextAndSignatureGate) {

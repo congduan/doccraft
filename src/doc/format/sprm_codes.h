@@ -44,6 +44,7 @@ inline constexpr uint8_t kLegacySprmCKul = 0x5E;
 inline constexpr uint8_t kLegacySprmCDxaSpace = 0x60;
 inline constexpr uint8_t kLegacySprmCIco = 0x62;
 inline constexpr uint8_t kLegacySprmCHps = 0x63;
+inline constexpr uint8_t kLegacySprmCPicLocation = 0x44;
 
 // sprm opcodes from [MS-DOC] v20260217 §2.6.1-2.6.4. Names match the
 // specification text, so searching the MS-DOC PDF for `sprmCFBold` also

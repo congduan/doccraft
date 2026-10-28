@@ -696,8 +696,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     });
     if (control == '\x01' && r.object_offset >= 0 && !r.ole_object &&
         !r.embedded_object && !r.binary_data) {
-      auto picture = ReadInlinePicture(
-          data, r.object_offset, detail::kMaxTotalImageSize - total_image_size);
+      auto picture =
+          fib.legacy
+              ? ReadLegacyPicture(word, r.object_offset,
+                                  detail::kMaxTotalImageSize - total_image_size)
+              : ReadInlinePicture(
+                    data, r.object_offset,
+                    detail::kMaxTotalImageSize - total_image_size);
       if (!picture)
         return std::unexpected(picture.error());
       if (picture->bytes.size() > detail::kMaxTotalImageSize - total_image_size)

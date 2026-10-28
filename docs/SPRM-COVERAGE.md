@@ -11,6 +11,7 @@
 > M18 标准书签 PLC：`M18Bookmarks.WholeMainStoryEndsAtCcpText` 与 `M18Bookmarks.BodyAndHeaderTextboxStoryBookmarks` 覆盖正文整域终点及正文/页眉文本框故事书签。它们不是 sprm，不改变本表 opcode 状态；§6.6 仍为 ◐。
 > M11 页眉 PLC 双重损坏：`M11HeaderFields.DoublyCorruptPlcsKeepBothWarnings` 断言故事 PLC 与域 PLC 同时损坏时各发一条警告；不改变 sprm 状态。
 > M4 第二批损坏降级：`degraded_fkp_warning`、`degraded_sprm_warning`、`degraded_header_warning` 验证局部跳过、stderr 警告及正文保留；它们不改变正常输入下的各 opcode 覆盖状态。
+> M8 续批旧版图片：`LegacyWord.Word6PicfMetafileBecomesMediaPart` 验证旧版单字节 opcode 0x44 经 WordDocument 中 66 字节 PICF 输出 WMF 媒体部件；`LegacyWord.Word6BitmapPicfReportsUnsupportedType` 验证 MFPF 位图(99) 明确不支持。现代 `sprmCPicLocation` 状态不变。
 
 > 代码中的 opcode 不再是裸字面量：统一引用 `src/doc/format/sprm_codes.h` 的
 > `kSprm<Name>` 常量；新增 sprm 时先在本表登记，再在同一文件补常量。

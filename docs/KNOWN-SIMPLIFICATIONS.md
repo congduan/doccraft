@@ -85,6 +85,8 @@
 
 ## M5 当前范围
 
+- M8 续批接入 Word 6/95 的单字节 `sprmCPicLocation`(0x44)：只解码 WordDocument 中 66 字节 PICF 直存、MFPF=8 的 WMF，字节原样写入媒体部件；MFPF 位图(99) 明确报不支持，其余类型也明确拒绝。合成样本覆盖 IR 与媒体部件，尚无真实旧版图片 golden。`Bug50955.doc` 的本转换输出无媒体部件，不能用它证明旧版图片验收。
+
 - 正文内联图片解码后保存到 IR 的字节总量上限为 256MiB（`kMaxTotalImageSize`）；重复引用也累计，恰好达到上限允许，超限以 `total image size exceeds limit` 使整篇转换失败，不降级或丢图。检查发生在当前图片解码后，因此该上限不是进程峰值内存上限；元文件仍受单图 64MiB 限制。
 
 - 正文内联 `U+0001` 图片按 `sprmCPicLocation` 从 Data 流读取 PICF，扫描嵌入 Escher BLIP 并输出 DrawingML 与原格式媒体部件。PNG/JPEG 有 LibreOffice golden 媒体字节对比及像素对拍；WMF/EMF 的压缩和非压缩 BLIP 有合成位流断言，但尚无 LibreOffice 导出的真实元文件 golden。非嵌入或延迟 BLIP、ObjectPool/OLE、裁剪/边框/旋转，以及页眉、脚注等其他故事中的图片留待后续；遇到正文内联图片的缺失或不支持载荷会显式返回错误。

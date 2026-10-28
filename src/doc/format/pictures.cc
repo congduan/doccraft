@@ -176,6 +176,53 @@ std::expected<std::optional<model::Image>, Error> ScanEscher(Bytes records,
 }
 }  // namespace
 
+std::expected<model::Image, Error> ReadLegacyPicture(Bytes word,
+                                                     uint32_t offset,
+                                                     size_t budget) {
+  // Word 6/95 stores PICF in WordDocument. Its header omits the Word 97
+  // cProps word, and the payload is a direct metafile or bitmap.
+  constexpr size_t kLegacyPicfHeaderSize = 66;
+  constexpr uint16_t kLegacyBitmapType = 99;
+  constexpr uint16_t kWmfAnisotropicType = 8;
+  if (offset > word.size() || word.size() - offset < kLegacyPicfHeaderSize)
+    return std::unexpected(Error{"Word 6/95 PICF outside WordDocument"});
+  Bytes picf = word.subspan(offset);
+  const size_t length = U32(picf, 0);
+  const size_t header = U16(picf, 4);
+  if (header < kLegacyPicfHeaderSize || length <= header ||
+      length > picf.size())
+    return std::unexpected(Error{"invalid Word 6/95 PICF length"});
+  const uint16_t type = U16(picf, 6);
+  if (type == kLegacyBitmapType)
+    return std::unexpected(Error{"unsupported Word 6/95 bitmap PICF"});
+  if (type != kWmfAnisotropicType)
+    return std::unexpected(Error{"unsupported Word 6/95 PICF MFPF type"});
+  const int goal_width = S16(picf, detail::kPicfGoalOffset);
+  const int goal_height = S16(picf, detail::kPicfGoalOffset + 2);
+  const int scale_width = U16(picf, detail::kPicfScaleOffset);
+  const int scale_height = U16(picf, detail::kPicfScaleOffset + 2);
+  if (goal_width <= 0 || goal_height <= 0 || !scale_width || !scale_height)
+    return std::unexpected(Error{"invalid Word 6/95 PICF dimensions"});
+  Bytes payload = picf.subspan(header, length - header);
+  if (payload.size() > detail::kMaxImageSize || payload.size() > budget)
+    return std::unexpected(Error{"Word 6/95 image size exceeds limit"});
+  if (payload.size() < detail::kWmfHeaderBytes ||
+      (U16(payload, 0) != 1 && U16(payload, 0) != 2) ||
+      U16(payload, 2) != detail::kWmfHeaderWords ||
+      (U16(payload, 4) != detail::kWmfVersion1 &&
+       U16(payload, 4) != detail::kWmfVersion3) ||
+      static_cast<uint64_t>(U32(payload, 6)) * 2 != payload.size())
+    return std::unexpected(Error{"invalid Word 6/95 WMF payload"});
+  model::Image image;
+  image.format = model::ImageFormat::kWmf;
+  image.width = std::clamp(goal_width * scale_width / detail::kPicfScaleUnit, 1,
+                           static_cast<int>(detail::kMaxTwips));
+  image.height = std::clamp(goal_height * scale_height / detail::kPicfScaleUnit,
+                            1, static_cast<int>(detail::kMaxTwips));
+  image.bytes.assign(payload.begin(), payload.end());
+  return image;
+}
+
 std::expected<model::Image, Error> ReadInlinePicture(Bytes data,
                                                      uint32_t offset,
                                                      size_t budget) {

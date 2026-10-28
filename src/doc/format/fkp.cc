@@ -338,6 +338,10 @@ bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = kSprmCHps;
         size = 2;  // Word 6 stores the full half-point word, not a byte.
         break;
+      case kLegacySprmCPicLocation:
+        modern = kSprmCPicLocation;
+        size = 4;
+        break;
       default:
         return false;
     }
