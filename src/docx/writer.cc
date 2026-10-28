@@ -233,6 +233,8 @@ pugi::xml_document BuildRelationships(const WriteContext& ctx) {
       type = "footnotes";
     } else if (target == "endnotes.xml") {
       type = "endnotes";
+    } else if (target == "comments.xml") {
+      type = "comments";
     } else if (target.starts_with("embeddings/")) {
       type = "oleObject";
     }

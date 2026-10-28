@@ -149,6 +149,20 @@ TEST(M3Comments, WritesCommentsPartAndAnchors) {
   EXPECT_NE(rels.find("Target=\"comments.xml\""), std::string::npos);
 }
 
+TEST(M3Comments, CommentsRelationshipUsesCommentsType) {
+  auto d = ParseFixture("comments-basic");
+  ASSERT_TRUE(d) << d.error().message;
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip);
+  const std::string rels = Part(*zip, "word/_rels/document.xml.rels");
+  // The comments part must be related with Type .../comments: Word refuses to
+  // open a package whose main-document rels carry an unexpected Type.
+  EXPECT_NE(rels.find("relationships/comments\" Target=\"comments.xml\""),
+            std::string::npos);
+  EXPECT_EQ(rels.find("relationships/footer\" Target=\"comments.xml\""),
+            std::string::npos);
+}
+
 TEST(M3Comments, DocumentWithoutCommentsHasNoPart) {
   model::Document d;
   model::Paragraph p;
