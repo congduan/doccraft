@@ -119,7 +119,8 @@ BookmarkMarks FilterStoryBookmarks(
           begin >= last - (last_cp_is_guard ? 1 : 0))
         continue;
       auto end = ends.find(id);
-      if (end != ends.end() && end->second >= begin && end->second < last) {
+      if (end->second >= begin &&
+          (last_cp_is_guard ? end->second < last : end->second <= last)) {
         valid_ids.insert(id);
       } else {
         invalid = true;

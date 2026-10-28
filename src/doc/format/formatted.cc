@@ -162,8 +162,11 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     doc.fonts = ReadFonts(table, fib.fonts);
     doc.styles = ReadStyles(table, fib.stsh, doc.fonts);
   }
+  auto bookmarks = ReadBookmarks(table, fib);
+  if (!bookmarks)
+    return std::unexpected(bookmarks.error());
   auto textboxes = detail::ReadTextboxes(word, table, fib, *chpx, *papx,
-                                         doc.fonts, &doc.warnings);
+                                         doc.fonts, *bookmarks, &doc.warnings);
   if (!textboxes)
     return std::unexpected(textboxes.error());
   doc.textboxes = std::move(*textboxes);
@@ -214,10 +217,6 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   auto comment_anchors = ReadCommentAnchors(table, fib, &doc.warnings);
   if (!comment_anchors) {
     return std::unexpected(comment_anchors.error());
-  }
-  auto bookmarks = ReadBookmarks(table, fib);
-  if (!bookmarks) {
-    return std::unexpected(bookmarks.error());
   }
   const detail::BookmarkMarks main_bookmarks = FilterStoryBookmarks(
       *bookmarks, {{0, fib.ccp_text}}, "main", &doc.warnings, false);
@@ -731,6 +730,14 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   }
   while (!frames.empty())
     close_table();
+  const bool final_para_has_runs = !para.runs.empty();
+  emit_bookmarks(fib.ccp_text);
+  if (!final_para_has_runs && !doc.paragraphs.empty()) {
+    auto& last_runs = doc.paragraphs.back().runs;
+    for (auto& run : para.runs)
+      last_runs.push_back(std::move(run));
+    para.runs.clear();
+  }
   if (!para.runs.empty() || doc.blocks.empty())
     add_paragraph(std::move(para));
   auto notes = ReadNotes(doc, word, table, fib, *chpx, *papx, *bookmarks);
@@ -752,7 +759,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
                            headers.error().message);
   } else {
     auto header_boxes = detail::ReadHeaderTextboxes(
-        word, table, fib, *chpx, *papx, doc.fonts, &doc.warnings);
+        word, table, fib, *chpx, *papx, doc.fonts, *bookmarks, &doc.warnings);
     if (!header_boxes)
       return std::unexpected(header_boxes.error());
     for (auto& box : *header_boxes) {

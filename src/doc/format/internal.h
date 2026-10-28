@@ -332,11 +332,13 @@ uint16_t Prm0Opcode(uint8_t isprm);
 std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts, std::vector<std::string>* warnings);
+    const std::vector<std::string>& fonts, const BookmarkMarks& bookmarks,
+    std::vector<std::string>* warnings);
 std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts, std::vector<std::string>* warnings);
+    const std::vector<std::string>& fonts, const BookmarkMarks& bookmarks,
+    std::vector<std::string>* warnings);
 
 // Standard bookmark markers keyed by absolute CP across document parts.
 struct BookmarkMark {
@@ -351,8 +353,9 @@ struct BookmarkMarks {
 
 std::expected<BookmarkMarks, Error> ReadBookmarks(Bytes table, const Fib& fib);
 
-// Keep complete pairs inside one [first, last) story range. When the final CP
-// is a guard, a bookmark may end there but may not start there.
+// Keep complete pairs inside one story range. When the final CP is a guard,
+// a bookmark may end there but may not start there. Otherwise the end may
+// equal last (the main story's exclusive end CP).
 BookmarkMarks FilterStoryBookmarks(
     const BookmarkMarks& bookmarks,
     const std::vector<std::pair<uint64_t, uint64_t>>& ranges, const char* story,

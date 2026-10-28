@@ -63,7 +63,7 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
     const std::vector<std::string>& fonts, bool header,
-    std::vector<std::string>* warnings) {
+    const BookmarkMarks& bookmarks, std::vector<std::string>* warnings) {
   std::vector<model::Textbox> boxes;
   const uint32_t count_chars = header ? fib.ccp_hdr_txbx : fib.ccp_txbx;
   const Fib::Range txt_range = header ? fib.hdr_txbx_txt : fib.txbx_txt;
@@ -122,6 +122,17 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
                         (header ? "header textbox" : "textbox") +
                         " field PLC: " + status.error().message);
   }
+  std::vector<std::pair<uint64_t, uint64_t>> bookmark_ranges;
+  // FTXBXS CPs are relative to this textbox document. Standard bookmark
+  // PLC CPs are absolute across all document parts.
+  for (const auto& entry : by_ftxbxs) {
+    const size_t index = entry.first;
+    bookmark_ranges.emplace_back(base + txt->Cp(index),
+                                 base + txt->Cp(index + 1));
+  }
+  const BookmarkMarks story_bookmarks =
+      FilterStoryBookmarks(bookmarks, bookmark_ranges,
+                           header ? "header textbox" : "textbox", warnings);
   for (size_t i = 0; i + 1 < bkd->count; i++) {
     const int index = S16(bkd->Item(i), 0);
     if (index < 0 || static_cast<size_t>(index) + 1 >= txt->count)
@@ -135,8 +146,9 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
     // split a run, so include their final character in the first component.
     const uint32_t end =
         bkd->Cp(i + 1) == txt->Cp(f + 1) ? bkd->Cp(i + 1) : bkd->Cp(i + 1) + 1;
-    auto paragraphs = ReadStoryParagraphs(*chars, chpx, papx, fonts, prcs, base,
-                                          bkd->Cp(i), end, &field_status);
+    auto paragraphs =
+        ReadStoryParagraphs(*chars, chpx, papx, fonts, prcs, base, bkd->Cp(i),
+                            end, &field_status, &story_bookmarks);
     auto& target = boxes[by_ftxbxs.at(f)].paragraphs;
     for (auto& paragraph : paragraphs)
       target.push_back(std::move(paragraph));
@@ -185,14 +197,18 @@ std::expected<std::vector<model::Textbox>, Error> ReadTextboxesFor(
 std::expected<std::vector<model::Textbox>, Error> ReadTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts, std::vector<std::string>* warnings) {
-  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, false, warnings);
+    const std::vector<std::string>& fonts, const BookmarkMarks& bookmarks,
+    std::vector<std::string>* warnings) {
+  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, false, bookmarks,
+                          warnings);
 }
 
 std::expected<std::vector<model::Textbox>, Error> ReadHeaderTextboxes(
     Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    const std::vector<std::string>& fonts, std::vector<std::string>* warnings) {
-  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, true, warnings);
+    const std::vector<std::string>& fonts, const BookmarkMarks& bookmarks,
+    std::vector<std::string>* warnings) {
+  return ReadTextboxesFor(word, table, fib, chpx, papx, fonts, true, bookmarks,
+                          warnings);
 }
 }  // namespace doccraft::doc::detail
