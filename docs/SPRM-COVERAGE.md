@@ -29,7 +29,7 @@
 | ✅ | `0x0801` | sprmCFRMarkIns | A ToggleOperand that specifies whether the text is formatted as inserted revision mark text, which is text that was inserted while revision marking was on. | 字符 CHP §2.6.1；M3Batch8.RevisionMarksWrapRuns |
 | ✅ | `0x0802` | sprmCFFldVanish | A ToggleOperand that specifies whether the field text is hidden. | 字符 CHP §2.6.1；M3Batch7.HiddenTextSources |
 | ✅ | `0x6A03` | sprmCPicLocation | A signed 32-bit integer that specifies either the position in the Data Stream of a picture or binary data or the name of an OLE object storage. | 字符 CHP §2.6.1；正文内联图片 Data 偏移、PICF/BLIP 到 `w:drawing`；M5InlineImages.LibreOfficeGoldenKeepsMediaBytes、M5InlineImages.SameChpxTextDoesNotAbsorbPicture、M5InlineImages.AggregateImageLimitAcceptsBoundaryRejectsOverflow；OLE 字段分隔符 ObjectPool id 到嵌入部件由 M4Ole.RealObjectPoolSubstorageIsIndependentCfbPart 验证 |
-| ✅ | `0x4804` | sprmCIbstRMark | A signed 16-bit integer that specifies a zero-based index into SttbfRMark. | 字符 CHP §2.6.1；ibst 存入 Run 查 SttbfRMark（FIB pair 24）写入 w:ins/@w:author，无 ibst 用默认 0 号 "Unknown"，表缺失/越界回退占位作者并警告；M19Revisions.InsertAuthorFromSttbfRMark、M19Revisions.UnindexedMarkNamesUnknown |
+| ✅ | `0x4804` | sprmCIbstRMark | A signed 16-bit integer that specifies a zero-based index into SttbfRMark. | 字符 CHP §2.6.1；ibst 存入 Run 查 SttbfRMark（FIB pair 51）写入 w:ins/@w:author，无 ibst 用默认 0 号 "Unknown"，表缺失/越界回退占位作者并警告；M19Revisions.InsertAuthorFromSttbfRMark、M19Revisions.UnindexedMarkNamesUnknown、M19Revisions.OutOfRangeIndexFallsBackAndWarns |
 | N/A | `0x6805` | sprmCDttmRMark | A DTTM that specifies the date and time at which the text was inserted.；M19 已接入修订作者，DTTM 时间戳仍省略；不影响当前格式值 | 字符 CHP §2.6.1 |
 | N/A | `0x0806` | sprmCFData | A Bool8 that specifies whether the picture character in the text represents binary data. | 字符 CHP §2.6.1；图片二进制标记；二进制数据不作为内联图片读取，M5InlineImages.BinaryDataMarkerDoesNotReadPicture；载荷留待后续 |
 | N/A | `0x4807` | sprmCIdslRMark | An unsigned 16-bit integer that specifies the reason value of the inserted or modified revision mark text.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
@@ -82,7 +82,7 @@
 | ✅ | `0x4A60` | sprmCIcoBi | An ICO value that specifies the color of text when displayed right-to-left or determined to be complex script.<147> | 字符 CHP §2.6.1；M3Batch8.ComplexScriptColor |
 | ✅ | `0x4A61` | sprmCHpsBi | An unsigned 2-byte integer value that specifies the size of the text, for text that is displayed right-to-left or text that is a complex script. | 字符 CHP §2.6.1 |
 | N/A | `0xCA62` | sprmCDispFldRMark | A DispFldRmOperand value that indicates a revision within the result of a display field.；修订元数据留 M4；不影响当前格式值 | 字符 CHP §2.6.1 |
-| ✅ | `0x4863` | sprmCIbstRMarkDel | A signed 16-bit integer value that specifies a zero-based index into SttbfRMark. | 字符 CHP §2.6.1；ibst 存入 Run 查 SttbfRMark（FIB pair 24）写入 w:del/@w:author，越界回退占位作者并警告；M19Revisions.DeleteAuthorFromSttbfRMark、M19Revisions.OutOfRangeIndexFallsBackAndWarns |
+| ✅ | `0x4863` | sprmCIbstRMarkDel | A signed 16-bit integer value that specifies a zero-based index into SttbfRMark. | 字符 CHP §2.6.1；ibst 存入 Run 查 SttbfRMark（FIB pair 51）写入 w:del/@w:author，越界回退占位作者并警告（越界路径的共用审计由 0x4804 行的 OutOfRangeIndexFallsBackAndWarns 验证）；M19Revisions.DeleteAuthorFromSttbfRMark |
 | N/A | `0x6864` | sprmCDttmRMarkDel | A DTTM value that specifies the date and time at which the text was deleted.；M19 已接入修订作者，DTTM 时间戳仍省略；不影响当前格式值 | 字符 CHP §2.6.1 |
 | ✅ | `0x6865` | sprmCBrc80 | A Brc80 value that specifies the border of all four sides of the text. | 字符 CHP §2.6.1 |
 | ✅ | `0x4866` | sprmCShd80 | A Shd80 structure that specifies the background shading for the text. | 字符 CHP §2.6.1；M3Batch7.Shd80PaletteToRgb |
@@ -411,7 +411,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | sprmCRmf `0x4875` | 当前 §2.6.1 不含该 opcode；`0x0875` 是 `sprmCFNoProof`。旧别名 N/A。 |
 | sprmSDopLayoutUnix | 当前 §2.6.4 无此名称；属于文档级兼容设置而非 SEPX sprm。旧别名 N/A。 |
 | sprmSFTextFlow `0x3615` | `0x3615` 是表格 `sprmTFAutofit`；节文字方向为 `sprmSTextFlow` (`0x5033`)，已覆盖。旧别名 N/A。 |
-| sprmCFRMark | 当前名称为 `sprmCFRMarkIns` (`0x0801`)；作者名已由 M19 经 SttbfRMark（pair 24）接入，DTTM 时间戳仍省略。 |
+| sprmCFRMark | 当前名称为 `sprmCFRMarkIns` (`0x0801`)；作者名已由 M19 经 SttbfRMark（pair 51）接入，DTTM 时间戳仍省略。 |
 
 ## 5. 第 7 批增量（本次 28 项）
 
