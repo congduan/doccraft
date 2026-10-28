@@ -22,6 +22,8 @@ const char* ImageExtension(model::ImageFormat format) {
       return "wmf";
     case model::ImageFormat::kEmf:
       return "emf";
+    case model::ImageFormat::kBmp:
+      return "bmp";
   }
   return "png";
 }
@@ -288,7 +290,25 @@ std::expected<void, Error> WriteShape(pugi::xml_node run, int index,
     Attr(node, "from", "0pt,0pt");
     Attr(node, "to", points(shape.width) + "," + points(shape.height));
   }
-  Attr(node, "filled", "f");
+  // OfficeArt fill/line become the VML paint children; an absent colour keeps
+  // the VML default (no fill, black line).
+  constexpr double kEmuPerPoint = 12700.0;
+  // VML paints use the CSS form of a colour: a leading # before RRGGBB.
+  auto vml_color = [](int color) { return "#" + Color(color); };
+  if (shape.fill_color >= 0 && shape.type != model::kShapeLine) {
+    Attr(node, "filled", "t");
+    Attr(node.append_child("v:fill"), "color", vml_color(shape.fill_color));
+  } else {
+    Attr(node, "filled", "f");
+  }
+  if (shape.line_color >= 0) {
+    auto stroke = node.append_child("v:stroke");
+    Attr(stroke, "color", vml_color(shape.line_color));
+    if (shape.line_width > 0) {
+      Attr(stroke, "weight",
+           std::to_string(shape.line_width / kEmuPerPoint) + "pt");
+    }
+  }
   const char* wrap = "square";
   switch (shape.anchor.wrap) {
     case model::ImageWrap::kNone:
@@ -402,6 +422,9 @@ std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
       IntAttr(rn.append_child(r.note_endnote ? "w:endnoteReference"
                                              : "w:footnoteReference"),
               "w:id", r.note_ref);
+    } else if (r.note_ref_mark > 0) {
+      // The mark at the head of a note body; its w:rStyle comes from RunPr.
+      rn.append_child(r.note_ref_mark == 2 ? "w:endnoteRef" : "w:footnoteRef");
     } else if (r.field_char >= 0) {
       const char* kinds[] = {"begin", "separate", "end"};
       auto fld = rn.append_child("w:fldChar");

@@ -72,6 +72,29 @@ std::expected<void, Error> WriteSectionReferences(pugi::xml_node sec,
   return {};
 }
 
+// Case-folded style-name lookup, restricted to one style type. Note bodies use
+// Word's built-in "footnote text" / "endnote text" paragraph styles and the
+// matching "... characters" character style; a DOC whose note paragraph names
+// no style of its own still expects them, so the writer reuses the parsed
+// STSH entry by name instead of inventing an unnamed style.
+int FindNoteStyle(const model::Document& document, int type,
+                  std::string_view name) {
+  for (size_t i = 0; i < document.styles.size(); i++) {
+    const model::Style& style = document.styles[i];
+    if (style.type != type || style.name.size() != name.size())
+      continue;
+    bool match = true;
+    for (size_t j = 0; j < name.size() && match; j++) {
+      const char c = style.name[j];
+      const char lower = c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
+      match = lower == name[j];
+    }
+    if (match)
+      return static_cast<int>(i);
+  }
+  return -1;
+}
+
 std::expected<void, Error> WriteNoteParts(const model::Document& document,
                                           WriteContext& ctx) {
   bool has_footnotes = false, has_endnotes = false;
@@ -103,6 +126,10 @@ std::expected<void, Error> WriteNoteParts(const model::Document& document,
       auto run = note.append_child("w:p").append_child("w:r");
       run.append_child(separator.name);
     }
+    const int text_style = FindNoteStyle(
+        document, 1, endnote ? "endnote text" : "footnote text");
+    const int mark_style = FindNoteStyle(
+        document, 2, endnote ? "endnote characters" : "footnote characters");
     int id = 0;
     for (const auto& note : document.notes) {
       if (note.endnote != endnote) {
@@ -114,7 +141,25 @@ std::expected<void, Error> WriteNoteParts(const model::Document& document,
       if (note.paragraphs.empty()) {
         node.append_child("w:p");
       }
-      for (const auto& paragraph : note.paragraphs) {
+      for (size_t i = 0; i < note.paragraphs.size(); i++) {
+        model::Paragraph paragraph = note.paragraphs[i];
+        if (paragraph.style < 0 && text_style >= 0) {
+          paragraph.style = text_style;
+        }
+        if (i == 0) {
+          // Word numbers a note from the mark that opens its body; the DOC text
+          // does not carry it, so the writer synthesizes mark + tab.
+          model::TabStop stop;
+          stop.position = detail::kNoteTextTabTwips;
+          paragraph.tabs.push_back(stop);
+          model::Run tab;
+          tab.text = "\t";
+          paragraph.runs.insert(paragraph.runs.begin(), tab);
+          model::Run mark;
+          mark.note_ref_mark = endnote ? 2 : 1;
+          mark.style = mark_style;
+          paragraph.runs.insert(paragraph.runs.begin(), mark);
+        }
         auto result = WriteParagraph(node, paragraph, nullptr, ctx);
         if (!result)
           return std::unexpected(result.error());
