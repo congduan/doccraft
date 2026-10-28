@@ -229,6 +229,75 @@ TEST(M18Bookmarks, BodyAndHeaderTextboxStoryBookmarks) {
   }
 }
 
+TEST(M18Bookmarks, LinkedTextboxBreakEmitsBookmarkEndOnce) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/textbox.doc";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input);
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  ASSERT_TRUE(cfb);
+  auto word = cfb->ReadStream("WordDocument");
+  ASSERT_TRUE(word);
+  auto fib = doc::ParseFib(*word);
+  ASSERT_TRUE(fib);
+  auto table = cfb->ReadStream(fib->table_stream());
+  ASSERT_TRUE(table);
+
+  // One visible FTXBXS [0, 5), split into linked Tbkd ranges [0, 2)
+  // and [2, 5). The following FTXBXS/Tbkd is reusable.
+  Put32(*table, fib->txbx_txt.offset + 4, 5);
+  std::vector<uint8_t> breaks(34);
+  Put32(breaks, 0, 0);
+  Put32(breaks, 4, 2);
+  Put32(breaks, 8, 5);
+  Put32(breaks, 12, fib->ccp_txbx);
+  fib->txbx_bkd = {static_cast<uint32_t>(table->size()),
+                   static_cast<uint32_t>(breaks.size())};
+  table->insert(table->end(), breaks.begin(), breaks.end());
+
+  const uint32_t base =
+      fib->ccp_text + fib->ccp_ftn + fib->ccp_hdd + fib->ccp_atn + fib->ccp_edn;
+  PutBookmark(&*table, &*fib, base, base + 2, "BreakEnd");
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->textboxes.size(), 1u);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t box_start = xml.find("<w:txbxContent>");
+  const size_t box_end = xml.find("</w:txbxContent>", box_start);
+  ASSERT_NE(box_start, std::string::npos);
+  ASSERT_NE(box_end, std::string::npos);
+  const std::string box = xml.substr(box_start, box_end - box_start);
+  const std::string start = "<w:bookmarkStart w:id=\"0\" w:name=\"BreakEnd\"/>";
+  const std::string end = "<w:bookmarkEnd w:id=\"0\"/>";
+  EXPECT_EQ(box.find(start), box.rfind(start));
+  EXPECT_EQ(box.find(end), box.rfind(end));
+  EXPECT_NE(box.find(start), std::string::npos);
+  EXPECT_NE(box.find(end), std::string::npos);
+  EXPECT_LT(box.find(start), box.find(end));
+
+  // A start at the same break belongs before the next segment's first char.
+  PutBookmark(&*table, &*fib, base + 2, base + 4, "BreakStart");
+  auto starts_at_break = doc::ParseFormatted(*word, *table, *fib);
+  ASSERT_TRUE(starts_at_break) << starts_at_break.error().message;
+  ASSERT_EQ(starts_at_break->textboxes.size(), 1u);
+  const auto& paragraphs = starts_at_break->textboxes[0].paragraphs;
+  ASSERT_EQ(paragraphs.size(), 2u);
+  ASSERT_GE(paragraphs[1].runs.size(), 2u);
+  EXPECT_TRUE(paragraphs[1].runs[0].bookmark_start);
+  EXPECT_EQ(paragraphs[1].runs[0].bookmark_id, 0);
+  EXPECT_EQ(paragraphs[1].runs[1].text, "x ");
+  auto start_zip = docx::Write(*starts_at_break);
+  ASSERT_TRUE(start_zip) << start_zip.error().message;
+  const std::string start_xml = Part(*start_zip, "word/document.xml");
+  const std::string start_mark =
+      "<w:bookmarkStart w:id=\"0\" w:name=\"BreakStart\"/>";
+  EXPECT_EQ(start_xml.find(start_mark), start_xml.rfind(start_mark));
+  EXPECT_NE(start_xml.find(start_mark), std::string::npos);
+}
+
 TEST(M4Textbox, SyntheticFlowBreaksStayInStoryOrder) {
   const std::string path =
       std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/textbox.doc";
