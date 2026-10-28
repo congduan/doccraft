@@ -48,7 +48,8 @@ struct Fib {
   Range and_ref, and_txt, atn_owners;
   // Bookmark name table (SttbfBkmk) and the start/end PLCs (PlcfBkf/PlcfBkl).
   Range sttb_bkmk, bkf, bkl;
-  // Revision author names (SttbfRMark), shared by insert/delete/property
+  // Revision author names (SttbfRMark = FibRgFcLcb97 pair(51), right after
+  // fcDggInfo = pair(50); pair(24) is fcCmds), shared by insert/delete/property
   // revision marks. Comments keep their own GrpXstAtnOwners table above.
   Range rmark_authors;
   Range spa_main, spa_hdr, drawing_group, txbx_txt, txbx_bkd;

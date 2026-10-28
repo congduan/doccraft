@@ -160,7 +160,10 @@ add_executable(m19_columns_test m19_columns_test.cc)
 target_link_libraries(m19_columns_test PRIVATE doccraft_doc doccraft_docx gtest_main)
 gtest_discover_tests(m19_columns_test)
 add_executable(m19_revisions_test m19_revisions_test.cc)
-target_link_libraries(m19_revisions_test PRIVATE doccraft_doc doccraft_docx gtest_main)
+target_link_libraries(m19_revisions_test PRIVATE doccraft_cfb doccraft_doc
+  doccraft_docx gtest_main)
+target_compile_definitions(m19_revisions_test PRIVATE
+  DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m19_revisions_test)
 
 add_executable(m4_ole_test m4_ole_test.cc cfb_test_util.cc)

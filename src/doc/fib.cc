@@ -198,10 +198,11 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.sttb_bkmk = pair(21);
   f.bkf = pair(22);
   f.bkl = pair(23);
-  // [MS-DOC] FibRgFcLcb97: SttbfRMark is row 25 of the pair table, which
-  // this parser reads as pair(24) (see fcClx at pair(33) = 0x01A2). It names
-  // the authors of sprmCIbstRMark / sprmCIbstRMarkDel / sprmCPropRMark.
-  f.rmark_authors = pair(24);
+  // [MS-DOC] FibRgFcLcb97: SttbfRMark is row 52 of the pair table, read here
+  // as pair(51) (0-based, anchored by fcClx = pair(33) = 0x01A2), right after
+  // fcDggInfo = pair(50). It names the authors of sprmCIbstRMark /
+  // sprmCIbstRMarkDel / sprmCPropRMark. Row 25 (pair(24)) is fcCmds.
+  f.rmark_authors = pair(51);
   f.fnd_ref = pair(2);
   f.fnd_txt = pair(3);
   // FibRgFcLcb97 pairs 44/45 are fcPms/fcFormFldSttbs; the endnote PLCs are

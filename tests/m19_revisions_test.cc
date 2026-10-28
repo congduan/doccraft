@@ -17,10 +17,13 @@
 #include <algorithm>
 #include <cstdint>
 #include <expected>
+#include <fstream>
 #include <initializer_list>
+#include <iterator>
 #include <string>
 #include <vector>
 
+#include "cfb/cfb_reader.h"
 #include "doc/fib.h"
 #include "doc/format.h"
 #include "doc/format/sprm.h"
@@ -28,6 +31,7 @@
 #include "third_party/miniz/miniz.h"
 
 namespace {
+namespace cfb = doccraft::cfb;
 namespace doc = doccraft::doc;
 namespace docx = doccraft::docx;
 namespace model = doccraft::model;
@@ -127,22 +131,69 @@ std::expected<model::Document, doc::Error> Synthetic(
   return doc::ParseFormatted(word, table, fib, Bytes{});
 }
 
-// SttbfRMark is FibRgFcLcb97 row 25, read here as pair(24) (0-based pairs,
-// anchored by fcClx = pair(33) at byte 0x01A2). Regression guard: the first
-// draft read pair(51), which is fcCmds, so real documents never found their
-// author table.
-TEST(M19Revisions, FibReadsSttbfRMarkFromPair24) {
+// SttbfRMark is FibRgFcLcb97 row 52, read here as pair(51) (0-based pairs,
+// anchored by fcClx = pair(33) at byte 0x01A2), right after fcDggInfo =
+// pair(50). Regression guard: the first draft read pair(24), which is fcCmds
+// (a 2-byte Tcg in real Word 97 files), so real documents never found their
+// author table; the decoy pair(24) value below must stay unread.
+TEST(M19Revisions, FibReadsSttbfRMarkFromPair51) {
   std::vector<uint8_t> word(4096);
   Put16(word, 0, 0xA5EC);
   Put16(word, 2, 0x00C1);
   Put16(word, 32, 14);               // csw
   Put16(word, 62, 22);               // cslw
   Put16(word, 152, 93);              // cbRgFcLcb
-  Put32(word, 154 + 24 * 8, 0x2A2);  // fcSttbfRMark
-  Put32(word, 158 + 24 * 8, 8);      // lcbSttbfRMark
+  Put32(word, 154 + 51 * 8, 0x2A2);  // fcSttbfRMark
+  Put32(word, 158 + 51 * 8, 8);      // lcbSttbfRMark
+  Put32(word, 154 + 24 * 8, 0x999);  // fcCmds decoy: must not be read
+  Put32(word, 158 + 24 * 8, 8);
   auto fib = doc::ParseFib(word);
   ASSERT_TRUE(fib) << fib.error().message;
   EXPECT_EQ(fib->rmark_authors, (doc::Fib::Range{0x2A2, 8}));
+}
+
+// Parses a checked-in fixture through the real CFB -> FIB -> formatted path
+// (no injected Fib), so the pair offset exercised is the production one.
+std::expected<model::Document, doc::Error> ParseFixture(
+    const std::string& filename) {
+  const std::string path =
+      std::string(DOCCRAFT_SOURCE_DIR) + "/tests/fixtures/" + filename;
+  std::ifstream input(path, std::ios::binary);
+  if (!input)
+    return std::unexpected(doc::Error{"cannot open " + path});
+  std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+  auto cfb = cfb::CfbReader::Open(bytes);
+  if (!cfb)
+    return std::unexpected(doc::Error{cfb.error().message});
+  auto word = cfb->ReadStream("WordDocument");
+  if (!word)
+    return std::unexpected(doc::Error{word.error().message});
+  auto fib = doc::ParseFib(*word);
+  if (!fib)
+    return std::unexpected(fib.error());
+  auto table = cfb->ReadStream(fib->table_stream());
+  if (!table)
+    return std::unexpected(doc::Error{table.error().message});
+  auto data = cfb->ReadStream("Data");
+  if (data)
+    return doc::ParseFormatted(*word, *table, *fib, *data);
+  return doc::ParseFormatted(*word, *table, *fib);
+}
+
+// Real Word 97 bytes pin the offset: both fixtures carry a 1-entry
+// SttbfRMark ("Unknown", cData=1, cbExtra=0) at pair(51) while pair(24)
+// holds fcCmds (lcb=2, a Tcg). Before the pair(51) fix the table never
+// parsed and conversion warned "truncated SttbfRMark" on both files.
+TEST(M19Revisions, RealWord97SttbfRMarkParsesThroughFib) {
+  for (const char* name : {"fast-saved-o-kurs.doc", "ole-embedded.doc"}) {
+    auto parsed = ParseFixture(name);
+    ASSERT_TRUE(parsed.has_value()) << name << ": " << parsed.error().message;
+    const std::vector<std::string> expected{"Unknown"};
+    EXPECT_EQ(expected, parsed->revision_authors) << name;
+    for (const auto& warning : parsed->warnings)
+      EXPECT_EQ(std::string::npos, warning.find("SttbfRMark"))
+          << name << ": " << warning;
+  }
 }
 
 std::string Xml(const model::Document& d) {
@@ -219,7 +270,7 @@ TEST(M19Revisions, OutOfRangeIndexFallsBackAndWarns) {
   ASSERT_TRUE(d.has_value());
   const std::string xml = Xml(*d);
   EXPECT_NE(std::string::npos, xml.find(R"(w:author="doccraft")"));
-  EXPECT_TRUE(WarnsAbout(*d, "SttbfRMark"));
+  EXPECT_TRUE(WarnsAbout(*d, "out of range"));
 }
 
 // Revision marks without any SttbfRMark keep the placeholder author and
@@ -229,7 +280,7 @@ TEST(M19Revisions, MissingTableWarns) {
   ASSERT_TRUE(d.has_value());
   const std::string xml = Xml(*d);
   EXPECT_NE(std::string::npos, xml.find(R"(w:author="doccraft")"));
-  EXPECT_TRUE(WarnsAbout(*d, "SttbfRMark"));
+  EXPECT_TRUE(WarnsAbout(*d, "without SttbfRMark"));
 }
 
 // The parser stores the decoded table and the per-run indices; sprmCPropRMark
@@ -270,7 +321,47 @@ TEST(M19Revisions, MalformedTableFailsClosed) {
                      Sprms({Prl(0x0801, {1}), Prl(0x4804, {1, 0})}), rmark);
   ASSERT_TRUE(d.has_value());
   EXPECT_TRUE(d->revision_authors.empty());
-  EXPECT_TRUE(WarnsAbout(*d, "SttbfRMark"));
+  EXPECT_TRUE(WarnsAbout(*d, "truncated SttbfRMark"));
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(w:author="doccraft")"));
+}
+
+// A non-extended STTB header (fExtend != 0xFFFF) is not SttbfRMark; parsing
+// fails closed with a header warning and the placeholder author everywhere.
+TEST(M19Revisions, MalformedHeaderFExtendFailsClosed) {
+  std::vector<uint8_t> rmark{0x00, 0x00, 1, 0, 0, 0};
+  const std::string unknown = "Unknown";
+  rmark.push_back(7);
+  rmark.push_back(0);
+  for (char c : unknown) {
+    rmark.push_back(static_cast<uint8_t>(c));
+    rmark.push_back(0);
+  }
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x4804, {1, 0})}), rmark);
+  ASSERT_TRUE(d.has_value());
+  EXPECT_TRUE(d->revision_authors.empty());
+  EXPECT_TRUE(WarnsAbout(*d, "invalid SttbfRMark header"));
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(w:author="doccraft")"));
+}
+
+// [MS-DOC] 2.9.290 requires cbExtra == 0; any other value fails closed the
+// same way instead of misreading entry bytes as text.
+TEST(M19Revisions, MalformedHeaderCbExtraFailsClosed) {
+  std::vector<uint8_t> rmark{0xFF, 0xFF, 1, 0, 4, 0};
+  const std::string unknown = "Unknown";
+  rmark.push_back(7);
+  rmark.push_back(0);
+  for (char c : unknown) {
+    rmark.push_back(static_cast<uint8_t>(c));
+    rmark.push_back(0);
+  }
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x4804, {1, 0})}), rmark);
+  ASSERT_TRUE(d.has_value());
+  EXPECT_TRUE(d->revision_authors.empty());
+  EXPECT_TRUE(WarnsAbout(*d, "invalid SttbfRMark header"));
   const std::string xml = Xml(*d);
   EXPECT_NE(std::string::npos, xml.find(R"(w:author="doccraft")"));
 }

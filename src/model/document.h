@@ -377,7 +377,7 @@ struct Document {
   Section section;
   std::vector<std::pair<size_t, Section>> section_breaks;
   std::vector<std::string> fonts;
-  // SttbfRMark (FIB pair 24): author names shared by insert/delete/property
+  // SttbfRMark (FIB pair 51): author names shared by insert/delete/property
   // revision marks. Empty when the document carries no table.
   std::vector<std::string> revision_authors;
   std::vector<List> lists;
