@@ -297,8 +297,8 @@
 |---|---|---|---|---|
 | ✅ | `0x3000` | sprmScnsPgn | A CNS indicating the number separator used between the chapter number and the page number for purpose of chapter numbering in page number fields (that is, when sprmSiHeadingPgn specifies a… | 节 SEP §2.6.4；M3Batch6.SectionBordersAndNumbering |
 | ✅ | `0x3001` | sprmSiHeadingPgn | An unsigned 8-bit integer value that specifies which heading level starts new chapters for the purposes of chapter numbering in page number fields. | 节 SEP §2.6.4；M3Batch6.SectionBordersAndNumbering |
-| ✅ | `0xF203` | sprmSDxaColWidth | An SDxaColWidthOperand that specifies the width of a particular column, in case columns are not evenly spaced as specified by sprmSFEvenlySpaced. | 节 SEP §2.6.4；w:cols/w:col/@w:w；M3Batch7.SectionColumnWidthAndSpacing |
-| ✅ | `0xF204` | sprmSDxaColSpacing | An SDxaColSpacingOperand that specifies the spacing between two columns in case columns are not evenly spaced (as instructed by sprmSFEvenlySpaced). | 节 SEP §2.6.4；w:cols/w:col/@w:space；M3Batch7.SectionColumnWidthAndSpacing |
+| ✅ | `0xF203` | sprmSDxaColWidth | An SDxaColWidthOperand that specifies the width of a particular column, in case columns are not evenly spaced as specified by sprmSFEvenlySpaced. | 节 SEP §2.6.4；w:cols/w:col/@w:w；M3Batch7.SectionColumnWidthAndSpacing；缺宽度的列按 LO 导入兜底 1440 twips（M19Columns） |
+| ✅ | `0xF204` | sprmSDxaColSpacing | An SDxaColSpacingOperand that specifies the spacing between two columns in case columns are not evenly spaced (as instructed by sprmSFEvenlySpaced). | 节 SEP §2.6.4；w:cols/w:col/@w:space；M3Batch7.SectionColumnWidthAndSpacing；仅间距列保留 w:space 不再丢弃（M19Columns） |
 | ✅ | `0x3005` | sprmSFEvenlySpaced | A Bool8 value that specifies whether the space between page margins is distributed evenly between all columns (after subtracting the space between columns, as instructed by sprmSDxaColumns).；非等宽栏输出 w:cols/@w:equalWidth="0" | 节 SEP §2.6.4；M3Batch7.SectionColumnWidthAndSpacing |
 | ✅ | `0x3006` | sprmSFProtected | A Bool8 value that specifies whether the section is unprotected in case document editing is restricted to form fields only (see DopBase.fProtEnabled). | 节 SEP §2.6.4；M3Batch8.PageBorderScopeAndFormProtection |
 | ✅ | `0x5007` | sprmSDmBinFirst | A SDmBinOperand that specifies the paper source used by the printer for the first page of the section. | 节 SEP §2.6.4；w:paperSrc/@w:first；0xFFFF 视为自动；M3Batch7.SectionPaperSourceAndEndnotePosition |
@@ -453,7 +453,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 - `sprmPIncLvl` 只累加 `ilvl`；`sprmPIlfo == 0` 时按规范应增量 `istd` 的分支未实现。
 - `sprmPNest`/`sprmPNest80` 只折算进 `w:ind/@w:left`，不参与悬挂/首行缩进重算。
 - 浮动表格：`sprmTPc`（`0x360D`）未实现，`w:tblpPr` 的 `w:horzAnchor`/`w:vertAnchor` 固定输出 `margin`。
-- 非等宽分栏只对已知宽度的列输出 `<w:col>`；仅给出间距（无宽度）的列不输出。
+- 非等宽分栏：缺宽度 sprm 的列不再丢弃，按 LibreOffice `.doc` 导入兜底值 1440 twips 补宽并保留 `w:space`（等宽节仍忽略列宽/间距 sprm，规范规定仅非等宽时生效）；兜底为常量、不按剩余空间均分，Word 行为未验证。
 - SHD80 只有 16 色调色板，索引 0（自动色）不产生 `w:shd`。
 - `w:framePr` 的位置属性用 `-1` 作“未设置”哨兵，合法的 `-1` twip 偏移无法表达。
 - `sprmCPlain` 只丢弃已累积的直接字符格式，不重建样式继承链。

@@ -66,7 +66,7 @@
 - `sprmPHugePapx` 和 `sprmPTableProps` 会按 Data 流偏移读取嵌套 PrcData；超出流边界则忽略该引用。其复杂表格语义未全部映射。
 - 浮动段落框映射 `w:framePr` 的位置/尺寸/间距/锁定、首字下沉（`sprmPDcs`）与纵向文字流（`sprmPFrameTextFlow`，仅宽高非默认时才输出）；`w:drawing` 级锚点与绕排多边形仍缺。
 - 浮动表格用 `w:tblpPr` 表达，锚点由 `sprmTPc` 的 `pcVert`/`pcHorz` 映射为 `margin`/`page`/`text`（缺省为 `margin`）；表格文本环绕距离已映射。`sprmTWidthBefore`/`sprmTWidthAfter` 的行级前后缩进仍无对应属性。
-- 非等宽分栏（`sprmSFEvenlySpaced` + `sprmSDxaColWidth`/`sprmSDxaColSpacing`）只输出已有宽度的列；仅指定间距的列被丢弃。
+- 非等宽分栏（`sprmSFEvenlySpaced` + `sprmSDxaColWidth`/`sprmSDxaColSpacing`）：[MS-DOC] §2.6.4 要求非等宽节的每列 MUST 带 `sprmSDxaColWidth`。违反该约束的列不再丢弃——`w:cols` 为每列输出 `w:col`，缺宽度的列（含仅指定间距的列）按 LibreOffice `.doc` 导入的兜底值 1440 twips 补宽（`sw/source/filter/ww8/ww8par6.cxx` 中缺失宽度 sprm 时取 1440），仅间距列保留 `w:space`（`M19Columns.SpacingOnlyColumnKeepsWColWithFallbackWidth`）。等宽节（未写 `sprmSFEvenlySpaced=0`）仍忽略列宽度/间距 sprm：规范规定两者仅在非等宽时生效。剩余限制：兜底宽度为常量，不按页面剩余空间均分，Word 对该违规输入的行为未验证；仅缺间距（宽度齐全）的列在 LibreOffice `.doc` 导入路径会因其 `rgdxaColumnWidthSpacing` 数组压缩而错位（LO 自身缺陷），doccraft 的 docx 路径按无 `w:space`（间距 0）输出，两条路径在该畸形输入下不对拍。
 - SHD80 系列（`sprmCShd80`/`sprmPShd80`/`sprmTDefTableShd80`）走 16 色调色板，索引 0（自动色）不产生 `w:shd`；现代 SHD 操作数仍以 COLORREF 优先。
 - `sprmPIncLvl` 只在 `sprmPIlfo != 0` 时累加 `ilvl`，按规范应增量 `istd` 的段落样式分支未实现。
 - `w:framePr` 与表格浮动定位用 `-1` 作「未设置」哨兵，`-1` twip 的真实偏移不可表达。

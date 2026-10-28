@@ -44,6 +44,10 @@ void WritePageSetup(pugi::xml_node sec, const model::Section& section) {
   }
 }
 
+// Fallback width for non-evenly-spaced columns that lack a sprmSDxaColWidth:
+// the value LibreOffice substitutes when importing such columns.
+constexpr int kColumnWidthFallbackTwips = 1440;
+
 void WriteColumns(pugi::xml_node sec, const model::Section& section) {
   if (section.columns <= 1 && section.column_space < 0 &&
       section.column_specs.empty()) {
@@ -64,6 +68,14 @@ void WriteColumns(pugi::xml_node sec, const model::Section& section) {
   if (section.columns_separator) {
     Attr(cols, "w:sep", "1");
   }
+  // sprmSDxaColWidth/Spacing apply "in case columns are not evenly spaced"
+  // ([MS-DOC] 2.6.4), and every column of a non-even section MUST carry a
+  // width sprm. Non-conforming files that leave a column without one keep
+  // their column count and spacing by falling back to the width LibreOffice
+  // substitutes on import (sw/source/filter/ww8/ww8par6.cxx: 1440 twips).
+  // Evenly spaced sections never emit per-column overrides, so they keep
+  // dropping spec entries.
+  const bool fallback_widths = !section.columns_even && section.columns > 1;
   for (int index = 0; index < section.columns; index++) {
     const model::ColumnSpec* spec = nullptr;
     for (const auto& entry : section.column_specs) {
@@ -71,12 +83,13 @@ void WriteColumns(pugi::xml_node sec, const model::Section& section) {
         spec = &entry;
       }
     }
-    if (!spec || spec->width < 0) {
+    const bool has_width = spec && spec->width >= 0;
+    if (!has_width && !fallback_widths) {
       continue;
     }
     auto col = cols.append_child("w:col");
-    IntAttr(col, "w:w", spec->width);
-    if (spec->space >= 0) {
+    IntAttr(col, "w:w", has_width ? spec->width : kColumnWidthFallbackTwips);
+    if (spec && spec->space >= 0) {
       IntAttr(col, "w:space", spec->space);
     }
   }

@@ -182,6 +182,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ✅ 纸张大小/方向/页边距/装订线/纸张来源（`w:paperSrc`）
 - ✅ 页眉页脚（首页/奇偶不同、逐节独立故事）/页码域
 - ✅ 分节符类型（连续/ nextPage /evenPage/oddPage）/行号/脚注位置/页面边框与保护
+- ◐ 非等宽分栏（`sprmSFEvenlySpaced=0` + `sprmSDxaColWidth`/`sprmSDxaColSpacing`）：逐列输出 `w:col`；违反「每列 MUST 带宽度」的列按 LibreOffice `.doc` 导入兜底 1440 twips 补宽、仅间距列保留 `w:space`，不再静默丢弃（`M19Columns`）；兜底为常量不按剩余空间均分，且仅缺间距的列与 LO `.doc` 路径因其数组压缩缺陷不对拍，限制见 KNOWN-SIMPLIFICATIONS「M3 当前范围」
 
 ### 6.5 表格
 - ✅ 基本网格（TAP/rgtc）/单元格合并（横向 fVertMerge、纵向）/拆分
