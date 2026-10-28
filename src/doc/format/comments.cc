@@ -28,9 +28,11 @@ namespace {
 // validated against the author array, so a misread falls back to the initials.
 constexpr size_t kAtrdSize = 30;
 constexpr size_t kAuthorIndexOffset = 20;
-constexpr size_t kInitialsSize = 10;
-constexpr size_t kInitialsLengthSize = 1;
+constexpr size_t kInitialsCchSize = 2;
+constexpr size_t kInitialsCapacity = 9;
 constexpr size_t kUtf16CodeUnitSize = 2;
+static_assert(kInitialsCchSize + kInitialsCapacity * kUtf16CodeUnitSize ==
+              kAuthorIndexOffset);
 constexpr size_t kBookmarkTagOffset = 26;
 constexpr size_t kAtnbeSize = 10;
 
@@ -60,15 +62,15 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(
       return std::unexpected(Error{"invalid comment anchor PLC CP order"});
     previous = anchor.cp;
     const size_t atrd = 4 * (count + 1) + kAtrdSize * i;
-    const size_t cch = plc[atrd];
-    if (kInitialsLengthSize + cch * kUtf16CodeUnitSize > kInitialsSize) {
+    const size_t cch = U16(plc, atrd);
+    if (cch > kInitialsCapacity) {
       if (warnings)
         warnings->push_back("skipped invalid comment initials: id " +
                             std::to_string(i + 1));
     } else {
       for (size_t k = 0; k < cch; ++k) {
-        AppendUtf8(anchor.initials, U16(plc, atrd + kInitialsLengthSize +
-                                                 k * kUtf16CodeUnitSize));
+        AppendUtf8(anchor.initials,
+                   U16(plc, atrd + kInitialsCchSize + k * kUtf16CodeUnitSize));
       }
     }
     const uint16_t author = U16(plc, atrd + kAuthorIndexOffset);
