@@ -229,6 +229,40 @@ TEST(DocxWriterRelations, HeaderImageAndLinkUseOwnRelationships) {
   EXPECT_EQ(docrels.find("https://example.com/header"), std::string::npos);
 }
 
+TEST(DocxWriterRelations, HeaderImageRelationshipsPrecedeDocument) {
+  model::Document document;
+  model::Image image;
+  image.bytes = {'p', 'n', 'g'};
+  image.width = 96;
+  image.height = 96;
+  document.images.push_back(image);
+  model::Paragraph header;
+  model::Run picture;
+  picture.image_index = 0;
+  header.runs.push_back(picture);
+  document.section.headers[1].push_back(header);
+
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  mz_zip_archive archive = {};
+  ASSERT_TRUE(mz_zip_reader_init_mem(&archive, zip->data(), zip->size(), 0));
+  std::vector<std::string> parts;
+  bool stats_ok = true;
+  for (mz_uint i = 0; i < mz_zip_reader_get_num_files(&archive); ++i) {
+    mz_zip_archive_file_stat stat = {};
+    if (!mz_zip_reader_file_stat(&archive, i, &stat)) {
+      stats_ok = false;
+      break;
+    }
+    parts.emplace_back(stat.m_filename);
+  }
+  mz_zip_reader_end(&archive);
+  ASSERT_TRUE(stats_ok);
+  ASSERT_GE(parts.size(), 5U);
+  EXPECT_EQ(parts[3], "word/_rels/header1.xml.rels");
+  EXPECT_EQ(parts[4], "word/document.xml");
+}
+
 TEST(DocxWriterRelations, DuplicateBodyUrlReusesRidWithoutGap) {
   model::Document document;
   model::Paragraph paragraph;
