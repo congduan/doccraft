@@ -37,12 +37,14 @@ std::expected<std::vector<Char>, Error> ReadChars(
     std::vector<std::string>* warnings) {
   if (fib.legacy) {
     // Word 6/95 stores its fc/lcb tables and CLX in WordDocument. Its PCD
-    // stores a direct file offset; bit 0x10 of its first byte selects ANSI.
-    // Normalize only the validated text descriptors into the Word 97 PCD
-    // representation so both format families share the character decoder.
-    constexpr uint8_t kLegacyAnsiPiece = 0x10;
+    // stores a direct byte offset; FibBase.fExtChar selects 16-bit text for
+    // every piece, as LibreOffice does for pre-Word 97 files (WW8Cp2Fc and
+    // WW8PLCFx_PCD keep bVer67 addresses untransformed). Normalize only the
+    // validated text descriptors into the Word 97 PCD representation so both
+    // format families share the character decoder.
     constexpr uint32_t kModernAnsiPiece = 0x40000000;
     constexpr size_t kLegacyPcdSize = 8;
+    const bool ansi_text = !fib.ext_char;
     std::vector<uint32_t> cps;
     std::vector<uint32_t> fcs;
     std::vector<bool> ansi;
@@ -63,12 +65,15 @@ std::expected<std::vector<Char>, Error> ReadChars(
         Bytes pcd =
             clx.subspan(descriptor + kLegacyPcdSize * i, kLegacyPcdSize);
         fcs.push_back(U32(pcd, 2));
-        ansi.push_back((pcd[0] & kLegacyAnsiPiece) != 0);
+        ansi.push_back(ansi_text);
       }
     } else {
-      cps = {0, fib.ccp_text};
+      // Non-complex Word 6/95 files keep body, footnote and header text in
+      // one contiguous run from fcMin, so the single implicit piece reaches
+      // whatever story the caller asked for.
+      cps = {0, limit};
       fcs = {fib.fc_min};
-      ansi = {true};
+      ansi = {ansi_text};
     }
     if (cps.empty() || cps.front() != 0 || cps.back() < limit)
       return std::unexpected(Error{"invalid Word 6/95 piece coverage"});

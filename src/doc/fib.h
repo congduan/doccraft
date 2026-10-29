@@ -39,6 +39,9 @@ struct Fib {
   bool complex = false;
   bool encrypted = false;
   bool which_table = false;
+  // FibBase.fExtChar. Word 6/95 stores text as 16-bit words when this is set;
+  // Word 97+ always stores Unicode and the bit carries no per-piece meaning.
+  bool ext_char = false;
   uint32_t ccp_text = 0, ccp_ftn = 0, ccp_hdd = 0, ccp_atn = 0;
   uint32_t ccp_edn = 0, ccp_txbx = 0, ccp_hdr_txbx = 0;
   uint32_t fc_clx = 0, lcb_clx = 0;
@@ -47,6 +50,9 @@ struct Fib {
     bool operator==(const Range&) const = default;
   };
   Range stsh, chpx_bte, papx_bte, sed, fonts, lists, list_overrides, headers;
+  // Word 6/95 document properties (FibRgFcLcb97 pair 31). The high byte of
+  // its first word is DOP.grpfIhdt, the word-level header/footer skip count.
+  Range dop;
   // Footnote/endnote reference and text PLCs ([MS-DOC] §2.8.4, §2.8.5).
   Range fnd_ref, fnd_txt, end_ref, end_txt;
   // Comment anchors (PlcfandRef), comment text (PlcfandTxt) and the author

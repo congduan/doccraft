@@ -80,17 +80,25 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
     f.legacy = true;
     f.lid = U16(word, 6);
     f.codepage = base::CodepageForLid(f.lid);
-    f.complex = (U16(word, 10) & 0x0004) != 0;
-    f.encrypted = (U16(word, 10) & 0x0100) != 0;
+    const uint16_t flags = U16(word, 10);
+    f.complex = (flags & 0x0004) != 0;
+    f.encrypted = (flags & 0x0100) != 0;
+    // Word 6/95 keeps the Unicode switch in FibBase.fExtChar (0x1000); its
+    // piece descriptors carry no per-piece encoding flag.
+    f.ext_char = (flags & 0x1000) != 0;
     if (f.encrypted)
       return std::unexpected(Error{"encrypted Word 6/95 unsupported"});
     f.fc_min = U32(word, 24);
     const uint32_t fc_max = U32(word, 28);
     f.ccp_text = U32(word, 52);
+    f.ccp_ftn = U32(word, 56);
+    f.ccp_hdd = U32(word, 60);
+    const uint64_t text_cps =
+        static_cast<uint64_t>(f.ccp_text) + f.ccp_ftn + f.ccp_hdd;
     if (f.fc_min < kLegacyHeaderSize + kLegacyPairCount * 8 ||
-        f.fc_min > fc_max || fc_max > word.size() || f.ccp_text > word.size())
+        f.fc_min > fc_max || fc_max > word.size() || text_cps > word.size())
       return std::unexpected(Error{"invalid Word 6/95 text range"});
-    if (!f.complex && f.ccp_text > fc_max - f.fc_min)
+    if (!f.complex && text_cps * (f.ext_char ? 2 : 1) > fc_max - f.fc_min)
       return std::unexpected(Error{"Word 6/95 text exceeds fcMac"});
     f.fc_clx = U32(word, kLegacyPairStart + kLegacyClxPair * 8);
     f.lcb_clx = U32(word, kLegacyPairStart + kLegacyClxPair * 8 + 4);
@@ -101,6 +109,23 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
                   U32(word, kLegacyPairStart + kLegacyChpxPair * 8 + 4)};
     f.papx_bte = {U32(word, kLegacyPairStart + kLegacyPapxPair * 8),
                   U32(word, kLegacyPairStart + kLegacyPapxPair * 8 + 4)};
+    // Plcfsed, PlcfHdd and the DOP also live in WordDocument for Word 6/95;
+    // the fc/lcb slots keep the Word 97 numbering.
+    constexpr size_t kLegacySedPair = 6;
+    constexpr size_t kLegacyHddPair = 11;
+    constexpr size_t kLegacyDopPair = 31;
+    auto pair_at = [&](size_t i) -> Fib::Range {
+      return {U32(word, kLegacyPairStart + i * 8),
+              U32(word, kLegacyPairStart + i * 8 + 4)};
+    };
+    f.sed = pair_at(kLegacySedPair);
+    f.headers = pair_at(kLegacyHddPair);
+    f.dop = pair_at(kLegacyDopPair);
+    for (const Fib::Range& range : {f.sed, f.headers, f.dop})
+      if (range.size && (range.offset > word.size() ||
+                         range.size > word.size() - range.offset))
+        return std::unexpected(
+            Error{"Word 6/95 FIB range outside WordDocument"});
     if (f.lcb_clx &&
         (f.fc_clx > word.size() || f.lcb_clx > word.size() - f.fc_clx))
       return std::unexpected(Error{"Word 6/95 CLX outside WordDocument"});

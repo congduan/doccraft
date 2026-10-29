@@ -630,7 +630,9 @@ TEST(LegacyWord, ComplexWord95UsesDirectFcAndUtf16) {
   Put16(word, 0, 0xA699);
   Put16(word, 2, 0x68);
   Put16(word, 6, 0x0409);
-  Put16(word, 10, 0x0004);
+  // fComplex plus FibBase.fExtChar: Word 6/95 stores 16-bit text and says so
+  // in the FIB, not in the piece descriptors.
+  Put16(word, 10, 0x1004);
   Put32(word, 24, 768);
   Put32(word, 28, 774);
   Put32(word, 52, 3);
