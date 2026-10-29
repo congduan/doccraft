@@ -41,6 +41,10 @@ inline constexpr uint8_t kLegacySprmPFTtp = 0x19;
 inline constexpr uint8_t kLegacySprmPWr = 0x25;
 inline constexpr uint8_t kLegacySprmPFNoAutoHyph = 0x2C;
 inline constexpr uint8_t kLegacySprmPFWidowControl = 0x33;
+// Section properties that identify the header/footer stories of a Word 6/95
+// section; the values are read by the legacy header reader, not translated.
+inline constexpr uint8_t kLegacySprmSFTitlePage = 0x8F;
+inline constexpr uint8_t kLegacySprmSGprfIhdt = 0x99;
 inline constexpr uint8_t kLegacySprmCFBold = 0x55;
 inline constexpr uint8_t kLegacySprmCFItalic = 0x56;
 inline constexpr uint8_t kLegacySprmCFStrike = 0x57;

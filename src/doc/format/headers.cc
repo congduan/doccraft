@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -40,6 +41,114 @@ constexpr size_t kStoryPreamble = 6;
 // grffldEnd flags of a field-end record ([MS-DOC] grffldEnd).
 constexpr uint8_t kFldResultsDirty = 0x04;
 constexpr uint8_t kFldLocked = 0x10;
+
+// Word 6/95 PlcfHdd stores only the stories a section actually owns. The bit
+// order below is the order the stories appear in the PLC (LibreOffice
+// ww8scan.hxx nsHdFtFlags / WW8PLCF_HdFt::GetTextPos).
+constexpr uint8_t kLegacyStoryFlags[kStoryCount] = {0x01, 0x02, 0x04,
+                                                    0x08, 0x10, 0x20};
+// The final CP of a Word 6/95 PlcfHdd may sit up to two CPs past ccpHdd: those
+// CPs are the last story's paragraph marks, outside the counted text.
+constexpr uint32_t kLegacyHddGuard = 2;
+// [MS-DOC] §2.9.210: cbGrpprl is signed and at most 0x3FA2.
+constexpr size_t kMaxSepxSize = 0x3FA2;
+
+struct LegacyStoryFlags {
+  uint8_t stories = 0;
+  bool title_page = false;
+};
+
+// Applies the one-byte Word 6/95 sprm table to one SEPX and returns the
+// section's grpfIhdt and title-page flags.
+std::expected<LegacyStoryFlags, Error> ReadLegacySepx(Bytes raw) {
+  LegacyStoryFlags flags;
+  for (size_t p = 0; p < raw.size();) {
+    const uint8_t code = raw[p++];
+    if (code == 0)
+      continue;  // Word 6 separator padding.
+    const LegacySprmSpec* spec = FindLegacySprmSpec(code);
+    if (!spec)
+      return std::unexpected(Error{"unsupported Word 6/95 SEPX sprm"});
+    size_t size = 0;
+    switch (spec->width) {
+      case LegacySprmWidth::kFix:
+        size = spec->size;
+        break;
+      case LegacySprmWidth::kVar:
+        if (p >= raw.size())
+          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+        size = static_cast<size_t>(raw[p]) + 1 + spec->size;
+        break;
+      case LegacySprmWidth::kVar2: {
+        if (raw.size() - p < 2)
+          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+        const size_t count = U16(raw, p);
+        if (!count)
+          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+        size = count + 1;
+        break;
+      }
+    }
+    if (size > raw.size() - p)
+      return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+    if (code == kLegacySprmSGprfIhdt && size) {
+      flags.stories = raw[p];
+    } else if (code == kLegacySprmSFTitlePage && size) {
+      flags.title_page = raw[p] != 0;
+    }
+    p += size;
+  }
+  return flags;
+}
+
+// Reads the section story flags in document order. A damaged or missing
+// Plcfsed yields no stories; the caller turns that into a warning.
+std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
+    Bytes word, const Fib& fib, size_t sections,
+    std::vector<std::string>* warnings) {
+  std::vector<LegacyStoryFlags> out(sections);
+  if (!sections || !fib.sed.size)
+    return out;
+  if (!Valid(word, fib.sed) || fib.sed.size < 20 || (fib.sed.size - 4) % 16)
+    return std::unexpected(Error{"invalid Word 6/95 SED PLC"});
+  Bytes plc = word.subspan(fib.sed.offset, fib.sed.size);
+  const size_t count = (plc.size() - 4) / 16;
+  if (count != sections)
+    return std::unexpected(Error{"header section count mismatch"});
+  for (size_t i = 0; i < count; ++i) {
+    const size_t pos = 4 * (count + 1) + 12 * i;
+    uint32_t fc = U32(plc, pos + 2);
+    if (fc == kUndefinedU32)
+      continue;
+    // A few Word 6 writers store fcSepx one byte past the length prefix; when
+    // that frame is impossible, retry the preceding byte before giving up.
+    auto frame = [&](uint32_t at) -> std::expected<Bytes, Error> {
+      if (at > word.size() || word.size() - at < 2)
+        return std::unexpected(Error{"Word 6/95 SEPX outside WordDocument"});
+      const size_t len = U16(word, at);
+      if (len > kMaxSepxSize || len > word.size() - at - 2)
+        return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+      return word.subspan(at + 2, len);
+    };
+    auto raw = frame(fc);
+    if (!raw && fc > 0) {
+      auto shifted = frame(fc - 1);
+      if (shifted) {
+        raw = shifted;
+        if (warnings)
+          warnings->push_back(
+              "corrected Word 6/95 SEPX offset: stored one byte too high");
+      }
+    }
+    if (!raw)
+      return std::unexpected(raw.error());
+    auto flags = ReadLegacySepx(*raw);
+    if (!flags)
+      return std::unexpected(flags.error());
+    out[i] = *flags;
+  }
+  return out;
+}
 
 }  // namespace
 
@@ -317,8 +426,12 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     doc.warnings.push_back("skipped header field PLC: " +
                            status.error().message);
   }
-  if (!Valid(table, fib.headers) || fib.headers.size % 4 ||
-      fib.headers.size < 4 * (kStoryCount + 1)) {
+  // Word 6/95 keeps PlcfHdd in WordDocument and stores only the stories a
+  // section owns; Word 97+ uses the table stream with a six-CP preamble.
+  Bytes plc_source = fib.legacy ? word : table;
+  const size_t minimum_plc = fib.legacy ? 4 * 2 : 4 * (kStoryCount + 1);
+  if (!Valid(plc_source, fib.headers) || fib.headers.size % 4 ||
+      fib.headers.size < minimum_plc) {
     return std::unexpected(Error{"invalid header story PLC"});
   }
   std::vector<std::vector<uint8_t>> prcs;
@@ -326,8 +439,50 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
   if (!chars) {
     return std::unexpected(chars.error());
   }
-  Bytes plc = table.subspan(fib.headers.offset, fib.headers.size);
+  Bytes plc = plc_source.subspan(fib.headers.offset, fib.headers.size);
   const size_t available = plc.size() / 4 - 1;
+  if (fib.legacy) {
+    auto flags = ReadLegacyStoryFlags(word, fib, sections, &doc.warnings);
+    if (!flags)
+      return std::unexpected(flags.error());
+    size_t index = 0;
+    bool facing_pages = false;
+    if (fib.dop.size && Valid(word, fib.dop) && fib.dop.size >= 2) {
+      const uint16_t dop = U16(word, fib.dop.offset);
+      facing_pages = (dop & 0x0001) != 0;
+      // DOP.grpfIhdt reserves one leading story per set bit (separators and
+      // notices); LibreOffice skips them the same way (WW8PLCF_HdFt).
+      index = std::popcount(static_cast<unsigned>(dop >> 8) & 0x3Fu);
+    }
+    for (size_t section = 0; section < sections; ++section) {
+      for (size_t story = 0; story < kStoryCount; ++story) {
+        const uint8_t bit = kLegacyStoryFlags[story];
+        if (!((*flags)[section].stories & bit))
+          continue;
+        if (index >= available) {
+          return std::unexpected(
+              Error{"header story PLC is shorter than the section count"});
+        }
+        const uint32_t first = U32(plc, 4 * index);
+        const uint32_t last = U32(plc, 4 * (index + 1));
+        ++index;
+        if (last < first || last > fib.ccp_hdd + kLegacyHddGuard) {
+          return std::unexpected(Error{"header CP range outside story"});
+        }
+        // Even stories are used only when the document enables facing pages;
+        // first-page stories only when the section enables a title page.
+        const bool enabled = (story == 0 || story == 2) ? facing_pages
+                             : story >= 4 ? (*flags)[section].title_page
+                                          : true;
+        if (enabled) {
+          out[section][story] =
+              ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base,
+                                  first, last, &field_status, nullptr);
+        }
+      }
+    }
+    return out;
+  }
   std::vector<std::pair<uint64_t, uint64_t>> story_ranges;
   for (size_t section = 0; section < sections; ++section) {
     for (size_t story = 0; story < kStoryCount; ++story) {

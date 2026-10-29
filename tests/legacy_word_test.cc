@@ -711,6 +711,178 @@ TEST(LegacyWord, RejectsTruncatedFibAndMalformedClx) {
   EXPECT_EQ(text.error().message, "invalid Word 6/95 PlcPcd size");
 }
 
+// Builds a Word 6/95 document whose text plane is body text followed by the
+// header/footer stories. `section_flags` holds each section's sprmSGprfIhdt
+// value; the stories are laid out in PLC order after the body.
+struct LegacyHeaderSample {
+  std::vector<std::string> stories;
+  std::vector<uint8_t> section_flags;
+  std::vector<uint32_t> section_ends;
+  std::vector<uint32_t> plcf_cps;
+  bool facing_pages = false;
+  bool title_page = false;
+  uint8_t word_ihdt = 0;
+  bool truncate_plcf = false;
+};
+
+std::vector<uint8_t> Word6HeaderDocument(uint16_t ident, uint16_t nfib,
+                                         const std::string& body,
+                                         const LegacyHeaderSample& sample) {
+  constexpr size_t kFcMin = 768;
+  constexpr size_t kDop = 400;
+  constexpr size_t kSed = 600;
+  constexpr size_t kSepx = 660;
+  constexpr size_t kHdd = 720;
+  std::vector<uint8_t> word(4096, 0);
+  Put16(word, 0, ident);
+  Put16(word, 2, nfib);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, kFcMin);
+  uint32_t story_bytes = 0;
+  for (const auto& story : sample.stories)
+    story_bytes += static_cast<uint32_t>(story.size());
+  Put32(word, 52, static_cast<uint32_t>(body.size()));
+  Put32(word, 56, 0);
+  Put32(word, 60, story_bytes);
+  Put32(word, 28, static_cast<uint32_t>(kFcMin + body.size() + story_bytes));
+  std::copy(body.begin(), body.end(), word.begin() + kFcMin);
+  size_t at = kFcMin + body.size();
+  for (const auto& story : sample.stories) {
+    std::copy(story.begin(), story.end(), word.begin() + at);
+    at += story.size();
+  }
+  // DOP: fFacingPages plus the word-level grpfIhdt skip count (zero here).
+  Put32(word, 88 + 31 * 8, kDop);
+  Put32(word, 92 + 31 * 8, 88);
+  word[kDop] = sample.facing_pages ? 1 : 0;
+  word[kDop + 1] = sample.word_ihdt;
+  // Plcfsed: aCP array then 12-byte SEDs. Word 6/95 keeps it in WordDocument.
+  const size_t sections = sample.section_flags.size();
+  Put32(word, 88 + 6 * 8, kSed);
+  Put32(word, 92 + 6 * 8,
+        static_cast<uint32_t>(4 * (sections + 1) + 12 * sections));
+  for (size_t i = 0; i < sections; ++i)
+    Put32(word, kSed + 4 * (i + 1), sample.section_ends[i]);
+  for (size_t i = 0; i < sections; ++i) {
+    size_t pos = kSed + 4 * (sections + 1) + 12 * i;
+    size_t sepx = kSepx + 40 * i;
+    Put32(word, pos + 2, static_cast<uint32_t>(sepx));
+    Put32(word, pos + 8, 0xFFFFFFFF);
+    size_t len = sample.title_page ? 4 : 2;
+    Put16(word, sepx, static_cast<uint16_t>(len));
+    word[sepx + 2] = 0x99;  // sprmSGprfIhdt.
+    word[sepx + 3] = sample.section_flags[i];
+    if (sample.title_page) {
+      word[sepx + 4] = 0x8F;  // sprmSFTitlePage.
+      word[sepx + 5] = 1;
+    }
+  }
+  // PlcfHdd: only the stories present in the document are stored.
+  Put32(word, 88 + 11 * 8, kHdd);
+  const size_t cps = sample.plcf_cps.size();
+  Put32(word, 92 + 11 * 8,
+        sample.truncate_plcf ? 8 : static_cast<uint32_t>(4 * cps));
+  for (size_t i = 0; i < cps && (i < 2 || !sample.truncate_plcf); ++i)
+    Put32(word, kHdd + 4 * i, sample.plcf_cps[i]);
+  return word;
+}
+
+LegacyHeaderSample HeaderSample(std::vector<std::string> stories,
+                                std::vector<uint8_t> flags,
+                                std::vector<uint32_t> ends) {
+  LegacyHeaderSample sample;
+  sample.section_ends = std::move(ends);
+  sample.plcf_cps.push_back(0);
+  for (const auto& story : stories)
+    sample.plcf_cps.push_back(sample.plcf_cps.back() +
+                              static_cast<uint32_t>(story.size()));
+  sample.stories = std::move(stories);
+  sample.section_flags = std::move(flags);
+  return sample;
+}
+
+TEST(LegacyWord, Word6HeaderAndFooterStoriesReachDocx) {
+  auto sample = HeaderSample({"HDR\r", "FTR\r"}, {0x0A}, {4});
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  EXPECT_EQ(fib->ccp_hdd, 8u);
+  EXPECT_EQ(fib->ccp_ftn, 0u);
+  auto document = doccraft::doc::ParseFormatted(word, word, *fib);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "HDR");
+  ASSERT_EQ(document->section.headers[3].size(), 1u);
+  EXPECT_EQ(document->section.headers[3][0].runs[0].text, "FTR");
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/header1.xml").find("HDR"), std::string::npos);
+  EXPECT_NE(Part(*zip, "word/footer2.xml").find("FTR"), std::string::npos);
+}
+
+TEST(LegacyWord, Word95EvenHeaderFollowsFacingPagesFlag) {
+  auto sample = HeaderSample({"EVEN\r", "ODD\r"}, {0x03}, {6});
+  sample.facing_pages = true;
+  auto word = Word6HeaderDocument(0xA699, 0x68, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section.headers[0].size(), 1u);
+  EXPECT_EQ(document->section.headers[0][0].runs[0].text, "EVEN");
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "ODD");
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("w:headerReference w:type=\"even\""), std::string::npos);
+  EXPECT_NE(xml.find("w:headerReference w:type=\"default\""),
+            std::string::npos);
+}
+
+TEST(LegacyWord, Word6PerSectionHeaderStoriesFollowSectionOrder) {
+  auto sample = HeaderSample({"ONE\r", "TWO\r"}, {0x02, 0x02}, {3, 5});
+  auto word = Word6HeaderDocument(0xA5DC, 0x65,
+                                  "A\r\x0c"
+                                  "B\r",
+                                  sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section_breaks.size(), 1u);
+  ASSERT_EQ(document->section_breaks[0].second.headers[1].size(), 1u);
+  EXPECT_EQ(document->section_breaks[0].second.headers[1][0].runs[0].text,
+            "ONE");
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "TWO");
+}
+
+TEST(LegacyWord, Word6WordLevelStoryBitsSkipLeadingPlcEntries) {
+  // DOP.grpfIhdt reserves the leading two stories before the section's own
+  // header; only the third PLC entry may become the default header.
+  auto sample = HeaderSample({"XX", "YY", "HDR\r"}, {0x02}, {4});
+  sample.plcf_cps = {0, 2, 4, 8};
+  sample.word_ihdt = 0x03;
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "HDR");
+}
+
+TEST(LegacyWord, TruncatedHeaderStoryPlcKeepsBodyWithWarning) {
+  auto sample = HeaderSample({"HDR\r", "FTR\r"}, {0x0A}, {4});
+  sample.truncate_plcf = true;
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "Body");
+  EXPECT_TRUE(document->section.headers[1].empty());
+  bool warned = false;
+  for (const auto& warning : document->warnings)
+    warned =
+        warned || warning.find("skipped header stories") != std::string::npos;
+  EXPECT_TRUE(warned);
+}
+
 TEST(LegacyWord, ReadsBoundedSummaryCodepage) {
   std::vector<uint8_t> summary(72);
   Put16(summary, 0, 0xFFFE);

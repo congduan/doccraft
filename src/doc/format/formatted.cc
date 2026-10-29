@@ -222,6 +222,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     return std::unexpected(sections_result.error());
   std::vector<std::pair<uint32_t, model::Section>> sections =
       std::move(*sections_result);
+  const size_t declared_sections = sections.size();
   if (!sections.empty())
     doc.section = sections.back().second;
   auto note_refs = ReadNoteReferences(table, fib, &doc.warnings);
@@ -917,9 +918,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     return std::unexpected(comments.error());
   }
   // Header/footer stories are per section: PlcfHdd holds six per section, in
-  // document order, so section k reads entries 6k..6k+5.
+  // document order, so section k reads entries 6k..6k+5. Word 6/95 stores only
+  // the stories a section owns, but the SED count still defines the section
+  // order used to assign them.
   const size_t section_count =
-      doc.section_breaks.empty() ? 1 : doc.section_breaks.size() + 1;
+      fib.legacy && declared_sections
+          ? declared_sections
+          : (doc.section_breaks.empty() ? 1 : doc.section_breaks.size() + 1);
   auto headers = ReadHeaders(doc, word, table, fib, *chpx, *papx, section_count,
                              *bookmarks);
   if (!headers) {

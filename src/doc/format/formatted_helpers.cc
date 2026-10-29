@@ -42,9 +42,11 @@ std::expected<std::vector<std::pair<uint32_t, model::Section>>, Error>
 ReadSections(Bytes word, Bytes table, const Fib& fib) {
   std::vector<std::pair<uint32_t, model::Section>> sections;
   if (fib.sed.size) {
-    if (!Valid(table, fib.sed) || fib.sed.size < 20 || (fib.sed.size - 4) % 16)
+    // Word 6/95 keeps Plcfsed in WordDocument; Word 97+ uses the table stream.
+    Bytes source = fib.legacy ? word : table;
+    if (!Valid(source, fib.sed) || fib.sed.size < 20 || (fib.sed.size - 4) % 16)
       return std::unexpected(Error{"invalid SED PLC"});
-    Bytes b = table.subspan(fib.sed.offset, fib.sed.size);
+    Bytes b = source.subspan(fib.sed.offset, fib.sed.size);
     size_t n = (b.size() - 4) / 16;
     uint32_t previous = 0;
     for (size_t i = 0; i < n; i++) {
@@ -52,6 +54,13 @@ ReadSections(Bytes word, Bytes table, const Fib& fib) {
       if (end <= previous)
         return std::unexpected(Error{"invalid section CP order"});
       previous = end;
+      // Word 6/95 SEPX payloads use the one-byte sprm table, which this
+      // section-property mapper does not understand; only the section bounds
+      // are used so header/footer stories can be split per section.
+      if (fib.legacy) {
+        sections.emplace_back(end, model::Section{});
+        continue;
+      }
       size_t pos = 4 * (n + 1) + 12 * i;
       uint32_t fc = U32(b, pos + 2);
       model::Section section;
