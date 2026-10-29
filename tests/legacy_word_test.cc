@@ -257,12 +257,63 @@ std::vector<uint8_t> Word6ChpxDocument(const std::vector<uint8_t>& sprms) {
   return word;
 }
 
+// Builds a Word 6/95 document whose single PAPX FKP range carries `sprms`.
+// `sprms` must be an even number of bytes so the BX length covers exactly the
+// two style bytes plus the modifiers.
+std::vector<uint8_t> Word6PapxDocument(const std::vector<uint8_t>& sprms) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 772);
+  Put32(word, 52, 4);
+  word[768] = 'A';
+  word[769] = 'B';
+  word[770] = 'C';
+  word[771] = '\r';
+  // PAPX BTE PLC at 2060 points at FKP page 3 (1536).
+  Put32(word, 88 + 13 * 8, 2060);
+  Put32(word, 92 + 13 * 8, 10);
+  Put32(word, 2060, 768);
+  Put32(word, 2064, 772);
+  Put16(word, 2068, 3);
+  // PAPX FKP: one range, BX at 504 carrying style 0 and `sprms`.
+  Put32(word, 1536, 768);
+  Put32(word, 1540, 772);
+  word[1544] = 252;
+  word[2040] = static_cast<uint8_t>((2 + sprms.size()) / 2);
+  std::copy(sprms.begin(), sprms.end(), word.begin() + 2043);
+  word[2047] = 1;
+  return word;
+}
+
 std::expected<doccraft::model::Document, doccraft::doc::Error> ParseWord6(
     const std::vector<uint8_t>& word) {
   auto fib = doccraft::doc::ParseFib(word);
   if (!fib)
     return std::unexpected(fib.error());
   return doccraft::doc::ParseFormatted(word, word, *fib);
+}
+
+TEST(LegacyWord, Word6FkpMapsFrameWrapAndLanguage) {
+  // sprmPWr (0x25, one byte) is a paragraph property: wrap=2 followed by
+  // sprmPJc (0x05) right align proves the next modifier is still applied.
+  auto paragraph = ParseWord6(Word6PapxDocument({0x25, 2, 0x05, 2}));
+  ASSERT_TRUE(paragraph) << paragraph.error().message;
+  ASSERT_EQ(paragraph->paragraphs.size(), 1u);
+  EXPECT_EQ(paragraph->paragraphs[0].frame_wrap, 2);
+  EXPECT_EQ(paragraph->paragraphs[0].align, 2);
+  // sprmCLid (0x61, two bytes LID) maps to sprmCRgLid0 on the run; bold and
+  // italic around it prove the scan no longer skips the item.
+  auto run =
+      ParseWord6(Word6ChpxDocument({0x55, 1, 0x61, 0x09, 0x04, 0x56, 1}));
+  ASSERT_TRUE(run) << run.error().message;
+  ASSERT_EQ(run->paragraphs.size(), 1u);
+  ASSERT_EQ(run->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(run->paragraphs[0].runs[0].bold);
+  EXPECT_TRUE(run->paragraphs[0].runs[0].italic);
+  EXPECT_EQ(run->paragraphs[0].runs[0].lang, "en-US");
 }
 
 TEST(LegacyWord, Word6OversizedPictureFailsWholeDocument) {
@@ -278,8 +329,8 @@ TEST(LegacyWord, Word6OversizedPictureFailsWholeDocument) {
 }
 
 TEST(LegacyWord, Word6SkipsUnmappedSizedSprmAndKeepsFollowing) {
-  // bold, sprmPWr (0x25, one byte, unmapped), italic.
-  auto document = ParseWord6(Word6ChpxDocument({0x55, 1, 0x25, 0, 0x56, 1}));
+  // bold, sprmPFSideBySide (0x06, one byte, unmapped), italic.
+  auto document = ParseWord6(Word6ChpxDocument({0x55, 1, 0x06, 0, 0x56, 1}));
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->paragraphs.size(), 1u);
   ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
@@ -288,9 +339,9 @@ TEST(LegacyWord, Word6SkipsUnmappedSizedSprmAndKeepsFollowing) {
 }
 
 TEST(LegacyWord, Word6SkipsUnmappedTwoByteSprmAndKeepsFollowing) {
-  // bold, sprmCLid (0x61, two bytes, unmapped), italic.
+  // bold, sprmCIbstRMark (0x45, two bytes, unmapped), italic.
   auto document =
-      ParseWord6(Word6ChpxDocument({0x55, 1, 0x61, 0x09, 0x04, 0x56, 1}));
+      ParseWord6(Word6ChpxDocument({0x55, 1, 0x45, 0x09, 0x04, 0x56, 1}));
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->paragraphs.size(), 1u);
   ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
@@ -356,10 +407,11 @@ TEST(LegacyWord, NormalizeLegacySprmsRejectsTruncatedOperands) {
 
 TEST(LegacyWord, NormalizeLegacySprmsSkipsKnownWidthsAndReportsPartial) {
   std::vector<uint8_t> out;
-  // bold, sprmPWr, sprmCLid, italic -> both mapped sprms survive, but the
-  // result is reported as partial because two sprms were skipped.
+  // bold, sprmPFSideBySide, sprmCIbstRMark, italic -> both mapped sprms
+  // survive, but the result is reported as partial because two sprms were
+  // skipped.
   EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
-      std::vector<uint8_t>{0x55, 1, 0x25, 0, 0x61, 0x09, 0x04, 0x56, 1}, out));
+      std::vector<uint8_t>{0x55, 1, 0x06, 0, 0x45, 0x09, 0x04, 0x56, 1}, out));
   ASSERT_EQ(out.size(), 6u);
   EXPECT_EQ(out[0], 0x35);
   EXPECT_EQ(out[1], 0x08);  // little-endian sprmCFBold (0x0835)
@@ -370,7 +422,7 @@ TEST(LegacyWord, NormalizeLegacySprmsSkipsKnownWidthsAndReportsPartial) {
 TEST(LegacyWord, LegacyScanDistinguishesSkipFromStop) {
   std::vector<uint8_t> out;
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
-                std::vector<uint8_t>{0x55, 1, 0x25, 0}, out),
+                std::vector<uint8_t>{0x55, 1, 0x06, 0}, out),
             doccraft::doc::detail::LegacySprmScan::kPartial);
   out.clear();
   EXPECT_EQ(

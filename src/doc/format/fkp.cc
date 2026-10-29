@@ -347,6 +347,10 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = kSprmPFTtp;
         size = 1;
         break;
+      case kLegacySprmPWr:
+        modern = kSprmPWr;
+        size = 1;
+        break;
       case kLegacySprmPFWidowControl:
         modern = kSprmPFWidowControl;
         size = 1;
@@ -381,6 +385,12 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         break;
       case kLegacySprmCDxaSpace:
         modern = kSprmCDxaSpace;
+        size = 2;
+        break;
+      case kLegacySprmCLid:
+        // Word 6/95 stores the 2-byte LID directly; sprmCRgLid0 takes the
+        // same 2-byte Lid operand, so the operand needs no translation.
+        modern = kSprmCRgLid0;
         size = 2;
         break;
       case kLegacySprmCHps:
