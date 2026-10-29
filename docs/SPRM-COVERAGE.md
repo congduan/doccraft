@@ -396,20 +396,20 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0x14` | sprmPDyaLine | 同名 | 4B |
 | `0x15`/`0x16` | sprmPDyaBefore/After | 同名 | 2B |
 | `0x18`/`0x19` | sprmPFInTable/PFTtp | 同名 | 1B |
+| `0x25` | sprmPWr | sprmPWr | 1B；`LegacyWord.Word6FkpMapsFrameWrapAndLanguage` |
 | `0x2C` | sprmPFNoAutoHyph | 同名 | 1B；M13 |
 | `0x33` | sprmPFWidowControl | 同名 | 1B |
 | `0x55`/`0x56`/`0x57` | sprmCFBold/Italic/Strike | 同名 | 1B |
 | `0x5D` | sprmCFtc | sprmCRgFtc0 | 2B；M13 起映射字体名 |
 | `0x5E` | sprmCKul | 同名 | 1B |
 | `0x60` | sprmCDxaSpace | 同名 | 2B；M13 |
+| `0x61` | sprmCLid | sprmCRgLid0 | 2B；操作数即 LID，直译；`LegacyWord.Word6FkpMapsFrameWrapAndLanguage` |
 | `0x62` | sprmCIco | 同名 | 1B |
 | `0x63` | sprmCHps | 同名 | **2B**；wvWare spra 位与 LO aSprms 表双证，hps<256 时与 1 字节读法等价；M13 修正 |
 
-> 实测样本中仍遇到的未映射项：`0x25` sprmPWr（十进制 37，框架环绕；1 字节）、
-> `0x61` sprmCLid（语言；2 字节；现代对应 sprmCRgLid0 操作数宽度不同，不能直译）。
-> r16 起二者均按 LO 表宽度整项跳过，不再丢弃该组后续修饰。表外 opcode（如
-> `Bug51944.doc` 的字节 `0x37`，十进制 55）或变长操作数截断（`Bug50955.doc` 的
-> `0xBF`）仍按保守策略停止并警告。
+> 实测样本中仍遇到的未映射项：`Bug51944.doc` 的表外 opcode `0x37`（十进制 55）与
+> `Bug50955.doc` 的 `0xBF` 变长操作数截断，二者仍按保守策略停止并警告。`0x25`
+> 与 `0x61` 自 r19 起已映射（见上表），不再走跳过路径。
 
 ## 规范外旧账别名（不计入 314）
 
