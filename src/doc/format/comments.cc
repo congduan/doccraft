@@ -42,11 +42,17 @@ constexpr uint16_t kXmlFirstPrintable = 0x20;
 constexpr uint16_t kXmlLastBeforeSurrogates = 0xD7FF;
 constexpr uint16_t kXmlFirstAfterSurrogates = 0xE000;
 constexpr uint16_t kXmlLastBmp = 0xFFFD;
+constexpr uint32_t kXmlLastCodePoint = 0x10FFFF;
 
-bool IsXmlCharacter(uint16_t c) {
+bool IsXmlBmpCharacter(uint16_t c) {
   return c == kXmlTab || c == kXmlLineFeed || c == kXmlCarriageReturn ||
          (c >= kXmlFirstPrintable && c <= kXmlLastBeforeSurrogates) ||
          (c >= kXmlFirstAfterSurrogates && c <= kXmlLastBmp);
+}
+
+bool IsXmlCodePoint(uint32_t c) {
+  return (c >= kUtf16SurrogateBase && c <= kXmlLastCodePoint) ||
+         (c <= kXmlLastBmp && IsXmlBmpCharacter(static_cast<uint16_t>(c)));
 }
 
 struct CommentAnchor {
@@ -82,9 +88,18 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(
                             std::to_string(i + 1));
     } else {
       for (size_t k = 0; k < cch; ++k) {
-        const uint16_t c =
-            U16(plc, atrd + kInitialsCchSize + k * kUtf16CodeUnitSize);
-        if (IsXmlCharacter(c))
+        uint32_t c = U16(plc, atrd + kInitialsCchSize + k * kUtf16CodeUnitSize);
+        if (c >= kUtf16HighSurrogateMin && c <= kUtf16HighSurrogateMax &&
+            k + 1 < cch) {
+          const uint32_t low =
+              U16(plc, atrd + kInitialsCchSize + (k + 1) * kUtf16CodeUnitSize);
+          if (low >= kUtf16LowSurrogateMin && low <= kUtf16LowSurrogateMax) {
+            c = kUtf16SurrogateBase + ((c - kUtf16HighSurrogateMin) << 10) +
+                (low - kUtf16LowSurrogateMin);
+            ++k;
+          }
+        }
+        if (IsXmlCodePoint(c))
           AppendUtf8(anchor.initials, c);
       }
     }

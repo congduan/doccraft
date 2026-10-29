@@ -1197,6 +1197,68 @@ TEST(M15StoryPlc, CommentInitialsDropInvalidXmlCharacters) {
   EXPECT_EQ(comments.find('\0'), std::string::npos);
 }
 
+TEST(M15StoryPlc, CommentInitialsKeepSupplementaryCharacter) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  const size_t record = s.fib.and_ref.offset + 8;
+  Put16(s.table, record, 2);
+  Put16(s.table, record + 2, 0xd83d);
+  Put16(s.table, record + 4, 0xde00);
+  Put16(s.table, record + 20, 0xffff);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  const std::string emoji = "\xf0\x9f\x98\x80";
+  EXPECT_EQ(parsed->comments[0].initials, emoji);
+  EXPECT_EQ(parsed->comments[0].author, emoji);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string comments = Part(*zip, "word/comments.xml");
+  EXPECT_NE(comments.find("w:initials=\"" + emoji + "\""), std::string::npos);
+  EXPECT_NE(comments.find("w:author=\"" + emoji + "\""), std::string::npos);
+}
+
+TEST(M15StoryPlc, CommentInitialsDropTrailingHighSurrogate) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  const size_t record = s.fib.and_ref.offset + 8;
+  Put16(s.table, record, 1);
+  Put16(s.table, record + 2, 0xd83d);
+  Put16(s.table, record + 20, 0xffff);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  EXPECT_TRUE(parsed->comments[0].initials.empty());
+  EXPECT_TRUE(parsed->comments[0].author.empty());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/comments.xml").find("w:author=\"doccraft\""),
+            std::string::npos);
+}
+
+TEST(M15StoryPlc, CommentInitialsCheckCodeUnitAfterHighSurrogate) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  const size_t record = s.fib.and_ref.offset + 8;
+  Put16(s.table, record, 3);
+  Put16(s.table, record + 2, 0xd83d);
+  Put16(s.table, record + 4, 0x0020);
+  Put16(s.table, record + 6, 'A');
+  Put16(s.table, record + 20, 0xffff);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  EXPECT_EQ(parsed->comments[0].initials, " A");
+  EXPECT_EQ(parsed->comments[0].author, " A");
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/comments.xml").find("w:initials=\" A\""),
+            std::string::npos);
+}
+
 TEST(M15StoryPlc, CommentInitialsFillNineCharacterBuffer) {
   Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
   s.fib.and_ref = PutCommentRefPlc(s, 1);
