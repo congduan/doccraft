@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -242,6 +243,36 @@ void AppendLegacySprm(std::vector<uint8_t>& out, uint16_t op, Bytes value) {
   out.push_back(static_cast<uint8_t>(op >> 8));
   out.insert(out.end(), value.begin(), value.end());
 }
+
+// The ChgTabs operands normally start with a one-byte cb. A cb of 0xFF instead
+// switches to a ChgTabsOperand whose first bytes are the deleted and inserted
+// tab counts: nDel entries of 4 bytes, then nIns entries of 3 bytes, so the
+// operand is 2 + 4*nDel + 3*nIns bytes after the cb. Transcribed from
+// LibreOffice sw/source/filter/ww8/ww8scan.cxx GetSprmTailLen (case 23 /
+// 0xC615); the byte counts come from the operand, not from a fixed width.
+constexpr uint8_t kChgTabsExtendedCb = 0xFF;
+constexpr size_t kChgTabsCountBytes = 2;
+constexpr size_t kChgTabsDelEntrySize = 4;
+constexpr size_t kChgTabsInsEntrySize = 3;
+
+// `p` is the offset of the cb byte; the result counts the operand bytes that
+// follow the opcode. No value means the counts run past the buffer.
+std::optional<size_t> ChgTabsOperandSize(Bytes raw, size_t p) {
+  if (p >= raw.size())
+    return std::nullopt;
+  if (raw[p] != kChgTabsExtendedCb)
+    return static_cast<size_t>(raw[p]) + 1;
+  const size_t del_index = p + 1;
+  if (del_index >= raw.size())
+    return std::nullopt;
+  const size_t del = raw[del_index];
+  const size_t ins_index = del_index + 1 + kChgTabsDelEntrySize * del;
+  if (ins_index >= raw.size())
+    return std::nullopt;
+  const size_t ins = raw[ins_index];
+  return kChgTabsCountBytes + kChgTabsDelEntrySize * del +
+         kChgTabsInsEntrySize * ins + 1;
+}
 }  // namespace
 
 // Word 6/95 grpprls use one-byte opcodes. Translate the scalar properties
@@ -275,9 +306,15 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = kSprmPFPageBreakBefore;
         size = 1;
         break;
-      case kLegacySprmPChgTabsPapx:
-        size = p < raw.size() ? static_cast<size_t>(raw[p]) + 1 : 0;
+      case kLegacySprmPChgTabsPapx: {
+        // The cb byte selects between a flat length and the ChgTabsOperand
+        // counts; both must resolve inside the buffer.
+        const std::optional<size_t> operand = ChgTabsOperandSize(raw, p);
+        if (!operand)
+          return LegacySprmScan::kStopped;
+        size = *operand;
         break;
+      }
       case kLegacySprmPDxaRight:
         modern = kSprmPDxaRight80;
         size = 2;
@@ -369,7 +406,14 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         case LegacySprmWidth::kVar:
           if (p >= raw.size())
             return LegacySprmScan::kStopped;
-          size = static_cast<size_t>(raw[p]) + 1 + spec->size;
+          if (code == kLegacySprmPChgTabs) {
+            const std::optional<size_t> operand = ChgTabsOperandSize(raw, p);
+            if (!operand)
+              return LegacySprmScan::kStopped;
+            size = *operand;
+          } else {
+            size = static_cast<size_t>(raw[p]) + 1 + spec->size;
+          }
           break;
         case LegacySprmWidth::kVar2:
           if (raw.size() - p < 2)

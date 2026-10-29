@@ -340,6 +340,66 @@ TEST(LegacyWord, LegacyScanDistinguishesSkipFromStop) {
             doccraft::doc::detail::LegacySprmScan::kComplete);
 }
 
+TEST(LegacyWord, LegacyScanStopsWhenMappedSprmLacksLengthByte) {
+  std::vector<uint8_t> out;
+  // sprmPChgTabsPapx (0x0F) is mapped and takes a cb byte, but the stream ends
+  // right after the opcode. Its width is unknowable, so the scan must stop
+  // instead of reporting a complete parse.
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x55, 1, 0x0F}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  // Only the leading bold survives; the unmappable 0x0F emits nothing.
+  ASSERT_EQ(out.size(), 3u);
+  EXPECT_EQ(out[2], 0x01);  // sprmCFBold operand.
+  // A cb byte promising five operand bytes with only one present is truncated.
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x0F, 0x05, 0xAA}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  // NormalizeLegacySprms keeps its historical "not complete" answer.
+  EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
+      std::vector<uint8_t>{0x0F}, out));
+}
+
+TEST(LegacyWord, LegacyScanResolvesChgTabsExtendedLength) {
+  // sprmPChgTabs (0x17) with cb=0xFF carries a ChgTabsOperand: the deleted and
+  // inserted tab counts replace the byte count (LibreOffice ww8scan.cxx
+  // GetSprmTailLen, case 23). One deleted tab occupies 4 bytes, one inserted
+  // tab 3, so the operand ends after 3 + 4 + 3 bytes and italic still applies.
+  std::vector<uint8_t> out;
+  std::vector<uint8_t> raw = {0x17, 0xFF, 0x01, 0x00, 0x00, 0x00, 0x00,
+                              0x01, 0x00, 0x00, 0x00, 0x56, 0x01};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kPartial);
+  ASSERT_EQ(out.size(), 3u);
+  EXPECT_EQ(out[0], 0x36);
+  EXPECT_EQ(out[1], 0x08);  // little-endian sprmCFItalic (0x0836).
+  EXPECT_EQ(out[2], 0x01);
+  // sprmPChgTabsPapx (0x0F) shares the layout and is dropped, not translated.
+  out.clear();
+  raw[0] = 0x0F;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  ASSERT_EQ(out.size(), 3u);
+  EXPECT_EQ(out[0], 0x36);
+  // Empty counts leave a three-byte operand: 0xFF, nDel=0, nIns=0.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x17, 0xFF, 0x00, 0x00, 0x56, 0x01}, out),
+            doccraft::doc::detail::LegacySprmScan::kPartial);
+  ASSERT_EQ(out.size(), 3u);
+  EXPECT_EQ(out[0], 0x36);
+  // nDel claims four entries but only two bytes follow it.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x17, 0xFF, 0x04, 0x00, 0x00}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  // nIns points past the buffer.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x17, 0xFF, 0x00, 0x03, 0x00, 0x00}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+}
+
 TEST(LegacyWord, Word6BadPictureReferenceIsSkippedWithWarning) {
   std::vector<uint8_t> word(2560);
   Put16(word, 0, 0xA5DC);

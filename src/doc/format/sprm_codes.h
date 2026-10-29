@@ -29,6 +29,7 @@ inline constexpr uint8_t kLegacySprmPFKeep = 0x07;
 inline constexpr uint8_t kLegacySprmPFKeepFollow = 0x08;
 inline constexpr uint8_t kLegacySprmPFPageBreakBefore = 0x09;
 inline constexpr uint8_t kLegacySprmPChgTabsPapx = 0x0F;
+inline constexpr uint8_t kLegacySprmPChgTabs = 0x17;
 inline constexpr uint8_t kLegacySprmPDxaRight = 0x10;
 inline constexpr uint8_t kLegacySprmPDxaLeft = 0x11;
 inline constexpr uint8_t kLegacySprmPDxaLeft1 = 0x13;
