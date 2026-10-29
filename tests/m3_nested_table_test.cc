@@ -24,11 +24,15 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "miniz.h"
 
+#include "cfb/cfb_reader.h"
 #include "doc/fib.h"
 #include "doc/format.h"
 #include "doc/format/sprm.h"
@@ -59,11 +63,17 @@ std::vector<uint8_t> Prl(uint16_t op, const std::vector<uint8_t>& value) {
 }
 
 // One paragraph's PAPX: fInTable, an optional row/table terminator and the
-// absolute table depth from sprmPItap.
-std::vector<uint8_t> PapxSpms(int depth, bool row_end, bool inner_row_end) {
+// absolute table depth from sprmPItap. An inner-table cell boundary sets
+// sprmPFInnerTableCell; sprmPFInnerTtp marks the end of an inner row.
+std::vector<uint8_t> PapxSpms(int depth, bool row_end, bool inner_row_end,
+                              bool inner_cell = false) {
   std::vector<uint8_t> sprms = Prl(0x2416, {1});
   if (row_end) {
     const auto terminator = Prl(0x2417, {1});
+    sprms.insert(sprms.end(), terminator.begin(), terminator.end());
+  }
+  if (inner_cell) {
+    const auto terminator = Prl(0x244B, {1});
     sprms.insert(sprms.end(), terminator.begin(), terminator.end());
   }
   if (inner_row_end) {
@@ -88,31 +98,13 @@ std::vector<uint8_t> PapxPayload(const std::vector<uint8_t>& sprms) {
   return out;
 }
 
-std::expected<model::Document, doc::Error> BuildDocument() {
-  // Marks:  O1 <cell> O2 <para> I1 <cell> I2 <inner row> O2 tail <para>
-  //         <cell> <outer row>
-  const std::string text =
-      "O1\x07"
-      "O2\x0d"
-      "I1\x07"
-      "I2\x07"
-      "O2 tail\x0d"
-      "\x07"
-      "\x07";
+std::expected<model::Document, doc::Error> BuildDocumentWith(
+    const std::string& text, const std::vector<std::vector<uint8_t>>& sprms) {
   std::vector<uint32_t> mark_fc;  // FC of every paragraph mark, in order
   for (size_t i = 0; i < text.size(); ++i) {
     if (text[i] == '\x07' || text[i] == '\x0d')
       mark_fc.push_back(kTextFc + static_cast<uint32_t>(i));
   }
-  const std::vector<std::vector<uint8_t>> sprms = {
-      PapxPayload(PapxSpms(1, false, false)),  // O1 cell
-      PapxPayload(PapxSpms(1, false, false)),  // O2 paragraph
-      PapxPayload(PapxSpms(2, false, false)),  // I1 cell
-      PapxPayload(PapxSpms(2, true, true)),    // I2 cell + inner row end
-      PapxPayload(PapxSpms(1, false, false)),  // O2 tail paragraph
-      PapxPayload(PapxSpms(1, false, false)),  // outer cell 2 end
-      PapxPayload(PapxSpms(1, true, false)),   // outer row end
-  };
 
   std::vector<uint8_t> word(3072);
   Put16(word, 0, 0xA5EC);
@@ -167,6 +159,65 @@ std::expected<model::Document, doc::Error> BuildDocument() {
   return doc::ParseFormatted(word, table, *fib);
 }
 
+std::expected<model::Document, doc::Error> BuildDocument() {
+  // Marks:  O1 <cell> O2 <para> I1 <cell> I2 <inner row> O2 tail <para>
+  //         <cell> <outer row>
+  const std::string text =
+      "O1\x07"
+      "O2\x0d"
+      "I1\x07"
+      "I2\x07"
+      "O2 tail\x0d"
+      "\x07"
+      "\x07";
+  const std::vector<std::vector<uint8_t>> sprms = {
+      PapxPayload(PapxSpms(1, false, false)),  // O1 cell
+      PapxPayload(PapxSpms(1, false, false)),  // O2 paragraph
+      PapxPayload(PapxSpms(2, false, false)),  // I1 cell
+      PapxPayload(PapxSpms(2, true, true)),    // I2 cell + inner row end
+      PapxPayload(PapxSpms(1, false, false)),  // O2 tail paragraph
+      PapxPayload(PapxSpms(1, false, false)),  // outer cell 2 end
+      PapxPayload(PapxSpms(1, true, false)),   // outer row end
+  };
+  return BuildDocumentWith(text, sprms);
+}
+
+// Two inner rows, as LibreOffice writes them: each inner cell paragraph is
+// terminated by a CR carrying sprmPFInnerTableCell, and the extra CR closing a
+// row carries sprmPFInnerTtp. The outer row keeps the usual BEL marks.
+std::expected<model::Document, doc::Error> BuildTwoRowNestedDocument() {
+  const std::string text =
+      "A1\x07"
+      "B1\x0d"
+      "I11\x0d"
+      "I12\x0d"
+      "\x0d"
+      "I21\x0d"
+      "I22\x0d"
+      "\x0d"
+      "B1 tail\x07"
+      "C1\x07"
+      "D1\x07"
+      "E1\x07"
+      "\x07";
+  const std::vector<std::vector<uint8_t>> sprms = {
+      PapxPayload(PapxSpms(1, false, false)),        // A1 cell
+      PapxPayload(PapxSpms(1, false, false)),        // B1 paragraph
+      PapxPayload(PapxSpms(2, false, false, true)),  // I11 inner cell
+      PapxPayload(PapxSpms(2, false, false, true)),  // I12 inner cell
+      PapxPayload(PapxSpms(2, false, true, true)),   // inner row 1 end
+      PapxPayload(PapxSpms(2, false, false, true)),  // I21 inner cell
+      PapxPayload(PapxSpms(2, false, false, true)),  // I22 inner cell
+      PapxPayload(PapxSpms(2, false, true, true)),   // inner row 2 end
+      PapxPayload(PapxSpms(1, false, false)),        // B1 tail cell
+      PapxPayload(PapxSpms(1, false, false)),        // C1 cell
+      PapxPayload(PapxSpms(1, false, false)),        // D1 cell
+      PapxPayload(PapxSpms(1, false, false)),        // E1 cell
+      PapxPayload(PapxSpms(1, true, false)),         // outer row end
+  };
+  return BuildDocumentWith(text, sprms);
+}
+
 std::string Xml(const model::Document& d) {
   auto zip = docx::Write(d);
   if (!zip)
@@ -193,6 +244,69 @@ std::string ParagraphText(const model::Document& d, const model::Block& block) {
   for (const auto& run : d.paragraphs[block.index].runs)
     out += run.text;
   return out;
+}
+
+size_t CountOccurrences(const std::string& haystack,
+                        const std::string& needle) {
+  size_t count = 0;
+  for (size_t pos = haystack.find(needle); pos != std::string::npos;
+       pos = haystack.find(needle, pos + needle.size()))
+    ++count;
+  return count;
+}
+
+// Returns the `ordinal`th (zero-based) element of `tag`, including its end tag,
+// tracking nesting so an outer table's slice stops at its own close.
+std::string ElementSlice(const std::string& xml, const std::string& tag,
+                         size_t ordinal) {
+  const std::string open = "<" + tag + ">";
+  const std::string close = "</" + tag + ">";
+  size_t pos = std::string::npos;
+  for (size_t seen = 0; seen <= ordinal; ++seen) {
+    pos = xml.find(open, pos == std::string::npos ? 0 : pos + open.size());
+    if (pos == std::string::npos)
+      return {};
+  }
+  int depth = 0;
+  size_t scan = pos;
+  while (true) {
+    const size_t next_open = xml.find(open, scan);
+    const size_t next_close = xml.find(close, scan);
+    if (next_close == std::string::npos)
+      return {};
+    if (next_open != std::string::npos && next_open < next_close) {
+      ++depth;
+      scan = next_open + open.size();
+    } else {
+      --depth;
+      scan = next_close + close.size();
+      if (depth == 0)
+        return xml.substr(pos, scan - pos);
+    }
+  }
+}
+
+std::optional<model::Document> ParseCorpus(const std::string& name) {
+  std::ifstream f(std::string(DOCCRAFT_SOURCE_DIR) + "/tests/corpus/corpus/" +
+                      name + ".doc",
+                  std::ios::binary);
+  const std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(f), {}};
+  auto container = cfb::CfbReader::Open(bytes);
+  if (!container)
+    return std::nullopt;
+  auto word = container->ReadStream("WordDocument");
+  if (!word)
+    return std::nullopt;
+  auto fib = doc::ParseFib(*word);
+  if (!fib)
+    return std::nullopt;
+  auto table = container->ReadStream(fib->table_stream());
+  if (!table)
+    return std::nullopt;
+  auto parsed = doc::ParseFormatted(*word, *table, *fib);
+  if (!parsed)
+    return std::nullopt;
+  return std::move(*parsed);
 }
 }  // namespace
 
@@ -241,6 +355,103 @@ TEST(M3NestedTable, WriterNestsTableElements) {
   EXPECT_NE(xml.find(">I1</w:t>"), std::string::npos);
   EXPECT_NE(xml.find(">I2</w:t>"), std::string::npos);
   EXPECT_EQ(xml.find(">I1</w:t>"), xml.rfind(">I1</w:t>"));
+}
+
+TEST(M3NestedTable, TwoRowInnerTableSplitsRowsAndCells) {
+  auto d = BuildTwoRowNestedDocument();
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->tables.size(), 2u);
+
+  const model::Table& outer = d->tables[d->blocks[0].index];
+  ASSERT_EQ(outer.rows.size(), 1u);
+  ASSERT_EQ(outer.rows[0].size(), 5u);
+  EXPECT_EQ(ParagraphText(*d, outer.rows[0][0].blocks.at(0)), "A1");
+
+  // The second outer cell stays one cell holding paragraph, nested table,
+  // paragraph - the inner cell marks must not leak out as outer boundaries.
+  const auto& second = outer.rows[0][1].blocks;
+  ASSERT_EQ(second.size(), 3u);
+  EXPECT_FALSE(second[0].table);
+  EXPECT_EQ(ParagraphText(*d, second[0]), "B1");
+  ASSERT_TRUE(second[1].table);
+  EXPECT_FALSE(second[2].table);
+  EXPECT_EQ(ParagraphText(*d, second[2]), "B1 tail");
+
+  const char* expected[2][2] = {{"I11", "I12"}, {"I21", "I22"}};
+  const model::Table& inner = d->tables[second[1].index];
+  ASSERT_EQ(inner.rows.size(), 2u);
+  for (size_t r = 0; r < inner.rows.size(); ++r) {
+    ASSERT_EQ(inner.rows[r].size(), 2u);
+    for (size_t c = 0; c < inner.rows[r].size(); ++c) {
+      // One paragraph per cell: the inner row-end mark must not leave an
+      // empty TTP paragraph behind.
+      ASSERT_EQ(inner.rows[r][c].blocks.size(), 1u);
+      EXPECT_FALSE(inner.rows[r][c].blocks[0].table);
+      EXPECT_EQ(ParagraphText(*d, inner.rows[r][c].blocks[0]), expected[r][c]);
+    }
+  }
+
+  for (size_t c = 2; c < outer.rows[0].size(); ++c) {
+    ASSERT_EQ(outer.rows[0][c].blocks.size(), 1u);
+    EXPECT_EQ(ParagraphText(*d, outer.rows[0][c].blocks[0]),
+              std::string(1, static_cast<char>('C' + c - 2)) + "1");
+  }
+}
+
+TEST(M3NestedTable, TwoRowInnerTableWritesTwoRows) {
+  auto d = BuildTwoRowNestedDocument();
+  ASSERT_TRUE(d) << d.error().message;
+  const std::string xml = Xml(*d);
+  ASSERT_FALSE(xml.empty());
+
+  const std::string inner = ElementSlice(xml, "w:tbl", 1);
+  ASSERT_FALSE(inner.empty());
+  EXPECT_EQ(CountOccurrences(inner, "<w:tr>"), 2u);
+  EXPECT_EQ(CountOccurrences(inner, "<w:tc>"), 4u);
+  EXPECT_EQ(CountOccurrences(inner, "<w:p>"), 4u);
+}
+
+TEST(M3NestedTable, CorpusNestedTableKeepsTwoRowsAndFourCells) {
+  auto d = ParseCorpus("nested-tables");
+  ASSERT_TRUE(d);
+  ASSERT_EQ(d->tables.size(), 2u);
+
+  const model::Table* outer = nullptr;
+  for (const auto& block : d->blocks) {
+    if (block.table) {
+      outer = &d->tables[block.index];
+      break;
+    }
+  }
+  ASSERT_NE(outer, nullptr);
+  ASSERT_EQ(outer->rows.size(), 2u);
+  for (const auto& row : outer->rows)
+    ASSERT_EQ(row.size(), 5u);
+
+  // B1's outer cell holds B1, the nested table and B1 tail.
+  const auto& second = outer->rows[0][1].blocks;
+  ASSERT_EQ(second.size(), 3u);
+  ASSERT_TRUE(second[1].table);
+  const model::Table& inner = d->tables[second[1].index];
+  const char* expected[2][2] = {{"I11", "I12"}, {"I21", "I22"}};
+  ASSERT_EQ(inner.rows.size(), 2u);
+  for (size_t r = 0; r < inner.rows.size(); ++r) {
+    ASSERT_EQ(inner.rows[r].size(), 2u);
+    for (size_t c = 0; c < inner.rows[r].size(); ++c) {
+      ASSERT_EQ(inner.rows[r][c].blocks.size(), 1u);
+      EXPECT_FALSE(inner.rows[r][c].blocks[0].table);
+      EXPECT_EQ(ParagraphText(*d, inner.rows[r][c].blocks[0]), expected[r][c]);
+    }
+  }
+
+  // The written document nests a real 2x2 table, four paragraphs in total.
+  const std::string xml = Xml(*d);
+  ASSERT_FALSE(xml.empty());
+  const std::string inner_xml = ElementSlice(xml, "w:tbl", 1);
+  ASSERT_FALSE(inner_xml.empty());
+  EXPECT_EQ(CountOccurrences(inner_xml, "<w:tr>"), 2u);
+  EXPECT_EQ(CountOccurrences(inner_xml, "<w:tc>"), 4u);
+  EXPECT_EQ(CountOccurrences(inner_xml, "<w:p>"), 4u);
 }
 
 TEST(M3NestedTable, DeltaDepthIsAccumulated) {

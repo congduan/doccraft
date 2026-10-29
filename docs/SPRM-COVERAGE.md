@@ -172,8 +172,8 @@
 | ✅ | `0x2448` | sprmPFAdjustRight | A Bool8 value that specifies whether this paragraph is set to automatically adjust the right indent when a document grid for East Asian characters is defined. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
 | ✅ | `0x6649` | sprmPItap | An integer value that specifies the table depth of this paragraph. | 段落 PAP §2.6.2；sprmPItap 作为表格嵌套深度的权威来源；M3NestedTable.DepthTwoTableLivesInTheEnclosingCell、M4FastSaved.PiecePItapPlacesParagraphInsideTable |
 | ✅ | `0x664A` | sprmPDtap | A signed integer that specifies an addition or subtraction to the existing table depth of this paragraph. | 段落 PAP §2.6.2；深度增量形式，累加到 sprmPItap；M3NestedTable.DeltaDepthIsAccumulated、M3NestedTable.DeltaDepthWideArithmetic |
-| N/A | `0x244B` | sprmPFInnerTableCell | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table cell. | 段落 PAP §2.6.2；嵌套表单元格增量保存簿记；不影响格式 |
-| ✅ | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2；嵌套表行结束标记；M3NestedTable.WriterNestsTableElements |
+| ✅ | `0x244B` | sprmPFInnerTableCell | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table cell. | 段落 PAP §2.6.2；嵌套表单元格边界（CR 标记），按 sprmPItap 深度分派；M3NestedTable.TwoRowInnerTableSplitsRowsAndCells、M3NestedTable.CorpusNestedTableKeepsTwoRowsAndFourCells |
+| ✅ | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2；嵌套表行结束标记（CR 标记），按 sprmPItap 深度分派；M3NestedTable.TwoRowInnerTableSplitsRowsAndCells、M3NestedTable.CorpusNestedTableKeepsTwoRowsAndFourCells |
 | ✅ | `0xC64D` | sprmPShd | A SHDOperand value that specifies the background shading for the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xC64E` | sprmPBrcTop | A BrcOperand value which specifies the top border of the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xC64F` | sprmPBrcLeft | A BrcOperand value that specifies the logical left border of the paragraph. | 段落 PAP §2.6.2；M3Batch6.ExistingParagraphAndCharacterPaths |
@@ -372,7 +372,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 
 批注区间由 `PlcfAtnBkf`/`PlcfAtnBkl` 与 ATRDPre10 书签 tag 还原，属于结构 PLC 而非 sprm；`M3Comments.RangeBookmarkSurroundsAnnotatedText`、`M15StoryPlc.AdjacentCommentRangesCrossRunsAndControl`、`M15StoryPlc.CommentRangeMayExtendPastReference`、`M15StoryPlc.InvalidCommentRangeKeepsOtherRange` 验证范围与局部降级；`M15StoryPlc.CommentInitialsUseTwoByteCountAndUtf16Payload`、`M15StoryPlc.CommentInitialsFillNineCharacterBuffer`、`M15StoryPlc.CommentInitialsKeepSupplementaryCharacter`、`M15StoryPlc.CommentInitialsDropTrailingHighSurrogate`、`M15StoryPlc.CommentInitialsCheckCodeUnitAfterHighSurrogate`、`M15StoryPlc.OversizedCommentInitialsWarnAndKeepComment` 验证 ATRDPre10 initials 解码与越界警告，不改变本表的覆盖计数。
 
-基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现；M19 把修订作者三个 sprm（0x4804/0x4863/0xCA89）从 N/A 拉回实现。M20 按行级状态重算，并将当时尚缺继承轮廓级别求值的 sprmPIncLvl 记为 ◐（269 / 270 适用项）；M21 补齐该分支后为 270 / 270。
+基线：上一轮清单为 151 ✅ / 52.1%（同一份规范表口径）。第 7 批回填 65 ✅，第 8 批新增 45 ✅ 并把 29 项按上述四类归为 N/A，后续把 sprmPItap/PDtap/PFInnerTtp 从 N/A 拉回实现。M5 内联图片再把 sprmCPicLocation 的图片分支转为实现；M19 把修订作者三个 sprm（0x4804/0x4863/0xCA89）从 N/A 拉回实现。M20 按行级状态重算，并将当时尚缺继承轮廓级别求值的 sprmPIncLvl 记为 ◐（269 / 270 适用项）；M21 补齐该分支后为 270 / 270；r22 把 sprmPFInnerTableCell 从 N/A 拉回实现（按行级状态重算，主表为 273 / 273 适用项）。
 
 ## Word 6/95 旧版 opcode（不计入 314）
 

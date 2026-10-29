@@ -303,6 +303,8 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   const FormatRange* table_pap = nullptr;
   bool cached_table_flag = false;
   bool cached_row_end = false;
+  bool cached_inner_cell = false;
+  bool cached_inner_row_end = false;
   int cached_depth = 0;
   std::string last_hyperlink;
   bool last_page_field = false;
@@ -591,13 +593,21 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     if (pap != table_pap) {
       cached_table_flag = false;
       cached_row_end = false;
+      cached_inner_cell = false;
+      cached_inner_row_end = false;
       cached_depth = 0;
       if (pap) {
         WalkParagraph(pap->sprms, data, [&](uint16_t op, Bytes v) {
           if (op == kSprmPFInTable)
             cached_table_flag = v[0] != 0;
-          if (op == kSprmPFTtp || op == kSprmPFInnerTtp)
+          if (op == kSprmPFTtp)
             cached_row_end = v[0] != 0;
+          if (op == kSprmPFInnerTableCell)
+            cached_inner_cell = v[0] != 0;
+          if (op == kSprmPFInnerTtp) {
+            cached_inner_row_end = v[0] != 0;
+            cached_row_end = v[0] != 0;
+          }
           if (op == kSprmPItap)
             cached_depth = ClampTableDepth(S32(v, 0));
           if (op == kSprmPDtap)
@@ -611,13 +621,22 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     // PAPX. Resolve both before interpreting cell and row marks.
     bool in_table = cached_table_flag;
     bool row_end = cached_row_end;
+    bool inner_cell = cached_inner_cell;
+    bool inner_row_end = cached_inner_row_end;
     int depth = cached_depth;
     bool piece_table_set = false;
     walk_piece_prm(ch.prm, [&](uint16_t op, Bytes v) {
       if (op == kSprmPFInTable) {
         in_table = v[0] != 0;
         piece_table_set = true;
-      } else if (op == kSprmPFTtp || op == kSprmPFInnerTtp) {
+      } else if (op == kSprmPFTtp) {
+        row_end = v[0] != 0;
+        piece_table_set = true;
+      } else if (op == kSprmPFInnerTableCell) {
+        inner_cell = v[0] != 0;
+        piece_table_set = true;
+      } else if (op == kSprmPFInnerTtp) {
+        inner_row_end = v[0] != 0;
         row_end = v[0] != 0;
         piece_table_set = true;
       } else if (op == kSprmPItap && v.size() >= 4) {
@@ -640,8 +659,16 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       const int wanted = bounded > 0 ? bounded : (in_table ? 1 : 0);
       set_table_depth(wanted);
     }
-    if (control == '\x07') {
-      if (frames.empty())
+    // The outer table terminates cells with BEL and its row with a BEL carrying
+    // sprmPFTtp. An inner table terminates each cell paragraph with a CR
+    // carrying sprmPFInnerTableCell and its row with a CR carrying
+    // sprmPFInnerTtp, so a CR at depth >= 2 with either flag is a structural
+    // mark rather than body text. The depth gate keeps an outer paragraph that
+    // happens to carry the flag from being split.
+    const bool inner_mark =
+        ch.newline && depth >= 2 && (inner_cell || inner_row_end);
+    if (control == '\x07' || inner_mark) {
+      if (control == '\x07' && frames.empty())
         set_table_depth(1);
       if (row_end) {
         // The row-end mark is itself a paragraph (the TTP): keep any content
