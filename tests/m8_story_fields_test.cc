@@ -962,6 +962,34 @@ TEST(M15StoryPlc, CommentRangeMayExtendPastReference) {
   EXPECT_LT(reference, range_end);
 }
 
+TEST(M15StoryPlc, ZeroLengthCommentRangeKeepsOtherRange) {
+  Synthetic s = TaggedComments();
+  Put32(s.table, s.fib.atn_bkl.offset, 3);  // A: [3, 3].
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 2u);
+  EXPECT_TRUE(parsed->warnings.empty());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  const size_t a_start = xml.find("<w:commentRangeStart w:id=\"1\"/>");
+  const size_t a_ref = xml.find("<w:commentReference w:id=\"1\"/>");
+  const size_t a_end = xml.find("<w:commentRangeEnd w:id=\"1\"/>");
+  const size_t b_start = xml.find("<w:commentRangeStart w:id=\"2\"/>");
+  const size_t b_end = xml.find("<w:commentRangeEnd w:id=\"2\"/>");
+  const size_t b_ref = xml.find("<w:commentReference w:id=\"2\"/>");
+  ASSERT_NE(a_start, std::string::npos);
+  ASSERT_NE(a_ref, std::string::npos);
+  ASSERT_NE(a_end, std::string::npos);
+  ASSERT_NE(b_start, std::string::npos);
+  ASSERT_NE(b_end, std::string::npos);
+  ASSERT_NE(b_ref, std::string::npos);
+  EXPECT_LT(a_start, a_ref);
+  EXPECT_LT(a_ref, a_end);
+  EXPECT_LT(b_start, b_end);
+  EXPECT_LT(b_end, b_ref);
+}
+
 TEST(M15StoryPlc, InvalidCommentRangeKeepsOtherRange) {
   Synthetic s = TaggedComments();
   Put32(s.table, s.fib.atn_bkf.offset + 4, 8);  // A: [8, 6].
