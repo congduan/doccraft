@@ -131,6 +131,14 @@ the format-neutral model. See [DESIGN](docs/DESIGN.md) for the full layout.
 - Fast-saved samples can preserve text while changing pagination. OLE objects
   without a field-result image use an EMF/WMF or CF_DIB (bitmap) OlePres preview;
   `\3EPRINT` previews and linked-object semantics can remain blank.
+- Word 6/95 files read text, core character/paragraph formatting and styles;
+  legacy tabs are dropped, full legacy table properties, headers/footers and
+  non-WMF pictures are not converted, and output layout may degrade.
+- Memory is not bounded: very large documents keep the decoded text buffer and
+  the CFB input in RAM until conversion completes (100 MiB ≈ 1.3 GiB RSS).
+- The DOCX schema validator checks element structure of the 2006 WordprocessingML
+  namespace; attribute validity, relationship targets and extension-namespace
+  placement are not verified.
 
 The detailed list is in [KNOWN-SIMPLIFICATIONS](docs/KNOWN-SIMPLIFICATIONS.md).
 
