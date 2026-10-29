@@ -991,6 +991,52 @@ TEST(M15StoryPlc, InvalidCommentRangeKeepsOtherRange) {
   EXPECT_LT(a_ref, a_end);
 }
 
+void ExpectInvalidCommentRangeTable(const Synthetic& s) {
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 2u);
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped comment range PLC: invalid annotation bookmark range");
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string body = Part(*zip, "word/document.xml");
+  const std::string comments = Part(*zip, "word/comments.xml");
+  EXPECT_NE(comments.find("One"), std::string::npos);
+  EXPECT_NE(comments.find("Two"), std::string::npos);
+  for (int id = 1; id <= 2; ++id) {
+    const std::string suffix = " w:id=\"" + std::to_string(id) + "\"/>";
+    const size_t start = body.find("<w:commentRangeStart" + suffix);
+    const size_t ref = body.find("<w:commentReference" + suffix);
+    const size_t end = body.find("<w:commentRangeEnd" + suffix);
+    ASSERT_NE(start, std::string::npos);
+    ASSERT_NE(ref, std::string::npos);
+    ASSERT_NE(end, std::string::npos);
+    EXPECT_LT(start, ref);
+    EXPECT_LT(ref, end);
+    EXPECT_EQ(Count(body, "<w:commentRangeStart" + suffix), 1u);
+    EXPECT_EQ(Count(body, "<w:commentRangeEnd" + suffix), 1u);
+  }
+}
+
+TEST(M15StoryPlc, DescendingCommentRangeStartsFallBackToPointAnchors) {
+  Synthetic s = TaggedComments();
+  Put32(s.table, s.fib.atn_bkf.offset, 4);
+  ExpectInvalidCommentRangeTable(s);
+}
+
+TEST(M15StoryPlc, DescendingCommentRangeEndsFallBackToPointAnchors) {
+  Synthetic s = TaggedComments();
+  Put32(s.table, s.fib.atn_bkl.offset, 10);
+  ExpectInvalidCommentRangeTable(s);
+}
+
+TEST(M15StoryPlc, OutOfBoundsCommentEndIndexFallsBackToPointAnchors) {
+  Synthetic s = TaggedComments();
+  Put16(s.table, s.fib.atn_bkf.offset + 12, 2);
+  ExpectInvalidCommentRangeTable(s);
+}
+
 TEST(M15StoryPlc, UnmatchedCommentTagFallsBackToPointAnchor) {
   Synthetic s = TaggedComments();
   Put32(s.table, s.fib.atn_bkmk.offset + 22, 0x12345678);
