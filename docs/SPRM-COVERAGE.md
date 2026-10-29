@@ -403,7 +403,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0x5D` | sprmCFtc | sprmCRgFtc0 | 2B；M13 起映射字体名 |
 | `0x5E` | sprmCKul | 同名 | 1B |
 | `0x60` | sprmCDxaSpace | 同名 | 2B；M13 |
-| `0x61` | sprmCLid | sprmCRgLid0 | 2B；操作数即 LID，直译；`LegacyWord.Word6FkpMapsFrameWrapAndLanguage` |
+| `0x61` | sprmCLid | sprmCRgLid0 + sprmCRgLid1 | 2B；同一 LID 操作数双写（wvWare 同时置 lidDefault 与 lidFE）；`LegacyWord.Word6FkpMapsFrameWrapAndLanguage`、`LegacyWord.Word6ClidSetsDefaultAndEastAsianLanguage` |
 | `0x62` | sprmCIco | 同名 | 1B |
 | `0x63` | sprmCHps | 同名 | **2B**；wvWare spra 位与 LO aSprms 表双证，hps<256 时与 1 字节读法等价；M13 修正 |
 

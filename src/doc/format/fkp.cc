@@ -288,6 +288,10 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
       continue;  // PAPX word alignment.
     size_t size = 0;
     uint16_t modern = 0;
+    // A legacy opcode can expand to a second modern sprm. Only sprmCLid uses
+    // this today: Word 6/95 stores one LID for both the default and the East
+    // Asian language, so the operand is written twice.
+    uint16_t modern_east_asia = 0;
     bool mapped = true;
     switch (code) {
       case kLegacySprmPJc:
@@ -388,9 +392,12 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         size = 2;
         break;
       case kLegacySprmCLid:
-        // Word 6/95 stores the 2-byte LID directly; sprmCRgLid0 takes the
-        // same 2-byte Lid operand, so the operand needs no translation.
+        // Word 6/95 stores one 2-byte LID and wvWare applies it to both
+        // lidDefault and lidFE. [MS-DOC] splits that across sprmCRgLid0
+        // (non-East-Asian) and sprmCRgLid1 (East Asian), so the same operand
+        // is written to both modern opcodes.
         modern = kSprmCRgLid0;
+        modern_east_asia = kSprmCRgLid1;
         size = 2;
         break;
       case kLegacySprmCHps:
@@ -440,8 +447,11 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
     }
     if (size > raw.size() - p)
       return LegacySprmScan::kStopped;
+    const Bytes operand = raw.subspan(p, size);
     if (modern)
-      AppendLegacySprm(out, modern, raw.subspan(p, size));
+      AppendLegacySprm(out, modern, operand);
+    if (modern_east_asia)
+      AppendLegacySprm(out, modern_east_asia, operand);
     p += size;
   }
   return partial ? LegacySprmScan::kPartial : LegacySprmScan::kComplete;

@@ -304,8 +304,14 @@ TEST(LegacyWord, Word6FkpMapsFrameWrapAndLanguage) {
   ASSERT_EQ(paragraph->paragraphs.size(), 1u);
   EXPECT_EQ(paragraph->paragraphs[0].frame_wrap, 2);
   EXPECT_EQ(paragraph->paragraphs[0].align, 2);
-  // sprmCLid (0x61, two bytes LID) maps to sprmCRgLid0 on the run; bold and
-  // italic around it prove the scan no longer skips the item.
+  auto paragraph_zip = doccraft::docx::Write(*paragraph);
+  ASSERT_TRUE(paragraph_zip) << paragraph_zip.error().message;
+  EXPECT_NE(Part(*paragraph_zip, "word/document.xml")
+                .find("<w:framePr w:wrap=\"around\""),
+            std::string::npos);
+  // sprmCLid (0x61, two bytes LID) expands to sprmCRgLid0 and sprmCRgLid1 on
+  // the run. Bold and italic survive the scan as well, but they also survive
+  // the legacy skip path, so only the language assertions prove the mapping.
   auto run =
       ParseWord6(Word6ChpxDocument({0x55, 1, 0x61, 0x09, 0x04, 0x56, 1}));
   ASSERT_TRUE(run) << run.error().message;
@@ -314,6 +320,29 @@ TEST(LegacyWord, Word6FkpMapsFrameWrapAndLanguage) {
   EXPECT_TRUE(run->paragraphs[0].runs[0].bold);
   EXPECT_TRUE(run->paragraphs[0].runs[0].italic);
   EXPECT_EQ(run->paragraphs[0].runs[0].lang, "en-US");
+  EXPECT_EQ(run->paragraphs[0].runs[0].lang_east_asia, "en-US");
+  auto run_zip = doccraft::docx::Write(*run);
+  ASSERT_TRUE(run_zip) << run_zip.error().message;
+  EXPECT_NE(Part(*run_zip, "word/document.xml")
+                .find("<w:lang w:val=\"en-US\" w:eastAsia=\"en-US\""),
+            std::string::npos);
+}
+
+TEST(LegacyWord, Word6ClidSetsDefaultAndEastAsianLanguage) {
+  // Word 6/95 sprmCLid carries a single LID that wvWare applies to both
+  // lidDefault and lidFE, so the modern split must write the same operand to
+  // sprmCRgLid0 (w:val) and sprmCRgLid1 (w:eastAsia).
+  auto document = ParseWord6(Word6ChpxDocument({0x61, 0x11, 0x04}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].runs[0].lang, "ja-JP");
+  EXPECT_EQ(document->paragraphs[0].runs[0].lang_east_asia, "ja-JP");
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/document.xml")
+                .find("<w:lang w:val=\"ja-JP\" w:eastAsia=\"ja-JP\""),
+            std::string::npos);
 }
 
 TEST(LegacyWord, Word6OversizedPictureFailsWholeDocument) {
