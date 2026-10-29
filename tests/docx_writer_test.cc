@@ -215,7 +215,7 @@ TEST(M6WriterBuffer, DoubleLimitReportsNamedPartFirst) {
   // Both limits sit one byte below the document part size, so the same
   // AddPart("word/document.xml") call fails the part check and the total
   // check at once. Lock the diagnostic order: the named-part error is the
-  // specific one and must win over the anonymous buffer error.
+  // specific one and must win over the named total-buffer error.
   auto zip = docx::detail::WriteWithBufferLimit(document, actual_bytes - 1,
                                                 actual_bytes - 1);
   ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized document";
