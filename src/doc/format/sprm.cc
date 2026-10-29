@@ -233,9 +233,14 @@ OpResult ApplyTableRowProperties(model::Table& table, model::RowProperties& row,
 
 OpResult ApplyTableLayout(model::Table& table, uint16_t op, Bytes v) {
   if (op == kSprmTTableWidth) {
-    if (v.size() != kTableWidthSize ||
-        (v[0] != kFtsNil && v[0] != kFtsPct && v[0] != kFtsDxa))
+    if (v.size() != kTableWidthSize)
       return OpResult::kError;
+    // [MS-DOC] Fts: 0 = nil, 1 = auto, 2 = percent, 3 = dxa; any other value
+    // "MUST be ignored" — skip this sprm, keep the rest of the row usable.
+    if (v[0] != kFtsNil && v[0] != kFtsAuto && v[0] != kFtsPct &&
+        v[0] != kFtsDxa) {
+      return OpResult::kOk;
+    }
     table.width_type = v[0];
     table.width = U16(v, kTableWidthValueOffset);
     return OpResult::kOk;
@@ -435,11 +440,14 @@ OpResult ApplyCellWidthAndMerge(model::RowProperties& row, uint16_t op,
   if (op == kSprmTCellWidth) {
     size_t first, limit;
     if (v.size() != kCellWidthSize || v[0] != kCellWidthCb ||
-        !TableRange(row, v, 1, first, limit) ||
-        (v[kCellWidthTypeOffset] != kFtsNil &&
-         v[kCellWidthTypeOffset] != kFtsPct &&
-         v[kCellWidthTypeOffset] != kFtsDxa))
+        !TableRange(row, v, 1, first, limit))
       return OpResult::kError;
+    // Same Fts rule as sprmTTableWidth: unknown types MUST be ignored.
+    if (v[kCellWidthTypeOffset] != kFtsNil &&
+        v[kCellWidthTypeOffset] != kFtsAuto &&
+        v[kCellWidthTypeOffset] != kFtsPct &&
+        v[kCellWidthTypeOffset] != kFtsDxa)
+      return OpResult::kOk;
     for (size_t i = first; i < limit; i++) {
       cells[i].width_type = v[kCellWidthTypeOffset];
       cells[i].width = U16(v, kCellWidthValueOffset);

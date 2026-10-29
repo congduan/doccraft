@@ -188,7 +188,7 @@ inline constexpr unsigned kTcTextFlowMax = 5;
 // Table layout operands in [MS-DOC] §2.9: fts plus a 16-bit width, the six
 // table borders, and the two-byte itcFirst/itcLim cell range.
 inline constexpr size_t kTableWidthSize = 3, kTableWidthValueOffset = 1;
-inline constexpr uint8_t kFtsNil = 0, kFtsPct = 2;
+inline constexpr uint8_t kFtsNil = 0, kFtsAuto = 1, kFtsPct = 2;
 inline constexpr size_t kTableBorderCount = 6;
 inline constexpr size_t kTableRangeSize = 2;
 
