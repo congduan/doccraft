@@ -13,11 +13,11 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <map>
-#include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
@@ -690,8 +690,10 @@ std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
     // Oversized extents (corrupt or beyond any page) are clamped, not fatal.
     if (width <= 0 || height <= 0)
       continue;
-    item.image.width = static_cast<int>(std::min(width, int64_t{detail::kMaxTwips}));
-    item.image.height = static_cast<int>(std::min(height, int64_t{detail::kMaxTwips}));
+    item.image.width =
+        static_cast<int>(std::min(width, int64_t{detail::kMaxTwips}));
+    item.image.height =
+        static_cast<int>(std::min(height, int64_t{detail::kMaxTwips}));
     const auto flags = U16(entry, detail::kSpaFlagsOffset);
     model::ImageAnchor anchor;
     anchor.x = static_cast<int>(left);
