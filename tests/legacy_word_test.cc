@@ -54,15 +54,22 @@ std::string Part(const std::vector<uint8_t>& bytes, const char* name) {
   return result;
 }
 
-TEST(LegacyWord, Word6PicfMetafileBecomesMediaPart) {
-  std::vector<uint8_t> word(2560);
+// Builds a Word 6/95 document whose only CHPX range references a 66-byte PICF
+// at `pic` declaring `payload` bytes of MFPF anisotropic metafile behind it.
+std::vector<uint8_t> Word6PictureDocument(size_t size, size_t pic,
+                                          size_t payload) {
+  constexpr size_t kHeader = 66;
+  constexpr size_t kPicfTypeOffset = 6;
+  constexpr size_t kPicfGoalOffset = 28;
+  constexpr size_t kPicfScaleOffset = 32;
+  std::vector<uint8_t> word(size);
   Put16(word, 0, 0xA5DC);
   Put16(word, 2, 0x65);
   Put16(word, 6, 0x0409);
   Put32(word, 24, 768);
   Put32(word, 28, 770);
   Put32(word, 52, 2);
-  word[768] = 1;
+  word[768] = 1;  // Picture marker.
   word[769] = '\r';
   Put32(word, 88 + 12 * 8, 2048);
   Put32(word, 92 + 12 * 8, 10);
@@ -74,18 +81,23 @@ TEST(LegacyWord, Word6PicfMetafileBecomesMediaPart) {
   word[1032] = 250;
   word[1524] = 5;
   word[1525] = 0x44;  // Word 6 sprmCPicLocation, four-byte FC.
-  Put32(word, 1526, 2200);
+  Put32(word, 1526, static_cast<uint32_t>(pic));
   word[1535] = 1;
+  Put32(word, pic, kHeader + payload);
+  Put16(word, pic + 4, kHeader);
+  Put16(word, pic + kPicfTypeOffset, 8);  // MFPF anisotropic metafile.
+  Put16(word, pic + kPicfGoalOffset, 1440);
+  Put16(word, pic + kPicfGoalOffset + 2, 720);
+  Put16(word, pic + kPicfScaleOffset, 1000);
+  Put16(word, pic + kPicfScaleOffset + 2, 1000);
+  return word;
+}
+
+TEST(LegacyWord, Word6PicfMetafileBecomesMediaPart) {
   constexpr size_t kPic = 2200;
-  constexpr size_t kHeader = 66;
   constexpr size_t kWmf = 18;
-  Put32(word, kPic, kHeader + kWmf);
-  Put16(word, kPic + 4, kHeader);
-  Put16(word, kPic + 6, 8);  // MFPF anisotropic metafile.
-  Put16(word, kPic + 28, 1440);
-  Put16(word, kPic + 30, 720);
-  Put16(word, kPic + 32, 1000);
-  Put16(word, kPic + 34, 1000);
+  auto word = Word6PictureDocument(2560, kPic, kWmf);
+  constexpr size_t kHeader = 66;
   Put16(word, kPic + kHeader, 1);      // WMF memory metafile.
   Put16(word, kPic + kHeader + 2, 9);  // Header size in words.
   Put16(word, kPic + kHeader + 4, 0x0300);
@@ -120,6 +132,24 @@ TEST(LegacyWord, Word6BitmapPicfReportsUnsupportedType) {
   auto image = doccraft::doc::ReadLegacyPicture(word, 0);
   ASSERT_FALSE(image);
   EXPECT_EQ(image.error().message, "unsupported Word 6/95 bitmap PICF");
+  EXPECT_EQ(image.error().kind, doccraft::doc::ErrorKind::kMalformed);
+}
+
+TEST(LegacyWord, Word6PictureLimitErrorIsNotDegradable) {
+  constexpr size_t kPic = 2200;
+  constexpr size_t kWmf = 18;
+  auto word = Word6PictureDocument(2560, kPic, kWmf);
+  // A payload above the remaining total-image budget is a resource limit, not
+  // a local picture defect: formatted parsing must fail the document.
+  auto limited = doccraft::doc::ReadLegacyPicture(word, kPic, 0);
+  ASSERT_FALSE(limited);
+  EXPECT_EQ(limited.error().message, "Word 6/95 image size exceeds limit");
+  EXPECT_EQ(limited.error().kind, doccraft::doc::ErrorKind::kResourceLimit);
+  // A malformed payload stays a local defect that degrades to a warning.
+  auto malformed = doccraft::doc::ReadLegacyPicture(word, kPic - 1);
+  ASSERT_FALSE(malformed);
+  EXPECT_NE(malformed.error().message, "Word 6/95 image size exceeds limit");
+  EXPECT_EQ(malformed.error().kind, doccraft::doc::ErrorKind::kMalformed);
 }
 
 TEST(LegacyWord, SimpleWord6TextAndSignatureGate) {
@@ -233,6 +263,18 @@ std::expected<doccraft::model::Document, doccraft::doc::Error> ParseWord6(
   if (!fib)
     return std::unexpected(fib.error());
   return doccraft::doc::ParseFormatted(word, word, *fib);
+}
+
+TEST(LegacyWord, Word6OversizedPictureFailsWholeDocument) {
+  constexpr size_t kPic = 2200;
+  constexpr size_t kHeader = 66;
+  const size_t payload = doccraft::doc::detail::kMaxImageSize + 1;
+  auto word = Word6PictureDocument(kPic + kHeader + payload, kPic, payload);
+  // KNOWN-SIMPLIFICATIONS keeps the per-image 64MiB limit fatal; only picture
+  // payload defects may be dropped with a warning.
+  auto parsed = ParseWord6(word);
+  ASSERT_FALSE(parsed);
+  EXPECT_EQ(parsed.error().message, "Word 6/95 image size exceeds limit");
 }
 
 TEST(LegacyWord, Word6SkipsUnmappedSizedSprmAndKeepsFollowing) {

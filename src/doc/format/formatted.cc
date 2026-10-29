@@ -826,10 +826,12 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         remember_run();
         continue;
       }
-      if (!picture && fib.legacy) {
+      if (!picture && fib.legacy &&
+          picture.error().kind != ErrorKind::kResourceLimit) {
         // A Word 6/95 picture reference that does not resolve is a local
         // defect: warn and drop the image instead of rejecting the document.
         // Reaching it at all can depend on how far the legacy grpprl scan got.
+        // A resource limit is not local damage and stays fatal.
         doc.warnings.push_back("Word 6/95 picture at CP " +
                                std::to_string(ch.cp) +
                                " skipped: " + picture.error().message);

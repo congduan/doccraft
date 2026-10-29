@@ -206,7 +206,8 @@ std::expected<model::Image, Error> ReadLegacyPicture(Bytes word,
     return std::unexpected(Error{"invalid Word 6/95 PICF dimensions"});
   Bytes payload = picf.subspan(header, length - header);
   if (payload.size() > detail::kMaxImageSize || payload.size() > budget)
-    return std::unexpected(Error{"Word 6/95 image size exceeds limit"});
+    return std::unexpected(
+        Error{"Word 6/95 image size exceeds limit", ErrorKind::kResourceLimit});
   if (payload.size() < detail::kWmfHeaderBytes ||
       (U16(payload, 0) != 1 && U16(payload, 0) != 2) ||
       U16(payload, 2) != detail::kWmfHeaderWords ||
