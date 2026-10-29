@@ -7,12 +7,20 @@ import zipfile
 from pathlib import Path
 
 engine, source = map(Path, sys.argv[1:3])
+core_prefix = [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "word/_rels/document.xml.rels",
+    "word/document.xml",
+    "word/styles.xml",
+    "word/numbering.xml",
+]
 for fixture in ("header-textbox.doc", "inline-image.doc"):
     with tempfile.TemporaryDirectory() as td:
         output = Path(td) / "out.docx"
         subprocess.run([str(engine), "convert", str(source / fixture),
                         "-o", str(output)], check=True)
         with zipfile.ZipFile(output) as archive:
-            first = archive.namelist()[0]
-            assert first == "[Content_Types].xml", (fixture, first)
-        print(f"{fixture}: {first}")
+            prefix = archive.namelist()[:len(core_prefix)]
+            assert prefix == core_prefix, (fixture, prefix)
+        print(f"{fixture}: {prefix}")
