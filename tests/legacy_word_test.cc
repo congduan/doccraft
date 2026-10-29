@@ -14,7 +14,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <expected>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -22,6 +25,7 @@
 
 #include "doc/fib.h"
 #include "doc/format.h"
+#include "doc/format/internal.h"
 #include "doc/text.h"
 #include "docx/writer.h"
 
@@ -193,6 +197,178 @@ TEST(LegacyWord, Word6FkpAppliesCharacterAndParagraphFormatting) {
   EXPECT_EQ(document->paragraphs[0].align, 2);
   ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
   EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+}
+
+// Builds a Word 6/95 document whose single CHPX FKP range carries `sprms`.
+std::vector<uint8_t> Word6ChpxDocument(const std::vector<uint8_t>& sprms) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 772);
+  Put32(word, 52, 4);
+  word[768] = 'A';
+  word[769] = 'B';
+  word[770] = 'C';
+  word[771] = '\r';
+  Put32(word, 88 + 12 * 8, 2048);
+  Put32(word, 92 + 12 * 8, 10);
+  Put32(word, 2048, 768);
+  Put32(word, 2052, 772);
+  Put16(word, 2056, 2);
+  // CHPX FKP: one run at FC 768-772.
+  Put32(word, 1024, 768);
+  Put32(word, 1028, 772);
+  word[1032] = 250;
+  word[1524] = static_cast<uint8_t>(sprms.size());
+  std::copy(sprms.begin(), sprms.end(), word.begin() + 1525);
+  word[1535] = 1;
+  return word;
+}
+
+std::expected<doccraft::model::Document, doccraft::doc::Error> ParseWord6(
+    const std::vector<uint8_t>& word) {
+  auto fib = doccraft::doc::ParseFib(word);
+  if (!fib)
+    return std::unexpected(fib.error());
+  return doccraft::doc::ParseFormatted(word, word, *fib);
+}
+
+TEST(LegacyWord, Word6SkipsUnmappedSizedSprmAndKeepsFollowing) {
+  // bold, sprmPWr (0x25, one byte, unmapped), italic.
+  auto document = ParseWord6(Word6ChpxDocument({0x55, 1, 0x25, 0, 0x56, 1}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].italic);
+}
+
+TEST(LegacyWord, Word6SkipsUnmappedTwoByteSprmAndKeepsFollowing) {
+  // bold, sprmCLid (0x61, two bytes, unmapped), italic.
+  auto document =
+      ParseWord6(Word6ChpxDocument({0x55, 1, 0x61, 0x09, 0x04, 0x56, 1}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].italic);
+}
+
+TEST(LegacyWord, Word6UnknownOpcodeStillStopsParsing) {
+  // italic, opcode 0xF0 is absent from the Word 6 table, then bold. Parsing
+  // must stop so 0xF0's operand bytes are not read as modifiers.
+  auto word = Word6ChpxDocument({0x56, 1, 0xF0, 0xAA, 0xBB, 0x55, 1});
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].italic);
+  EXPECT_FALSE(document->paragraphs[0].runs[0].bold);
+  std::vector<uint8_t> normalized;
+  EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
+      {word.data() + 1525, 7}, normalized));
+}
+
+TEST(LegacyWord, Word6SkipsVariableLengthSprmAndKeepsFollowing) {
+  // bold, sprmCDefault (0x52, L_VAR with cb=2), then italic.
+  auto document =
+      ParseWord6(Word6ChpxDocument({0x55, 1, 0x52, 0x02, 0xAA, 0xBB, 0x56, 1}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].italic);
+}
+
+TEST(LegacyWord, Word6SkipsTwoByteLengthSprmAndKeepsFollowing) {
+  // bold, sprmTDefTable (0xBE, L_VAR2, length word = payload + 1), then italic.
+  auto document = ParseWord6(
+      Word6ChpxDocument({0x55, 1, 0xBE, 0x03, 0x00, 0xAA, 0xBB, 0x56, 1}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].italic);
+}
+
+TEST(LegacyWord, NormalizeLegacySprmsRejectsTruncatedOperands) {
+  std::vector<uint8_t> out;
+  // sprmPDxaRight (0x10) needs two operand bytes, only one is present.
+  EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
+      std::vector<uint8_t>{0x10, 0x01}, out));
+  // sprmCLid (0x61) is known-width but still truncated.
+  out.clear();
+  EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
+      std::vector<uint8_t>{0x61, 0x01}, out));
+  // sprmCDefault (0x52) declares five bytes but supplies one.
+  out.clear();
+  EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
+      std::vector<uint8_t>{0x52, 0x05, 0xAA}, out));
+  // sprmTDefTable (0xBE) declares a three-byte count but only one byte follows.
+  out.clear();
+  EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
+      std::vector<uint8_t>{0xBE, 0x03}, out));
+}
+
+TEST(LegacyWord, NormalizeLegacySprmsSkipsKnownWidthsAndReportsPartial) {
+  std::vector<uint8_t> out;
+  // bold, sprmPWr, sprmCLid, italic -> both mapped sprms survive, but the
+  // result is reported as partial because two sprms were skipped.
+  EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
+      std::vector<uint8_t>{0x55, 1, 0x25, 0, 0x61, 0x09, 0x04, 0x56, 1}, out));
+  ASSERT_EQ(out.size(), 6u);
+  EXPECT_EQ(out[0], 0x35);
+  EXPECT_EQ(out[1], 0x08);  // little-endian sprmCFBold (0x0835)
+  EXPECT_EQ(out[3], 0x36);
+  EXPECT_EQ(out[4], 0x08);  // little-endian sprmCFItalic (0x0836)
+}
+
+TEST(LegacyWord, LegacyScanDistinguishesSkipFromStop) {
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x55, 1, 0x25, 0}, out),
+            doccraft::doc::detail::LegacySprmScan::kPartial);
+  out.clear();
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(std::vector<uint8_t>{0xF0}, out),
+      doccraft::doc::detail::LegacySprmScan::kStopped);
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x55, 1}, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+}
+
+TEST(LegacyWord, Word6BadPictureReferenceIsSkippedWithWarning) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 770);
+  Put32(word, 52, 2);
+  word[768] = 0x01;  // Picture marker.
+  word[769] = '\r';
+  Put32(word, 88 + 12 * 8, 2048);
+  Put32(word, 92 + 12 * 8, 10);
+  Put32(word, 2048, 768);
+  Put32(word, 2052, 770);
+  Put16(word, 2056, 2);
+  Put32(word, 1024, 768);
+  Put32(word, 1028, 770);
+  word[1032] = 250;
+  word[1524] = 5;
+  word[1525] = 0x44;          // sprmCPicLocation.
+  Put32(word, 1526, 0xFFFF);  // Far outside the 2560-byte stream.
+  word[1535] = 1;
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_TRUE(document->images.empty());
+  bool warned = false;
+  for (const auto& warning : document->warnings)
+    warned = warned || warning.find("Word 6/95 picture") != std::string::npos;
+  EXPECT_TRUE(warned);
 }
 
 TEST(LegacyWord, ComplexWord95UsesDirectFcAndUtf16) {

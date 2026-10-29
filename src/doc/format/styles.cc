@@ -469,7 +469,8 @@ std::vector<model::Style> ReadLegacyStyles(
         grpprl = payload.subspan(2);
       }
       std::vector<uint8_t> normalized;
-      if (!NormalizeLegacySprms(grpprl, normalized) && partial_style.empty())
+      if (ScanLegacySprms(grpprl, normalized) == LegacySprmScan::kStopped &&
+          partial_style.empty())
         partial_style = s.name;
       Walk(normalized, [&](uint16_t op, Bytes v) {
         if (paragraph_upx)

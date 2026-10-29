@@ -433,7 +433,11 @@ std::vector<model::Style> ReadLegacyStyles(
     uint32_t codepage, std::vector<std::string>* warnings);
 
 // Translates a Word 6/95 one-byte-opcode grpprl into the modern sprm stream
-// consumed by Walk(); returns false when an opcode is unsupported.
+// consumed by Walk(). kStopped means an opcode width was unknown (or an
+// operand was truncated), so the rest of the grpprl was discarded; kPartial
+// means every opcode was stepped over but at least one is not mapped.
+enum class LegacySprmScan { kComplete, kPartial, kStopped };
+LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 
 void ReadLists(model::Document& doc, Bytes table, const Fib& fib);

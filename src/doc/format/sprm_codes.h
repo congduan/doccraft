@@ -15,7 +15,10 @@
 #ifndef SRC_DOC_FORMAT_SPRM_CODES_H_
 #define SRC_DOC_FORMAT_SPRM_CODES_H_
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 
 namespace doccraft::doc::detail {
 
@@ -45,6 +48,219 @@ inline constexpr uint8_t kLegacySprmCDxaSpace = 0x60;
 inline constexpr uint8_t kLegacySprmCIco = 0x62;
 inline constexpr uint8_t kLegacySprmCHps = 0x63;
 inline constexpr uint8_t kLegacySprmCPicLocation = 0x44;
+
+// Word 6/95 one-byte sprm operand widths. Transcribed row for row from
+// LibreOffice sw/source/filter/ww8/ww8scan.cxx (GetWW6SprmSearcher), whose
+// opcodes come from sw/source/filter/ww8/sprmids.hxx namespace v6. The table
+// lets the FKP translator step over opcodes whose semantics it does not map:
+// a known width never turns an operand byte into a bogus opcode.
+//
+// kFix: `size` operand bytes. kVar: one cb byte, `size` extra fixed bytes,
+// then cb operand bytes. kVar2: a 16-bit count of (operand bytes + 1).
+// Only unmapped opcodes are consumed through this table; the mapped subset is
+// translated by NormalizeLegacySprms, which keeps the measured width of
+// sprmCPicLocation (0x44, four bytes) even though LibreOffice marks it L_VAR.
+enum class LegacySprmWidth : uint8_t { kFix, kVar, kVar2 };
+
+struct LegacySprmSpec {
+  uint8_t code;
+  uint8_t size;
+  LegacySprmWidth width;
+};
+
+inline constexpr LegacySprmSpec kLegacySprmSpecs[] = {
+    {0x00, 0, LegacySprmWidth::kFix},   // default sprm (skipped)
+    {0x02, 2, LegacySprmWidth::kFix},   // sprmPIstd
+    {0x03, 3, LegacySprmWidth::kVar},   // sprmPIstdPermute
+    {0x04, 1, LegacySprmWidth::kFix},   // sprmPIncLv1
+    {0x05, 1, LegacySprmWidth::kFix},   // sprmPJc
+    {0x06, 1, LegacySprmWidth::kFix},   // sprmPFSideBySide
+    {0x07, 1, LegacySprmWidth::kFix},   // sprmPFKeep
+    {0x08, 1, LegacySprmWidth::kFix},   // sprmPFKeepFollow
+    {0x09, 1, LegacySprmWidth::kFix},   // sprmPPageBreakBefore
+    {0x0A, 1, LegacySprmWidth::kFix},   // sprmPBrcl
+    {0x0B, 1, LegacySprmWidth::kFix},   // sprmPBrcp
+    {0x0C, 0, LegacySprmWidth::kVar},   // sprmPAnld
+    {0x0D, 1, LegacySprmWidth::kFix},   // sprmPNLvlAnm
+    {0x0E, 1, LegacySprmWidth::kFix},   // sprmPFNoLineNumb
+    {0x0F, 0, LegacySprmWidth::kVar},   // sprmPChgTabsPapx
+    {0x10, 2, LegacySprmWidth::kFix},   // sprmPDxaRight
+    {0x11, 2, LegacySprmWidth::kFix},   // sprmPDxaLeft
+    {0x12, 2, LegacySprmWidth::kFix},   // sprmPNest
+    {0x13, 2, LegacySprmWidth::kFix},   // sprmPDxaLeft1
+    {0x14, 4, LegacySprmWidth::kFix},   // sprmPDyaLine
+    {0x15, 2, LegacySprmWidth::kFix},   // sprmPDyaBefore
+    {0x16, 2, LegacySprmWidth::kFix},   // sprmPDyaAfter
+    {0x17, 0, LegacySprmWidth::kVar},   // sprmPChgTabs
+    {0x18, 1, LegacySprmWidth::kFix},   // sprmPFInTable
+    {0x19, 1, LegacySprmWidth::kFix},   // sprmPTtp
+    {0x1A, 2, LegacySprmWidth::kFix},   // sprmPDxaAbs
+    {0x1B, 2, LegacySprmWidth::kFix},   // sprmPDyaAbs
+    {0x1C, 2, LegacySprmWidth::kFix},   // sprmPDxaWidth
+    {0x1D, 1, LegacySprmWidth::kFix},   // sprmPPc
+    {0x1E, 2, LegacySprmWidth::kFix},   // sprmPBrcTop10
+    {0x1F, 2, LegacySprmWidth::kFix},   // sprmPBrcLeft10
+    {0x20, 2, LegacySprmWidth::kFix},   // sprmPBrcBottom10
+    {0x21, 2, LegacySprmWidth::kFix},   // sprmPBrcRight10
+    {0x22, 2, LegacySprmWidth::kFix},   // sprmPBrcBetween10
+    {0x23, 2, LegacySprmWidth::kFix},   // sprmPBrcBar10
+    {0x24, 2, LegacySprmWidth::kFix},   // sprmPFromText10
+    {0x25, 1, LegacySprmWidth::kFix},   // sprmPWr
+    {0x26, 2, LegacySprmWidth::kFix},   // sprmPBrcTop
+    {0x27, 2, LegacySprmWidth::kFix},   // sprmPBrcLeft
+    {0x28, 2, LegacySprmWidth::kFix},   // sprmPBrcBottom
+    {0x29, 2, LegacySprmWidth::kFix},   // sprmPBrcRight
+    {0x2A, 2, LegacySprmWidth::kFix},   // sprmPBrcBetween
+    {0x2B, 2, LegacySprmWidth::kFix},   // sprmPBrcBar
+    {0x2C, 1, LegacySprmWidth::kFix},   // sprmPFNoAutoHyph
+    {0x2D, 2, LegacySprmWidth::kFix},   // sprmPWHeightAbs
+    {0x2E, 2, LegacySprmWidth::kFix},   // sprmPDcs
+    {0x2F, 2, LegacySprmWidth::kFix},   // sprmPShd
+    {0x30, 2, LegacySprmWidth::kFix},   // sprmPDyaFromText
+    {0x31, 2, LegacySprmWidth::kFix},   // sprmPDxaFromText
+    {0x32, 1, LegacySprmWidth::kFix},   // sprmPFLocked
+    {0x33, 1, LegacySprmWidth::kFix},   // sprmPFWidowControl
+    {0x34, 0, LegacySprmWidth::kFix},   // sprmPRuler
+    {0x40, 0, LegacySprmWidth::kVar},   // unknown RTL property
+    {0x41, 1, LegacySprmWidth::kFix},   // sprmCFStrikeRM
+    {0x42, 1, LegacySprmWidth::kFix},   // sprmCFRMark
+    {0x43, 1, LegacySprmWidth::kFix},   // sprmCFFldVanish
+    {0x44, 0, LegacySprmWidth::kVar},   // sprmCPicLocation
+    {0x45, 2, LegacySprmWidth::kFix},   // sprmCIbstRMark
+    {0x46, 4, LegacySprmWidth::kFix},   // sprmCDttmRMark
+    {0x47, 1, LegacySprmWidth::kFix},   // sprmCFData
+    {0x48, 2, LegacySprmWidth::kFix},   // sprmCRMReason
+    {0x49, 3, LegacySprmWidth::kFix},   // sprmCChse
+    {0x4A, 0, LegacySprmWidth::kVar},   // sprmCSymbol
+    {0x4B, 1, LegacySprmWidth::kFix},   // sprmCFOle2
+    {0x4D, 0, LegacySprmWidth::kVar},   // unknown
+    {0x4F, 0, LegacySprmWidth::kVar},   // unknown
+    {0x50, 2, LegacySprmWidth::kFix},   // sprmCIstd
+    {0x51, 0, LegacySprmWidth::kVar},   // sprmCIstdPermute
+    {0x52, 0, LegacySprmWidth::kVar},   // sprmCDefault
+    {0x53, 0, LegacySprmWidth::kFix},   // sprmCPlain
+    {0x55, 1, LegacySprmWidth::kFix},   // sprmCFBold
+    {0x56, 1, LegacySprmWidth::kFix},   // sprmCFItalic
+    {0x57, 1, LegacySprmWidth::kFix},   // sprmCFStrike
+    {0x58, 1, LegacySprmWidth::kFix},   // sprmCFOutline
+    {0x59, 1, LegacySprmWidth::kFix},   // sprmCFShadow
+    {0x5A, 1, LegacySprmWidth::kFix},   // sprmCFSmallCaps
+    {0x5B, 1, LegacySprmWidth::kFix},   // sprmCFCaps
+    {0x5C, 1, LegacySprmWidth::kFix},   // sprmCFVanish
+    {0x5D, 2, LegacySprmWidth::kFix},   // sprmCFtc
+    {0x5E, 1, LegacySprmWidth::kFix},   // sprmCKul
+    {0x5F, 3, LegacySprmWidth::kFix},   // sprmCSizePos
+    {0x60, 2, LegacySprmWidth::kFix},   // sprmCDxaSpace
+    {0x61, 2, LegacySprmWidth::kFix},   // sprmCLid
+    {0x62, 1, LegacySprmWidth::kFix},   // sprmCIco
+    {0x63, 2, LegacySprmWidth::kFix},   // sprmCHps
+    {0x64, 1, LegacySprmWidth::kFix},   // sprmCHpsInc
+    {0x65, 2, LegacySprmWidth::kFix},   // sprmCHpsPos
+    {0x66, 1, LegacySprmWidth::kFix},   // sprmCHpsPosAdj
+    {0x67, 0, LegacySprmWidth::kVar},   // sprmCMajority
+    {0x68, 1, LegacySprmWidth::kFix},   // sprmCIss
+    {0x69, 0, LegacySprmWidth::kVar},   // sprmCHpsNew50
+    {0x6A, 0, LegacySprmWidth::kVar},   // sprmCHpsInc1
+    {0x6B, 2, LegacySprmWidth::kFix},   // sprmCHpsKern
+    {0x6C, 0, LegacySprmWidth::kVar},   // sprmCMajority50
+    {0x6D, 2, LegacySprmWidth::kFix},   // sprmCHpsMul
+    {0x6E, 2, LegacySprmWidth::kFix},   // sprmCCondHyhen
+    {0x6F, 0, LegacySprmWidth::kVar},   // unknown
+    {0x70, 0, LegacySprmWidth::kVar},   // unknown
+    {0x71, 0, LegacySprmWidth::kVar},   // unknown
+    {0x72, 0, LegacySprmWidth::kVar},   // unknown
+    {0x73, 0, LegacySprmWidth::kVar},   // unknown
+    {0x74, 0, LegacySprmWidth::kVar},   // unknown
+    {0x75, 1, LegacySprmWidth::kFix},   // sprmCFSpec
+    {0x76, 1, LegacySprmWidth::kFix},   // sprmCFObj
+    {0x77, 1, LegacySprmWidth::kFix},   // sprmPicBrcl
+    {0x78, 12, LegacySprmWidth::kVar},  // sprmPicScale
+    {0x79, 2, LegacySprmWidth::kFix},   // sprmPicBrcTop
+    {0x7A, 2, LegacySprmWidth::kFix},   // sprmPicBrcLeft
+    {0x7B, 2, LegacySprmWidth::kFix},   // sprmPicBrcBottom
+    {0x7C, 2, LegacySprmWidth::kFix},   // sprmPicBrcRight
+    {0x83, 1, LegacySprmWidth::kFix},   // sprmSScnsPgn
+    {0x84, 1, LegacySprmWidth::kFix},   // sprmSiHeadingPgn
+    {0x85, 0, LegacySprmWidth::kVar},   // sprmSOlstAnm
+    {0x88, 3, LegacySprmWidth::kFix},   // sprmSDxaColWidth
+    {0x89, 3, LegacySprmWidth::kFix},   // sprmSDxaColSpacing
+    {0x8A, 1, LegacySprmWidth::kFix},   // sprmSFEvenlySpaced
+    {0x8B, 1, LegacySprmWidth::kFix},   // sprmSFProtected
+    {0x8C, 2, LegacySprmWidth::kFix},   // sprmSDmBinFirst
+    {0x8D, 2, LegacySprmWidth::kFix},   // sprmSDmBinOther
+    {0x8E, 1, LegacySprmWidth::kFix},   // sprmSBkc
+    {0x8F, 1, LegacySprmWidth::kFix},   // sprmSFTitlePage
+    {0x90, 2, LegacySprmWidth::kFix},   // sprmSCcolumns
+    {0x91, 2, LegacySprmWidth::kFix},   // sprmSDxaColumns
+    {0x92, 1, LegacySprmWidth::kFix},   // sprmSFAutoPgn
+    {0x93, 1, LegacySprmWidth::kFix},   // sprmSNfcPgn
+    {0x94, 2, LegacySprmWidth::kFix},   // sprmSDyaPgn
+    {0x95, 2, LegacySprmWidth::kFix},   // sprmSDxaPgn
+    {0x96, 1, LegacySprmWidth::kFix},   // sprmSFPgnRestart
+    {0x97, 1, LegacySprmWidth::kFix},   // sprmSFEndnote
+    {0x98, 1, LegacySprmWidth::kFix},   // sprmSLnc
+    {0x99, 1, LegacySprmWidth::kFix},   // sprmSGprfIhdt
+    {0x9A, 2, LegacySprmWidth::kFix},   // sprmSNLnnMod
+    {0x9B, 2, LegacySprmWidth::kFix},   // sprmSDxaLnn
+    {0x9C, 2, LegacySprmWidth::kFix},   // sprmSDyaHdrTop
+    {0x9D, 2, LegacySprmWidth::kFix},   // sprmSDyaHdrBottom
+    {0x9E, 1, LegacySprmWidth::kFix},   // sprmSLBetween
+    {0x9F, 1, LegacySprmWidth::kFix},   // sprmSVjc
+    {0xA0, 2, LegacySprmWidth::kFix},   // sprmSLnnMin
+    {0xA1, 2, LegacySprmWidth::kFix},   // sprmSPgnStart
+    {0xA2, 1, LegacySprmWidth::kFix},   // sprmSBOrientation
+    {0xA3, 0, LegacySprmWidth::kFix},   // sprmSBCustomize
+    {0xA4, 2, LegacySprmWidth::kFix},   // sprmSXaPage
+    {0xA5, 2, LegacySprmWidth::kFix},   // sprmSYaPage
+    {0xA6, 2, LegacySprmWidth::kFix},   // sprmSDxaLeft
+    {0xA7, 2, LegacySprmWidth::kFix},   // sprmSDxaRight
+    {0xA8, 2, LegacySprmWidth::kFix},   // sprmSDyaTop
+    {0xA9, 2, LegacySprmWidth::kFix},   // sprmSDyaBottom
+    {0xAA, 2, LegacySprmWidth::kFix},   // sprmSDzaGutter
+    {0xAB, 2, LegacySprmWidth::kFix},   // sprmSDMPaperReq
+    {0xB3, 0, LegacySprmWidth::kVar},   // unknown RTL property
+    {0xB5, 0, LegacySprmWidth::kVar},   // unknown RTL property
+    {0xB6, 2, LegacySprmWidth::kFix},   // sprmTJc
+    {0xB7, 2, LegacySprmWidth::kFix},   // sprmTDxaLeft
+    {0xB8, 2, LegacySprmWidth::kFix},   // sprmTDxaGapHalf
+    {0xB9, 1, LegacySprmWidth::kFix},   // sprmTFCantSplit
+    {0xBA, 1, LegacySprmWidth::kFix},   // sprmTTableHeader
+    {0xBB, 12, LegacySprmWidth::kFix},  // sprmTTableBorders
+    {0xBC, 0, LegacySprmWidth::kVar2},  // sprmTDefTable10
+    {0xBD, 2, LegacySprmWidth::kFix},   // sprmTDyaRowHeight
+    {0xBE, 0, LegacySprmWidth::kVar2},  // sprmTDefTable
+    {0xBF, 1, LegacySprmWidth::kVar},   // sprmTDefTableShd
+    {0xC0, 4, LegacySprmWidth::kFix},   // sprmTTlp
+    {0xC1, 5, LegacySprmWidth::kFix},   // sprmTSetBrc
+    {0xC2, 4, LegacySprmWidth::kFix},   // sprmTInsert
+    {0xC3, 2, LegacySprmWidth::kFix},   // sprmTDelete
+    {0xC4, 4, LegacySprmWidth::kFix},   // sprmTDxaCol
+    {0xC5, 2, LegacySprmWidth::kFix},   // sprmTMerge
+    {0xC6, 2, LegacySprmWidth::kFix},   // sprmTSplit
+    {0xC7, 5, LegacySprmWidth::kFix},   // sprmTSetBrc10
+    {0xC8, 4, LegacySprmWidth::kFix},   // sprmTSetShd
+    {0xCF, 0, LegacySprmWidth::kVar},   // unknown RTL property
+};
+
+constexpr bool LegacySprmSpecsSorted() {
+  for (size_t i = 1; i < std::size(kLegacySprmSpecs); ++i)
+    if (kLegacySprmSpecs[i - 1].code >= kLegacySprmSpecs[i].code)
+      return false;
+  return true;
+}
+static_assert(LegacySprmSpecsSorted());
+
+// Returns the width record for a Word 6/95 one-byte opcode, or nullptr when
+// the opcode is outside the table and its operand width is unknowable.
+constexpr const LegacySprmSpec* FindLegacySprmSpec(uint8_t code) {
+  const LegacySprmSpec* first = std::begin(kLegacySprmSpecs);
+  const LegacySprmSpec* last = std::end(kLegacySprmSpecs);
+  const LegacySprmSpec* it = std::lower_bound(
+      first, last, code, [](const LegacySprmSpec& spec, uint8_t value) {
+        return spec.code < value;
+      });
+  return it != last && it->code == code ? it : nullptr;
+}
 
 // sprm opcodes from [MS-DOC] v20260217 §2.6.1-2.6.4. Names match the
 // specification text, so searching the MS-DOC PDF for `sprmCFBold` also

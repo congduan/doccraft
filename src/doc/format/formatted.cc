@@ -826,6 +826,16 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         remember_run();
         continue;
       }
+      if (!picture && fib.legacy) {
+        // A Word 6/95 picture reference that does not resolve is a local
+        // defect: warn and drop the image instead of rejecting the document.
+        // Reaching it at all can depend on how far the legacy grpprl scan got.
+        doc.warnings.push_back("Word 6/95 picture at CP " +
+                               std::to_string(ch.cp) +
+                               " skipped: " + picture.error().message);
+        last_run_count = 0;
+        continue;
+      }
       if (!picture)
         return std::unexpected(picture.error());
       if (picture->bytes.size() > detail::kMaxTotalImageSize - total_image_size)

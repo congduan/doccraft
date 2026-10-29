@@ -245,15 +245,19 @@ void AppendLegacySprm(std::vector<uint8_t>& out, uint16_t op, Bytes value) {
 }  // namespace
 
 // Word 6/95 grpprls use one-byte opcodes. Translate the scalar properties
-// understood by this converter; stop at an unknown operand so its bytes can
-// never be mistaken for another modifier.
-bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
+// understood by this converter and step over the ones whose width the Word 6
+// table knows, so a harmless modifier can no longer discard every later
+// property. An opcode outside the table (or a truncated operand) still stops
+// the scan: without a width its operand bytes could be mistaken for opcodes.
+LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
+  bool partial = false;
   for (size_t p = 0; p < raw.size();) {
     const uint8_t code = raw[p++];
     if (code == 0)
       continue;  // PAPX word alignment.
     size_t size = 0;
     uint16_t modern = 0;
+    bool mapped = true;
     switch (code) {
       case kLegacySprmPJc:
         modern = kSprmPJc80;
@@ -351,15 +355,49 @@ bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         size = 4;
         break;
       default:
-        return false;
+        mapped = false;
+        break;
     }
-    if (!size || size > raw.size() - p)
-      return false;
+    if (!mapped) {
+      const LegacySprmSpec* spec = FindLegacySprmSpec(code);
+      if (!spec)
+        return LegacySprmScan::kStopped;
+      switch (spec->width) {
+        case LegacySprmWidth::kFix:
+          size = spec->size;
+          break;
+        case LegacySprmWidth::kVar:
+          if (p >= raw.size())
+            return LegacySprmScan::kStopped;
+          size = static_cast<size_t>(raw[p]) + 1 + spec->size;
+          break;
+        case LegacySprmWidth::kVar2:
+          if (raw.size() - p < 2)
+            return LegacySprmScan::kStopped;
+          {
+            const size_t count = U16(raw, p);
+            if (!count)
+              return LegacySprmScan::kStopped;
+            size = count + 1;  // Two-byte count prefix, then count - 1 bytes.
+          }
+          break;
+      }
+      partial = true;
+    }
+    if (size > raw.size() - p)
+      return LegacySprmScan::kStopped;
     if (modern)
       AppendLegacySprm(out, modern, raw.subspan(p, size));
     p += size;
   }
-  return true;
+  return partial ? LegacySprmScan::kPartial : LegacySprmScan::kComplete;
+}
+
+// Keeps the historical "not fully successful" result while the internal scan
+// distinguishes a harmless skip from a stop. Callers that only warn when the
+// grpprl is truly truncated use ScanLegacySprms directly.
+bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
+  return ScanLegacySprms(raw, out) == LegacySprmScan::kComplete;
 }
 
 std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
@@ -400,8 +438,8 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
           range.style = U16(f, start);
           start += 2;
         }
-        if (!NormalizeLegacySprms(f.subspan(start, length - (para ? 2 : 0)),
-                                  range.sprms) &&
+        if (ScanLegacySprms(f.subspan(start, length - (para ? 2 : 0)),
+                            range.sprms) == LegacySprmScan::kStopped &&
             !warned && warnings) {
           warnings->push_back("Word 6/95 FKP contains unsupported sprms");
           warned = true;
