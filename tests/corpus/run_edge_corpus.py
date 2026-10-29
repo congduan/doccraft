@@ -22,6 +22,9 @@ NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 def normalize(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Tab characters are formatting, not text: LO TXT export drops them and
+    # so does the expected corpus (control-whitespace expects "AB\nC").
+    text = text.replace("\t", "")
     text = re.sub(r"\n{2,}", "\n", text)
     return "\n".join(line.rstrip() for line in text.rstrip().split("\n"))
 
@@ -35,6 +38,8 @@ def docx_text(path: Path) -> str:
         for node in para.iter():
             if node.tag == NS + "t":
                 parts.append(node.text or "")
+            elif node.tag == NS + "tab":
+                parts.append("\t")
             elif node.tag == NS + "br":
                 parts.append("\n")
         paragraphs.append("".join(parts))

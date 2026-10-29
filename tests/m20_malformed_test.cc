@@ -171,9 +171,17 @@ TEST(M20Malformed, FibFcMinBelowHeaderIsIgnored) {
   // when a Pcdt is present, so a bogus value must not break the conversion.
   DocSpec spec = TextSpec();
   spec.fc_min = 4;
-  const auto outcome =
-      ConvertBytes(Pack(doccraft::test::BuildDocStreams(spec)));
-  EXPECT_TRUE(outcome.ok) << outcome.error;
+  const DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  // The CLX is authoritative: the covered text must survive the bogus fcMin.
+  std::string text;
+  for (const auto& para : document->paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  EXPECT_NE(text.find("Hi"), std::string::npos) << text;
 }
 
 TEST(M20Malformed, FibCcpTextBeyondPieceCoverage) {
@@ -384,9 +392,17 @@ TEST(M20Malformed, SprmNestedDepthBombSurvives) {
   const auto inner = Prl(kSprmPHugePapx, {0, 0, 0, 0});
   std::copy(inner.begin(), inner.end(), spec.data.begin() + 2);
   spec.papx.push_back({2, Prl(kSprmPHugePapx, {0, 0, 0, 0})});
-  const auto outcome =
-      ConvertBytes(Pack(doccraft::test::BuildDocStreams(spec)));
-  EXPECT_TRUE(outcome.ok) << outcome.error;
+  const DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  // The self-referencing grpprl must be ignored, not drop the paragraph text.
+  std::string text;
+  for (const auto& para : document->paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  EXPECT_NE(text.find("Hi"), std::string::npos) << text;
 }
 
 // ---------------------------------------------------------------------------
