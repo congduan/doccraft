@@ -771,8 +771,14 @@ TEST(M5FloatingImages, RejectsMalformedRangesRecordsAndReferences) {
   Put32(s.table, s.fib.spa_main.offset, s.fib.ccp_text);
   check(s);
   s = Floating(0x54);
+  // An inverted/overflowing FSPA extent is skipped as an empty shape rather
+  // than failing the document (real LO QA files carry such records).
   Put32(s.table, s.fib.spa_main.offset + 8 + 12, 0x80000000);
-  check(s);
+  {
+    const auto r = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+    ASSERT_TRUE(r);
+    EXPECT_TRUE(r->empty());
+  }
   check(Floating(6 << 5));
   check(Floating(3 << 1));
   check(Floating(4 << 9));

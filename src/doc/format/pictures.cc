@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <expected>
 #include <map>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
@@ -685,11 +686,12 @@ std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
     const int64_t left = base::S32(entry, 4), top = base::S32(entry, 8);
     const int64_t width = int64_t{base::S32(entry, 12)} - left;
     const int64_t height = int64_t{base::S32(entry, 16)} - top;
-    if (width <= 0 || height <= 0 || width > detail::kMaxTwips ||
-        height > detail::kMaxTwips)
-      return std::unexpected(Error{"invalid floating picture dimensions"});
-    item.image.width = static_cast<int>(width);
-    item.image.height = static_cast<int>(height);
+    // Zero-extent FSPA records exist in real files (empty anchors); skip them.
+    // Oversized extents (corrupt or beyond any page) are clamped, not fatal.
+    if (width <= 0 || height <= 0)
+      continue;
+    item.image.width = static_cast<int>(std::min(width, int64_t{detail::kMaxTwips}));
+    item.image.height = static_cast<int>(std::min(height, int64_t{detail::kMaxTwips}));
     const auto flags = U16(entry, detail::kSpaFlagsOffset);
     model::ImageAnchor anchor;
     anchor.x = static_cast<int>(left);
