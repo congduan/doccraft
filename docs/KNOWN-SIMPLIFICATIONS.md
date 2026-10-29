@@ -6,6 +6,8 @@
 
 > M19 全库扩展与警告分类（7cf5fb3 后）：语料扩至 547 个（POI 159 + LibreOffice sw/qa 289 + wvWare 56 + Aspose 46，md5 全局去重、全部 CFB 验证）。全库跑测：367 成功 / 108 警告 / 75 拒绝 / 0 崩溃。警告按类型聚类：①52 个「ignored non-XML control in field instruction」（fast-saved 域代码内的二进制标记，行为正确且已去重为单次警告）；②43 个 Word 6/95 unsupported sprms（`NormalizeLegacySprms` 遇未知 1 字节 opcode 即停止，该 range 后续修饰全丢；r16 引入 LO `GetWW6SprmSearcher` 定长表后，表内未映射项按宽度跳过、后续修饰保留，仅表外 opcode 或操作数截断仍停止，见「Word 6/95 读取边界」）；③30 个故事 PLC CP 范围损坏跳过（行为正确，样本多为 Aspose/LO 回归文件）。75 个拒绝全部定性为损坏/fuzz/加密样本，拒绝正确。
 >
+> M20 语料再扩：GOVDOCS1（Digital Corpora，美国联邦政府泄露文档集）——按尺寸分层抽样 150 个，经 HTTP Range 从 by_type/doc.zip（17.6GB，76,616 个 .doc 索引）按条目精确抽取，去重后新增 **130 个有效 CFB**（20 个伪装文件已剔）。全库达 **680 个**。GOVDOCS 抽样跑测：55 成功 / 70 警告 / 5 拒绝（2 个 partial sector 为原始截断、1 个未知 BLIP 类型、1 个 OLE 域指令无效、1 个 piece 越界——均为正确拒绝）0 崩溃。政府文档特征：大量表格+域+脚注，警告分布与既有聚类一致。
+>
 > M19 冒烟常驻：`tests/poi_corpus_smoke.py` 入 ctest（`poi_corpus_smoke`），断言语料 ≥100 文件、成功 ≥100、零崩溃/超时；语料目录缺失时干净跳过（上游 CI 无语料也能过）。
 >
 > M19 语料回归：引入 Apache POI test-data 159 个真实 Word `.doc`（/home/ubuntu/doccraft-corpus/poi-test-data），首轮冒烟 87 成功/26 警告/46 拒绝/0 崩溃。修复 sprmTTableWidth/sprmTCellWidth 的 fts 处理（d5383fc）后为 102 成功/32 警告/25 拒绝。剩余 25 个拒绝逐项核验均为正确行为：6 个 clusterfuzz 变异样本与 1 个截断文件（partial sector）、3 个加密文档（需 --password）、3 个畸形图片尺寸、2 个缺流、2 个非法目录名、其余为 CFB 结构损坏。fuzz 样本拒绝不是缺陷。
