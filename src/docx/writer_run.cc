@@ -229,6 +229,25 @@ const std::string& RevisionAuthor(const model::Document* document, int index) {
   return document->revision_authors[index];
 }
 
+std::string RevisionDate(uint32_t dttm) {
+  // [MS-DOC] 2.9.60 DTTM: minute 0-5, hour 6-10, day 11-15, month 16-19,
+  // year 20-28 as 1900 + value; bits 29-31 hold an unused weekday. The
+  // fields are expanded literally (no month-length validation).
+  constexpr uint32_t kMinuteMask = 0x3F, kHourMask = 0x1F, kDayMask = 0x1F,
+                     kMonthMask = 0xF, kYearMask = 0x1FF;
+  constexpr uint32_t kHourShift = 6, kDayShift = 11, kMonthShift = 16,
+                     kYearShift = 20, kYearBase = 1900;
+  const unsigned minute = dttm & kMinuteMask;
+  const unsigned hour = (dttm >> kHourShift) & kHourMask;
+  const unsigned day = (dttm >> kDayShift) & kDayMask;
+  const unsigned month = (dttm >> kMonthShift) & kMonthMask;
+  const unsigned year = kYearBase + ((dttm >> kYearShift) & kYearMask);
+  char text[sizeof("YYYY-MM-DDTHH:MM:SSZ")];
+  std::snprintf(text, sizeof text, "%04u-%02u-%02uT%02u:%02u:00Z", year, month,
+                day, hour, minute);
+  return text;
+}
+
 void RunPr(pugi::xml_node parent, const model::Run& r,
            const model::Document* document) {
   pugi::xml_node n = parent.append_child("w:rPr");

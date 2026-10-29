@@ -55,6 +55,12 @@ std::vector<uint8_t> Prl(uint16_t op, std::vector<uint8_t> value) {
   return result;
 }
 
+// Little-endian 4-byte DTTM ([MS-DOC] 2.9.60) for sprmCDttmRMark operands.
+std::vector<uint8_t> Dttm(uint32_t value) {
+  return {static_cast<uint8_t>(value), static_cast<uint8_t>(value >> 8),
+          static_cast<uint8_t>(value >> 16), static_cast<uint8_t>(value >> 24)};
+}
+
 std::vector<uint8_t> Sprms(std::initializer_list<std::vector<uint8_t>> list) {
   std::vector<uint8_t> out;
   for (const auto& item : list) {
@@ -303,6 +309,73 @@ TEST(M19Revisions, StoresIndicesAndTable) {
   EXPECT_EQ(2, run.revision_property);
   const std::vector<std::string> expected{"Unknown", "Alice", "Bob"};
   EXPECT_EQ(expected, d->revision_authors);
+}
+
+// sprmCDttmRMark carries the insertion date as a 4-byte DTTM; the raw bits
+// reach the IR and w:ins exposes them as an ISO-8601 @w:date.
+TEST(M19Revisions, InsertDateFromDttm) {
+  // 2026-10-29T14:05:00Z: minute 5, hour 14, day 29, month 10, year 1900+126.
+  constexpr uint32_t kDttm =
+      5 | (14 << 6) | (29 << 11) | (10 << 16) | (126 << 20);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs.size());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(kDttm, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_NE(std::string::npos, xml.find(R"(w:date="2026-10-29T14:05:00Z")"));
+}
+
+// sprmCDttmRMarkDel feeds w:del's @w:date from revision_date_delete.
+TEST(M19Revisions, DeleteDateFromDttm) {
+  // 1999-01-02T03:04:00Z: minute 4, hour 3, day 2, month 1, year 1900+99.
+  constexpr uint32_t kDttm = 4 | (3 << 6) | (2 << 11) | (1 << 16) | (99 << 20);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0800, {1}), Prl(0x6864, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(kDttm, d->paragraphs[0].runs[0].revision_date_delete);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:del )"));
+  EXPECT_NE(std::string::npos, xml.find(R"(w:date="1999-01-02T03:04:00Z")"));
+}
+
+// Without sprmCDttmRMark* the mark keeps the old shape: no @w:date at all.
+TEST(M19Revisions, NoDateWithoutDttm) {
+  auto d = Synthetic(Prl(0x0000, {0}), Sprms({Prl(0x0801, {1})}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(0u, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
+// A DTTM operand shorter than four bytes never reaches ApplyRun through the
+// file path: the FKP grpprl walk rejects the malformed sequence and the CHPX
+// page is skipped with a warning. ApplyRun's own guard still ignores a short
+// span handed in directly.
+TEST(M19Revisions, TruncatedDttmIgnored) {
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, {1, 2, 3})}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(0u, d->paragraphs[0].runs[0].revision_date_insert);
+  EXPECT_FALSE(d->paragraphs[0].runs[0].revision_insert);
+  EXPECT_TRUE(WarnsAbout(*d, "skipped CHPX FKP page"));
+  EXPECT_EQ(std::string::npos, Xml(*d).find("w:date="));
+  model::Run run;
+  const std::vector<uint8_t> short_operand{1, 2, 3};
+  doc::detail::ApplyRun(run, 0x6805, Bytes(short_operand), {});
+  doc::detail::ApplyRun(run, 0x6864, Bytes(short_operand), {});
+  EXPECT_EQ(0u, run.revision_date_insert);
+  EXPECT_EQ(0u, run.revision_date_delete);
 }
 
 // A structurally invalid SttbfRMark fails closed: no authors, a warning, and

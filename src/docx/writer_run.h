@@ -14,6 +14,9 @@
 
 #ifndef SRC_DOCX_WRITER_RUN_H_
 #define SRC_DOCX_WRITER_RUN_H_
+#include <cstdint>
+#include <string>
+
 #include "model/document.h"
 #include "third_party/pugixml/pugixml.hpp"
 namespace doccraft::docx {
@@ -22,6 +25,10 @@ namespace doccraft::docx {
 // table, or an out-of-range index (already warned about at parse time)
 // degrades to the historical placeholder author "doccraft".
 const std::string& RevisionAuthor(const model::Document* document, int index);
+
+// Formats a [MS-DOC] 2.9.60 DTTM as the ISO-8601 UTC value used by @w:date
+// on w:ins / w:del.
+std::string RevisionDate(uint32_t dttm);
 
 void RunPr(pugi::xml_node parent, const model::Run& run,
            const model::Document* document);

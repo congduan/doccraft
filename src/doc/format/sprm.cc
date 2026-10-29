@@ -702,6 +702,14 @@ void ApplyRun(model::Run& r, uint16_t op, Bytes v,
       if (v.size() >= kRevisionAuthorMinSize)
         r.revision_author_delete = S16(v, 0);
       break;
+    case kSprmCDttmRMark:
+      if (v.size() >= kRevisionDateMinSize)
+        r.revision_date_insert = U32(v, 0);
+      break;
+    case kSprmCDttmRMarkDel:
+      if (v.size() >= kRevisionDateMinSize)
+        r.revision_date_delete = U32(v, 0);
+      break;
     case kSprmCPropRMark:
       if (v.size() > 1)
         r.property_revision = v[1] != 0;
