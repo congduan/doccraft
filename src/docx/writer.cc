@@ -49,9 +49,9 @@ std::expected<std::string_view, Error> detail::RelationshipTypeFor(
     return "oleObject";
   if (target.starts_with("footer"))
     return "footer";
-  return std::unexpected(Error{"Unknown relationship target: " +
-                               std::string(source) + " -> " +
-                               std::string(target)});
+  return std::unexpected(
+      Error{"Unknown relationship target: " + std::string(source) + " -> " +
+            std::string(target)});
 }
 
 namespace {

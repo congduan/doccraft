@@ -310,8 +310,8 @@ TEST(DocxWriterRelations, PlainHeaderHasNoRelationshipsPart) {
 }
 
 TEST(DocxWriterRelations, UnknownTargetReturnsNamedError) {
-  auto type = docx::detail::RelationshipTypeFor("document.xml",
-                                               "future-part.xml");
+  auto type =
+      docx::detail::RelationshipTypeFor("document.xml", "future-part.xml");
   ASSERT_FALSE(type);
   EXPECT_EQ(type.error().message,
             "Unknown relationship target: document.xml -> future-part.xml");
