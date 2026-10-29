@@ -83,6 +83,8 @@ add_test(NAME docx_zip_validate COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:doccraft> ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc)
 add_test(NAME corpus_text_consistency COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/corpus/compare_text.py $<TARGET_FILE:doccraft>)
+add_test(NAME poi_corpus_smoke COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/poi_corpus_smoke.py $<TARGET_FILE:doccraft>)
 add_test(NAME cli_input_path COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/cli_input_path.py $<TARGET_FILE:doccraft>)
 add_executable(m15_bad_note_fixture m15_bad_note_fixture.cc cfb_test_util.cc)
