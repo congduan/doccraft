@@ -64,15 +64,40 @@ size_t PartCount(const std::vector<uint8_t>& archive, const char* name) {
 
 TEST(M6WriterBuffer, SerializedPartsLimitReturnsError) {
   model::Document document;
-  constexpr size_t kTestLimit = 8192;
-  auto baseline = docx::detail::WriteWithBufferLimit(document, kTestLimit);
-  ASSERT_TRUE(baseline) << baseline.error().message;
   document.paragraphs.push_back({});
   document.paragraphs.back().runs.push_back({});
   document.paragraphs.back().runs.back().text = std::string(16384, 'x');
+  constexpr size_t kGenerousLimit = 65536;
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kGenerousLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  mz_zip_archive archive = {};
+  ASSERT_TRUE(
+      mz_zip_reader_init_mem(&archive, baseline->data(), baseline->size(), 0));
+  size_t total = 0;
+  for (mz_uint index = 0; index < mz_zip_reader_get_num_files(&archive);
+       ++index) {
+    mz_zip_archive_file_stat stat = {};
+    ASSERT_TRUE(mz_zip_reader_file_stat(&archive, index, &stat));
+    total += stat.m_uncomp_size;
+  }
+  mz_zip_reader_end(&archive);
+  const size_t document_bytes = Part(*baseline, "word/document.xml").size();
+  const size_t styles_bytes = Part(*baseline, "word/styles.xml").size();
+  const size_t numbering_bytes = Part(*baseline, "word/numbering.xml").size();
+  // document.xml is added after the package metadata and before styles and
+  // numbering, so the buffered total at that call is the measured archive
+  // total minus those two trailing parts.
+  const size_t before_document =
+      total - document_bytes - styles_bytes - numbering_bytes;
+  constexpr size_t kTestLimit = 8192;
+  ASSERT_GT(document_bytes, kTestLimit);
   auto zip = docx::detail::WriteWithBufferLimit(document, kTestLimit);
   ASSERT_FALSE(zip);
-  EXPECT_EQ(zip.error().message, "writer buffer limit exceeded");
+  EXPECT_EQ(zip.error().message,
+            "writer buffer limit exceeded: word/document.xml (" +
+                std::to_string(document_bytes) + " bytes, total " +
+                std::to_string(before_document + document_bytes) + " > " +
+                std::to_string(kTestLimit) + ")");
 }
 
 TEST(M6WriterBuffer, HeaderPartCountsTowardTotalLimit) {
@@ -101,10 +126,17 @@ TEST(M6WriterBuffer, HeaderPartCountsTowardTotalLimit) {
   }
   mz_zip_reader_end(&archive);
   ASSERT_GT(total, core + 1);
+  const size_t numbering_bytes = Part(*baseline, "word/numbering.xml").size();
 
+  // AddPart serializes numbering.xml last, so a limit one byte below the total
+  // trips on that part after the header payload has already been buffered.
   auto zip = docx::detail::WriteWithBufferLimit(document, total - 1);
   ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized total";
-  EXPECT_EQ(zip.error().message, "writer buffer limit exceeded");
+  EXPECT_EQ(zip.error().message,
+            "writer buffer limit exceeded: word/numbering.xml (" +
+                std::to_string(numbering_bytes) + " bytes, total " +
+                std::to_string(total) + " > " + std::to_string(total - 1) +
+                ")");
 }
 
 TEST(M6WriterBuffer, SinglePartLimitReturnsNamedSize) {
@@ -190,6 +222,51 @@ TEST(M6WriterBuffer, DoubleLimitReportsNamedPartFirst) {
   EXPECT_EQ(zip.error().message,
             "writer part limit exceeded: word/document.xml (" +
                 std::to_string(actual_bytes) + " bytes)");
+}
+
+TEST(M6WriterBuffer, TotalLimitErrorNamesOffendingPart) {
+  model::Document document;
+  model::Paragraph header;
+  model::Run run;
+  run.text = std::string(4096, 'h');
+  header.runs.push_back(std::move(run));
+  document.section.headers[1].push_back(std::move(header));
+  document.paragraphs.push_back({});
+  document.paragraphs.back().runs.push_back({});
+  document.paragraphs.back().runs.back().text = std::string(2048, 'x');
+
+  constexpr size_t kGenerousLimit = 65536;
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kGenerousLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  mz_zip_archive archive = {};
+  ASSERT_TRUE(
+      mz_zip_reader_init_mem(&archive, baseline->data(), baseline->size(), 0));
+  size_t total = 0;
+  for (mz_uint index = 0; index < mz_zip_reader_get_num_files(&archive);
+       ++index) {
+    mz_zip_archive_file_stat stat = {};
+    ASSERT_TRUE(mz_zip_reader_file_stat(&archive, index, &stat));
+    total += stat.m_uncomp_size;
+  }
+  mz_zip_reader_end(&archive);
+  const size_t document_bytes = Part(*baseline, "word/document.xml").size();
+  const size_t styles_bytes = Part(*baseline, "word/styles.xml").size();
+  const size_t numbering_bytes = Part(*baseline, "word/numbering.xml").size();
+  // AddPart serializes the header first, then the package metadata, document
+  // and finally styles/numbering, so everything before document.xml is the
+  // total minus those three parts. A limit one byte below that prefix plus the
+  // document payload keeps the part check satisfied and makes document.xml the
+  // part that crosses the total bound.
+  const size_t before_document =
+      total - document_bytes - styles_bytes - numbering_bytes;
+  const size_t limit = before_document + document_bytes - 1;
+  auto zip = docx::detail::WriteWithBufferLimit(document, limit);
+  ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized total";
+  EXPECT_EQ(zip.error().message,
+            "writer buffer limit exceeded: word/document.xml (" +
+                std::to_string(document_bytes) + " bytes, total " +
+                std::to_string(before_document + document_bytes) + " > " +
+                std::to_string(limit) + ")");
 }
 
 TEST(DocxWriterRelations, HeaderImageAndLinkUseOwnRelationships) {

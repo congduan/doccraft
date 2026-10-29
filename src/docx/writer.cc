@@ -166,8 +166,14 @@ struct WriteContext {
                                    " (" + std::to_string(data.size()) +
                                    " bytes)"});
     }
-    if (data.size() > max_buffer_bytes - buffered)
-      return std::unexpected(Error{"writer buffer limit exceeded"});
+    if (data.size() > max_buffer_bytes - buffered) {
+      const size_t total = buffered + data.size();
+      return std::unexpected(Error{"writer buffer limit exceeded: " + name +
+                                   " (" + std::to_string(data.size()) +
+                                   " bytes, total " + std::to_string(total) +
+                                   " > " + std::to_string(max_buffer_bytes) +
+                                   ")"});
+    }
     buffered += data.size();
     parts.push_back({std::move(name), std::move(data)});
     return {};
