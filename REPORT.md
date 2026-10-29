@@ -18,11 +18,11 @@
 |---|---|---|
 | 1 | `cb4fb68` | 合成 .doc 边界语料生成器 + 27 个样本 + `edge_corpus` ctest |
 | 2 | `b512112` | `m20_writer_matrix_test.cc`，22 个 writer 属性矩阵用例 |
-| 3 | `f6060c0` | `m20_malformed_test.cc`，35 个畸形输入回归用例 |
+| 3 | `f6060c0` + 后续补 2 例 | `m20_malformed_test.cc`，37 个畸形输入回归用例 |
 | 4 | `b2bc703` | 语料 8→12，4 个 MS-DOC 特性样本 + pixel 基线记录 |
 
-ctest 用例数：**373 → 431（+58）**，其中 27 个边界样本断言集中在
-`edge_corpus` 一个 ctest 条目内；新增独立 gtest 用例 57 个（22 + 35）。
+ctest 用例数：**373 → 433（+60）**，其中 27 个边界样本断言集中在
+`edge_corpus` 一个 ctest 条目内；新增独立 gtest 用例 59 个（22 + 37）。
 
 ## 2. 块1：合成边界语料
 
@@ -79,10 +79,11 @@ two-paragraphs / nested-table-d2..d9），再扩展到 27 个；未闭门造格�
 
 ## 4. 块3：畸形输入回归库
 
-`tests/m20_malformed_test.cc`，35 个 byte-level 用例，其中 **28 个断言拒绝**：
+`tests/m20_malformed_test.cc`，37 个 byte-level 用例，其中 **30 个断言拒绝**：
 
 - FIB：ident、nFib 过低/过高、截断 base、截断 RgLw、截断 pair、RC4/XOR
-  加密头、缺失 CLX。
+  加密头、缺失 CLX；`fcMin` 低于头长（CLX 权威，接受）与 `ccpText`
+  超出 piece 覆盖（告警并保留已覆盖文本）各一例。
 - CLX：CP 倒序、CP 相等、Pcdt 声明过大/过小、CLX 越界、compressed 位越界、
   Prc 尺寸溢出、Prm 索引越界、缺失 Pcdt、piece 过度覆盖。
 - FKP：FC 倒序、run count 30/0、PAPX 长度溢出、PAPX sprm 截断、重复页、
@@ -93,7 +94,7 @@ two-paragraphs / nested-table-d2..d9），再扩展到 27 个；未闭门造格�
 7 个用例（FC 倒序/run count/PAPX 溢出/重复页/页越界/深度炸弹等）断言的是
 **产品既有的降级策略**：FKP 结构损坏时跳过该页并警告，而不是返回错误。
 这与 `docs/KNOWN-SIMPLIFICATIONS.md` 的 degraded FKP 条目一致，已在
-`ExpectDegradedFkp` 中固定警告关键词与成功解析；其余 28 个用例严格断言
+`ExpectDegradedFkp` 中固定警告关键词与成功解析；其余 30 个用例严格断言
 `std::expected` 错误与指定关键词。
 
 ## 5. 块4：数据深化
@@ -140,14 +141,14 @@ build_exit=0
 ```text
 $ ctest --test-dir build --output-on-failure -j2
 ...
-431/431 Test #418: edge_corpus ............................................................   Passed    0.16 sec
+433/433 Test #418: edge_corpus ............................................................   Passed    0.16 sec
 
-100% tests passed, 0 tests failed out of 431
+100% tests passed, 0 tests failed out of 433
 
 Total Test time (real) =   6.95 sec
 ```
 
-用例数对比：基线 `ctest -N` = 373，本次 = 431，新增 58 个 ctest 条目。
+用例数对比：基线 `ctest -N` = 373，本次 = 433，新增 60 个 ctest 条目。
 
 ### 6.3 新语料断言
 
