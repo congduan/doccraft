@@ -377,9 +377,12 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 ## Word 6/95 旧版 opcode（不计入 314）
 
 > 旧版 grpprl 用 1 字节 opcode（LibreOffice `sprmids.hxx` v6 命名空间 + wvWare
-> `rgsprmWord6` 双源核对）。`src/doc/format/fkp.cc` 的 `NormalizeLegacySprms`
-> 把已支持项翻译为上表现代 opcode 后走同一 IR 路径；FKP 与样式 UPX 共用。
-> 未列出的 opcode 一律警告并跳过该组剩余修饰（partial-keep）。
+> `rgsprmWord6` 双源核对）。`src/doc/format/fkp.cc` 的 `ScanLegacySprms` /
+> `NormalizeLegacySprms` 把已支持项翻译为上表现代 opcode 后走同一 IR 路径；
+> FKP 与样式 UPX 共用。`sprm_codes.h` 的 `kLegacySprmSpecs` 逐行转写 LO
+> `GetWW6SprmSearcher` 的完整宽度表：已映射项按上表宽度翻译；表内定长或变长
+> 但未映射的 opcode 按宽度整项跳过，后续修饰继续解析；表外 opcode 或操作数
+> 截断仍停止该组并警告（无法确定宽度时不能把操作数误当 opcode）。
 
 | 旧版 opcode | sprm | 现代去向 | 备注 |
 |---|---|---|---|
@@ -399,9 +402,11 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0x62` | sprmCIco | 同名 | 1B |
 | `0x63` | sprmCHps | 同名 | **2B**；wvWare spra 位与 LO aSprms 表双证，hps<256 时与 1 字节读法等价；M13 修正 |
 
-> 实测样本中仍遇到的未映射项：`0x25` sprmPWr（十进制 37，框架环绕；本语料未遇到，
-> 早年登记时误写作十六进制 `0x37`）、`0x61` sprmCLid（语言；
-> 现代对应 sprmCRgLid0 操作数宽度不同，不能直译）。
+> 实测样本中仍遇到的未映射项：`0x25` sprmPWr（十进制 37，框架环绕；1 字节）、
+> `0x61` sprmCLid（语言；2 字节；现代对应 sprmCRgLid0 操作数宽度不同，不能直译）。
+> r16 起二者均按 LO 表宽度整项跳过，不再丢弃该组后续修饰。表外 opcode（如
+> `Bug51944.doc` 的字节 `0x37`，十进制 55）或变长操作数截断（`Bug50955.doc` 的
+> `0xBF`）仍按保守策略停止并警告。
 
 ## 规范外旧账别名（不计入 314）
 
