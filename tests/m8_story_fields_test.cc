@@ -778,6 +778,24 @@ TEST(M15StoryPlc, BadEndnoteTextKeepsFootnote) {
   EXPECT_TRUE(Part(*zip, "word/endnotes.xml").empty());
 }
 
+TEST(M15StoryPlc, OutOfRangeFootnoteTextCpSkipsStoryWithoutClamp) {
+  // Word 97+ has no legacy text-PLC guard: a note range past ccpFtn still
+  // skips the story PLC with a warning instead of clamping to the story.
+  Synthetic s = Build("Body\r", "Foot\r\r", "", "", "");
+  s.fib.fnd_ref = PutNoteRefPlc(s, 1);
+  s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn + 1);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "skipped footnote story PLC: invalid note text PLC CP range");
+  EXPECT_TRUE(parsed->notes.empty());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip);
+  EXPECT_TRUE(Part(*zip, "word/footnotes.xml").empty());
+  EXPECT_NE(Part(*zip, "word/document.xml").find("Body"), std::string::npos);
+}
+
 TEST(M15StoryPlc, EqualCommentAnchorCpsKeepBothBodies) {
   Synthetic s = Build("Body\r", "", "", "One\rTwo\r\r", "");
   const size_t at = s.table.size();

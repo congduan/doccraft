@@ -929,6 +929,8 @@ size_t Count(const std::string& text, const std::string& needle) {
 // after the body because this document is not complex.
 struct LegacyFootnoteSample {
   bool corrupt_reference_cps = false;
+  // Word 6/95 text PLCs may end up to two CPs past the story.
+  bool overshoot_text_cp = false;
 };
 
 std::vector<uint8_t> Word6FootnoteDocument(uint16_t ident, uint16_t nfib,
@@ -962,7 +964,9 @@ std::vector<uint8_t> Word6FootnoteDocument(uint16_t ident, uint16_t nfib,
   Put32(word, 88 + 3 * 8, kTxtPlc);
   Put32(word, 92 + 3 * 8, 8);
   Put32(word, kTxtPlc, 0);
-  Put32(word, kTxtPlc + 4, static_cast<uint32_t>(note.size()));
+  Put32(word, kTxtPlc + 4,
+        static_cast<uint32_t>(note.size()) +
+            (sample.overshoot_text_cp ? 2u : 0u));
   return word;
 }
 
@@ -1003,6 +1007,33 @@ TEST(LegacyWord, Word95FootnoteBodyReachesDocx) {
   ASSERT_TRUE(zip) << zip.error().message;
   EXPECT_NE(Part(*zip, "word/footnotes.xml").find(">F</w:t>"),
             std::string::npos);
+}
+
+TEST(LegacyWord, LegacyFootnoteTextGuardClampsLastNote) {
+  // The legacy guard allows the text PLC to end ccpFtn + 2 CPs past the
+  // story. The single note must survive by clamping to the story length; the
+  // reference in document.xml must keep a matching footnotes.xml entry.
+  const struct {
+    uint16_t ident;
+    uint16_t nfib;
+  } cases[] = {{0xA5DC, 0x65}, {0xA699, 0x68}};
+  for (const auto& item : cases) {
+    LegacyFootnoteSample sample;
+    sample.overshoot_text_cp = true;
+    auto word = Word6FootnoteDocument(item.ident, item.nfib, sample);
+    auto document = ParseWord6(word);
+    ASSERT_TRUE(document) << document.error().message;
+    ExpectSingleFootnote(*document);
+    auto zip = doccraft::docx::Write(*document);
+    ASSERT_TRUE(zip) << zip.error().message;
+    const std::string footnotes = Part(*zip, "word/footnotes.xml");
+    ASSERT_FALSE(footnotes.empty()) << "nfib " << item.nfib;
+    EXPECT_EQ(Count(footnotes, "<w:footnote w:id="), 1u);
+    EXPECT_NE(footnotes.find(">F</w:t>"), std::string::npos);
+    EXPECT_EQ(Count(Part(*zip, "word/document.xml"),
+                    "<w:footnoteReference w:id=\"1\"/>"),
+              1u);
+  }
 }
 
 TEST(LegacyWord, LegacyCorruptFootnotePlcWarnsAndKeepsBody) {

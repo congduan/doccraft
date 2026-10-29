@@ -117,6 +117,7 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
   // Word 6/95 keeps the note PLCs and their field PLCs in WordDocument; Word
   // 97+ uses the table stream.
   Bytes source = fib.legacy ? word : table;
+  const uint32_t text_guard = fib.legacy ? kLegacyNoteTextGuard : 0;
   auto footnotes = ReadTextCps(source, fib.fnd_txt);
   auto endnotes = ReadTextCps(source, fib.end_txt);
   // The reference PLC is authoritative for how many notes exist: some
@@ -154,18 +155,38 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
   auto append = [&](const std::vector<uint32_t>& text_cps, uint64_t base,
                     uint32_t story_length, size_t count, bool endnote,
                     const std::map<uint32_t, uint8_t>& field_status) {
+    // Word 6/95 text PLCs may end up to two CPs past the story (the final
+    // story's paragraph marks). Clamp such a range to the story instead of
+    // dropping the note, otherwise the reference in the main story keeps
+    // pointing at a missing footnotes.xml entry. Word 97+ keeps exact CPs:
+    // an over-long range is skipped, never clamped.
+    auto resolve_range = [&](uint32_t first, uint32_t last, uint32_t* end) {
+      if (last > story_length) {
+        if (text_guard == 0)
+          return false;
+        last = story_length;
+        if (last <= first)
+          return false;
+      }
+      if (last < first)
+        return false;
+      *end = last;
+      return true;
+    };
     std::vector<std::pair<uint64_t, uint64_t>> ranges;
     for (size_t i = 0; i < count; ++i) {
-      if (text_cps[i + 1] > text_cps[i] && text_cps[i + 1] <= story_length) {
-        ranges.emplace_back(base + text_cps[i], base + text_cps[i + 1]);
-      }
+      uint32_t last = 0;
+      if (!resolve_range(text_cps[i], text_cps[i + 1], &last) ||
+          last == text_cps[i])
+        continue;
+      ranges.emplace_back(base + text_cps[i], base + last);
     }
     const BookmarkMarks story_bookmarks = FilterStoryBookmarks(
         bookmarks, ranges, endnote ? "endnote" : "footnote", &doc.warnings);
     for (size_t i = 0; i < count; i++) {
       const uint32_t first = text_cps[i];
-      const uint32_t last = text_cps[i + 1];
-      if (last < first || last > story_length) {
+      uint32_t last = 0;
+      if (!resolve_range(first, text_cps[i + 1], &last)) {
         continue;
       }
       model::Note note;
