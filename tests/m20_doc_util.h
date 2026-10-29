@@ -483,8 +483,7 @@ inline DocStreams BuildDocStreams(const DocSpec& spec) {
   return {word, table, spec.data};
 }
 
-inline std::vector<uint8_t> BuildDocFile(const DocSpec& spec) {
-  const DocStreams streams = BuildDocStreams(spec);
+inline std::vector<uint8_t> BuildCfb(const DocStreams& streams) {
   cfb::test::CfbBuilder builder;
   builder.AddStream("WordDocument", streams.word);
   builder.AddStream("0Table", streams.table);
@@ -492,6 +491,10 @@ inline std::vector<uint8_t> BuildDocFile(const DocSpec& spec) {
     builder.AddStream("Data", streams.data);
   }
   return builder.Build();
+}
+
+inline std::vector<uint8_t> BuildDocFile(const DocSpec& spec) {
+  return BuildCfb(BuildDocStreams(spec));
 }
 
 }  // namespace doccraft::test

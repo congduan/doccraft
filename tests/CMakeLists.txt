@@ -201,6 +201,12 @@ target_compile_definitions(m14_textbox_test PRIVATE
                            DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m14_textbox_test)
 
+add_executable(m20_malformed_test m20_malformed_test.cc fuzz_util.cc
+  cfb_test_util.cc)
+target_link_libraries(m20_malformed_test PRIVATE doccraft_cfb doccraft_doc
+  doccraft_docx gtest_main)
+gtest_discover_tests(m20_malformed_test)
+
 add_executable(m20_writer_matrix_test m20_writer_matrix_test.cc)
 target_link_libraries(m20_writer_matrix_test PRIVATE doccraft_docx gtest_main)
 gtest_discover_tests(m20_writer_matrix_test)
