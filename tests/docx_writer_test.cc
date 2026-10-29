@@ -273,6 +273,52 @@ TEST(DocxWriterRelations, PlainHeaderHasNoRelationshipsPart) {
   EXPECT_EQ(PartCount(*zip, "word/_rels/header1.xml.rels"), 0);
 }
 
+TEST(DocxWriterRelations, UnknownTargetReturnsNamedError) {
+  auto type = docx::detail::RelationshipTypeFor("future-part.xml");
+  ASSERT_FALSE(type);
+  EXPECT_EQ(type.error().message,
+            "unknown relationship target: future-part.xml");
+}
+
+TEST(DocxWriterRelations, RegisteredTargetsHaveExplicitTypes) {
+  for (const auto& [target, expected] :
+       std::vector<std::pair<std::string_view, std::string_view>>{
+           {"header1.xml", "header"},
+           {"media/image1.png", "image"},
+           {"footnotes.xml", "footnotes"},
+           {"endnotes.xml", "endnotes"},
+           {"comments.xml", "comments"},
+           {"embeddings/ole1.bin", "oleObject"},
+           {"footer1.xml", "footer"}}) {
+    auto type = docx::detail::RelationshipTypeFor(target);
+    ASSERT_TRUE(type) << target;
+    EXPECT_EQ(*type, expected);
+  }
+}
+
+TEST(DocxWriterRelations, OddEvenSettingsIsLastPartAndLinked) {
+  model::Document document;
+  document.section.odd_even_different = true;
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  mz_zip_archive archive = {};
+  ASSERT_TRUE(mz_zip_reader_init_mem(&archive, zip->data(), zip->size(), 0));
+  const mz_uint count = mz_zip_reader_get_num_files(&archive);
+  ASSERT_GT(count, 0u);
+  mz_zip_archive_file_stat last = {};
+  ASSERT_TRUE(mz_zip_reader_file_stat(&archive, count - 1, &last));
+  EXPECT_EQ(std::string(last.m_filename), "word/settings.xml");
+  mz_zip_reader_end(&archive);
+  EXPECT_NE(Part(*zip, "word/settings.xml").find("<w:evenAndOddHeaders/>"),
+            std::string::npos);
+  EXPECT_NE(Part(*zip, "[Content_Types].xml")
+                .find("<Override PartName=\"/word/settings.xml\""),
+            std::string::npos);
+  EXPECT_NE(Part(*zip, "word/_rels/document.xml.rels")
+                .find("relationships/settings\" Target=\"settings.xml\""),
+            std::string::npos);
+}
+
 TEST(DocxWriterRelations, BodyAndFooterCanShareImage) {
   model::Document document;
   model::Image image;
