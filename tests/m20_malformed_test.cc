@@ -166,6 +166,36 @@ TEST(M20Malformed, FibMissingClx) {
                  "missing CLX Pcdt");
 }
 
+TEST(M20Malformed, FibFcMinBelowHeaderIsIgnored) {
+  // Modern Word 97 text addressing is CLX-authoritative: fcMin is not used
+  // when a Pcdt is present, so a bogus value must not break the conversion.
+  DocSpec spec = TextSpec();
+  spec.fc_min = 4;
+  const auto outcome =
+      ConvertBytes(Pack(doccraft::test::BuildDocStreams(spec)));
+  EXPECT_TRUE(outcome.ok) << outcome.error;
+}
+
+TEST(M20Malformed, FibCcpTextBeyondPieceCoverage) {
+  // ccpText claims 100000 characters while the CLX covers three. The reader
+  // emits the covered text and records a coverage warning instead of reading
+  // past the piece table.
+  DocSpec spec = TextSpec();
+  spec.ccp_override = 100000;
+  spec.complex = false;  // the coverage warning is for non-complex files
+  spec.pieces = {{0, 3, 0, true, 0}};
+  const DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("piece coverage short") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
 // ---------------------------------------------------------------------------
 // CLX / piece table
 // ---------------------------------------------------------------------------
