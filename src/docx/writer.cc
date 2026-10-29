@@ -32,6 +32,26 @@
 #include "third_party/pugixml/pugixml.hpp"
 
 namespace doccraft::docx {
+std::expected<std::string_view, Error> detail::RelationshipTypeFor(
+    std::string_view target) {
+  if (target.starts_with("header"))
+    return "header";
+  if (target.starts_with("media/"))
+    return "image";
+  if (target == "footnotes.xml")
+    return "footnotes";
+  if (target == "endnotes.xml")
+    return "endnotes";
+  if (target == "comments.xml")
+    return "comments";
+  if (target.starts_with("embeddings/"))
+    return "oleObject";
+  if (target.starts_with("footer"))
+    return "footer";
+  return std::unexpected(
+      Error{"unknown relationship target: " + std::string(target)});
+}
+
 namespace {
 using xml::Attr;
 using xml::BorderPr;
@@ -227,8 +247,8 @@ std::string BuildContentTypes(const WriteContext& ctx) {
   return out;
 }
 
-pugi::xml_document BuildRelationships(const WriteContext& ctx,
-                                      std::string_view source) {
+std::expected<pugi::xml_document, Error> BuildRelationships(
+    const WriteContext& ctx, std::string_view source) {
   constexpr const char* kRelBase =
       "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
   pugi::xml_document docrels;
@@ -252,23 +272,12 @@ pugi::xml_document BuildRelationships(const WriteContext& ctx,
       continue;
     const int rid = relation.id;
     const std::string& target = relation.target;
-    const char* type = "footer";
-    if (target.starts_with("header")) {
-      type = "header";
-    } else if (target.starts_with("media/")) {
-      type = "image";
-    } else if (target == "footnotes.xml") {
-      type = "footnotes";
-    } else if (target == "endnotes.xml") {
-      type = "endnotes";
-    } else if (target == "comments.xml") {
-      type = "comments";
-    } else if (target.starts_with("embeddings/")) {
-      type = "oleObject";
-    }
+    auto type = detail::RelationshipTypeFor(target);
+    if (!type)
+      return std::unexpected(type.error());
     auto rel = relations.append_child("Relationship");
     Attr(rel, "Id", "rId" + std::to_string(rid));
-    Attr(rel, "Type", std::string(kRelBase) + type);
+    Attr(rel, "Type", std::string(kRelBase) + std::string(*type));
     Attr(rel, "Target", target);
   }
   if (settings_id != 0) {
@@ -382,7 +391,9 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
 
   pugi::xml_document styles = WriteStyles(document);
   pugi::xml_document numbering = WriteNumbering(document);
-  pugi::xml_document docrels = BuildRelationships(ctx, "document.xml");
+  auto docrels = BuildRelationships(ctx, "document.xml");
+  if (!docrels)
+    return std::unexpected(docrels.error());
 
   const size_t generated_parts = ctx.parts.size();
   auto result = ctx.AddPart("[Content_Types].xml", BuildContentTypes(ctx));
@@ -391,7 +402,7 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   result = ctx.AddPart("_rels/.rels", kRootRelationships);
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("word/_rels/document.xml.rels", Save(docrels));
+  result = ctx.AddPart("word/_rels/document.xml.rels", Save(*docrels));
   if (!result)
     return std::unexpected(result.error());
   for (size_t i = 0; i < generated_parts; ++i) {
@@ -408,8 +419,11 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
     if (!has_relation &&
         (links == ctx.hyperlinks.end() || links->second.empty()))
       continue;
-    result = ctx.AddPart("word/_rels/" + source + ".rels",
-                         Save(BuildRelationships(ctx, source)));
+    auto relationships = BuildRelationships(ctx, source);
+    if (!relationships)
+      return std::unexpected(relationships.error());
+    result =
+        ctx.AddPart("word/_rels/" + source + ".rels", Save(*relationships));
     if (!result)
       return std::unexpected(result.error());
   }
