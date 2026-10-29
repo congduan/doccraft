@@ -138,8 +138,7 @@ struct WriteContext {
     image_rids[source].resize(document->images.size());
     ole_rids[source].resize(document->ole_objects.size());
   }
-  std::expected<void, Error> AddPart(std::string name, std::string data,
-                                     std::vector<Part>* destination = nullptr) {
+  std::expected<void, Error> AddPart(std::string name, std::string data) {
     if (data.size() > max_part_bytes) {
       return std::unexpected(Error{"writer part limit exceeded: " + name +
                                    " (" + std::to_string(data.size()) +
@@ -148,8 +147,7 @@ struct WriteContext {
     if (data.size() > max_buffer_bytes - buffered)
       return std::unexpected(Error{"writer buffer limit exceeded"});
     buffered += data.size();
-    (destination ? *destination : parts)
-        .push_back({std::move(name), std::move(data)});
+    parts.push_back({std::move(name), std::move(data)});
     return {};
   }
 };
@@ -386,23 +384,21 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
   pugi::xml_document numbering = WriteNumbering(document);
   pugi::xml_document docrels = BuildRelationships(ctx, "document.xml");
 
-  std::vector<Part> core_parts;
-  auto result =
-      ctx.AddPart("[Content_Types].xml", BuildContentTypes(ctx), &core_parts);
+  const size_t generated_parts = ctx.parts.size();
+  auto result = ctx.AddPart("[Content_Types].xml", BuildContentTypes(ctx));
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("_rels/.rels", kRootRelationships, &core_parts);
+  result = ctx.AddPart("_rels/.rels", kRootRelationships);
   if (!result)
     return std::unexpected(result.error());
-  result =
-      ctx.AddPart("word/_rels/document.xml.rels", Save(docrels), &core_parts);
+  result = ctx.AddPart("word/_rels/document.xml.rels", Save(docrels));
   if (!result)
     return std::unexpected(result.error());
-  for (const auto& part : ctx.parts) {
-    if (!part.name.ends_with(".xml"))
+  for (size_t i = 0; i < generated_parts; ++i) {
+    if (!ctx.parts[i].name.ends_with(".xml"))
       continue;
     constexpr std::string_view kWordPartPrefix = "word/";
-    const std::string source = part.name.substr(kWordPartPrefix.size());
+    const std::string source = ctx.parts[i].name.substr(kWordPartPrefix.size());
     const bool has_relation =
         std::any_of(ctx.relations.begin(), ctx.relations.end(),
                     [&](const Relationship& relation) {
@@ -413,31 +409,30 @@ std::expected<std::vector<uint8_t>, Error> detail::WriteWithBufferLimit(
         (links == ctx.hyperlinks.end() || links->second.empty()))
       continue;
     result = ctx.AddPart("word/_rels/" + source + ".rels",
-                         Save(BuildRelationships(ctx, source)), &core_parts);
+                         Save(BuildRelationships(ctx, source)));
     if (!result)
       return std::unexpected(result.error());
   }
-  result = ctx.AddPart("word/document.xml", Save(doc), &core_parts);
+  result = ctx.AddPart("word/document.xml", Save(doc));
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("word/styles.xml", Save(styles), &core_parts);
+  result = ctx.AddPart("word/styles.xml", Save(styles));
   if (!result)
     return std::unexpected(result.error());
-  result = ctx.AddPart("word/numbering.xml", Save(numbering), &core_parts);
+  result = ctx.AddPart("word/numbering.xml", Save(numbering));
   if (!result)
     return std::unexpected(result.error());
 
-  core_parts.reserve(core_parts.size() + ctx.parts.size() +
-                     (ctx.odd_even ? 1 : 0));
-  for (auto& part : ctx.parts)
-    core_parts.push_back(std::move(part));
+  // Keep package metadata before generated story/media parts in the ZIP.
+  std::rotate(ctx.parts.begin(), ctx.parts.begin() + generated_parts,
+              ctx.parts.end());
   if (ctx.odd_even) {
-    result = ctx.AddPart("word/settings.xml", kSettingsPart, &core_parts);
+    result = ctx.AddPart("word/settings.xml", kSettingsPart);
     if (!result)
       return std::unexpected(result.error());
   }
   const auto t_xml = Clock::now();
-  auto archive = PackParts(core_parts);
+  auto archive = PackParts(ctx.parts);
   if (std::getenv("DOCCRAFT_PROFILE")) {
     auto ms = [](Clock::time_point a, Clock::time_point b) {
       return std::chrono::duration<double, std::milli>(b - a).count();
