@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p><text:bookmark text:name="MarkOne"/>Start of marked range.
+<office:annotation office:name="c1"><dc:creator>Reviewer</dc:creator><dc:date>2026-01-02T03:04:05</dc:date><text:p>Please review this range.</text:p></office:annotation>
+Inside comment range.<office:annotation-end office:name="c1"/><text:bookmark-end text:name="MarkOne"/> End.</text:p>
+<text:p>Second paragraph.</text:p>
+</office:text></office:body></office:document>

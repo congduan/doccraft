@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:automatic-styles>
+<style:style style:name="PBreak" style:family="paragraph">
+<style:paragraph-properties fo:break-before="page"/></style:style>
+<style:style style:name="Sect1" style:family="section">
+<style:section-properties style:columns="2" fo:column-count="2"
+ fo:column-gap="0.2in"/></style:style>
+</office:automatic-styles>
+<office:body><office:text>
+<text:p>Section one paragraph.</text:p>
+<text:p text:style-name="PBreak">Section two paragraph.</text:p>
+<text:section text:name="S2" text:style-name="Sect1">
+<text:p>Two column start.</text:p>
+<text:p>Two column second.</text:p>
+</text:section>
+<text:p>After sections.</text:p>
+</office:text></office:body></office:document>

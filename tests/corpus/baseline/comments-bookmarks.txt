@@ -1,0 +1,2 @@
+﻿Start of marked range.  Inside comment range. End.
+Second paragraph.

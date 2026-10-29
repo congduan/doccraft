@@ -32,3 +32,7 @@ tests/fixtures/table-multi-paragraph.doc	PASS	1
 tests/fixtures/table-shading-basic.doc	PASS	1
 tests/fixtures/textbox.doc	PASS	1
 tests/fixtures/two-section-headers.doc	PASS	2
+tests/corpus/corpus/sections-continuous.doc	PASS	2
+tests/corpus/corpus/nested-tables.doc	FAIL	1
+tests/corpus/corpus/page-fields.doc	PASS	1
+tests/corpus/corpus/comments-bookmarks.doc	PASS	1

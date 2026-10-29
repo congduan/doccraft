@@ -127,6 +127,82 @@ SAMPLES = {
 </table:table>
 <text:p>After complex table</text:p>
 </office:text></office:body></office:document>""",
+    "sections-continuous": """<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:automatic-styles>
+<style:style style:name="PBreak" style:family="paragraph">
+<style:paragraph-properties fo:break-before="page"/></style:style>
+<style:style style:name="Sect1" style:family="section">
+<style:section-properties style:columns="2" fo:column-count="2"
+ fo:column-gap="0.2in"/></style:style>
+</office:automatic-styles>
+<office:body><office:text>
+<text:p>Section one paragraph.</text:p>
+<text:p text:style-name="PBreak">Section two paragraph.</text:p>
+<text:section text:name="S2" text:style-name="Sect1">
+<text:p>Two column start.</text:p>
+<text:p>Two column second.</text:p>
+</text:section>
+<text:p>After sections.</text:p>
+</office:text></office:body></office:document>""",
+    "nested-tables": """<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p>Outer table follows.</text:p>
+<table:table table:name="Outer">
+<table:table-column table:number-columns-repeated="5"/>
+<table:table-row>
+<table:table-cell><text:p>A1</text:p></table:table-cell>
+<table:table-cell><text:p>B1</text:p>
+<table:table table:name="Inner">
+<table:table-column table:number-columns-repeated="2"/>
+<table:table-row><table:table-cell><text:p>I11</text:p></table:table-cell><table:table-cell><text:p>I12</text:p></table:table-cell></table:table-row>
+<table:table-row><table:table-cell><text:p>I21</text:p></table:table-cell><table:table-cell><text:p>I22</text:p></table:table-cell></table:table-row>
+</table:table>
+<text:p>B1 tail</text:p></table:table-cell>
+<table:table-cell><text:p>C1</text:p></table:table-cell>
+<table:table-cell><text:p>D1</text:p></table:table-cell>
+<table:table-cell><text:p>E1</text:p></table:table-cell>
+</table:table-row>
+<table:table-row>
+<table:table-cell><text:p>A2</text:p></table:table-cell>
+<table:table-cell><text:p>B2</text:p></table:table-cell>
+<table:table-cell><text:p>C2</text:p></table:table-cell>
+<table:table-cell><text:p>D2</text:p></table:table-cell>
+<table:table-cell><text:p>E2</text:p></table:table-cell>
+</table:table-row>
+</table:table>
+<text:p>After nested table.</text:p>
+</office:text></office:body></office:document>""",
+    "page-fields": """<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p>Page <text:page-number text:select-page="current">1</text:page-number> start.</text:p>
+<text:p>Sequence <text:sequence text:name="Item" style:num-format="1">1</text:sequence> continues.</text:p>
+<text:p>Link <text:a xlink:href="https://example.com">example</text:a> end.</text:p>
+</office:text></office:body></office:document>""",
+    "comments-bookmarks": """<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ office:version="1.2" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:body><office:text>
+<text:p><text:bookmark text:name="MarkOne"/>Start of marked range.
+<office:annotation office:name="c1"><dc:creator>Reviewer</dc:creator><dc:date>2026-01-02T03:04:05</dc:date><text:p>Please review this range.</text:p></office:annotation>
+Inside comment range.<office:annotation-end office:name="c1"/><text:bookmark-end text:name="MarkOne"/> End.</text:p>
+<text:p>Second paragraph.</text:p>
+</office:text></office:body></office:document>""",
 }
 
 def convert(src: Path, fmt: str) -> Path:
@@ -136,8 +212,10 @@ def convert(src: Path, fmt: str) -> Path:
     return src.with_suffix("." + fmt.split(":")[0])
 
 def main() -> int:
+    selected = sys.argv[1:] or list(SAMPLES)
     made = []
-    for name, fodt in SAMPLES.items():
+    for name in selected:
+        fodt = SAMPLES[name]
         src = OUT / f"{name}.fodt"
         src.write_text(fodt, encoding="utf-8")
         doc = convert(src, "doc:MS Word 97")
