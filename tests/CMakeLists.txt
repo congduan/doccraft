@@ -38,6 +38,12 @@ gtest_discover_tests(m6_rc4_test)
 add_executable(m6_fixture_gen m6_fixture_gen.cc cfb_test_util.cc)
 target_link_libraries(m6_fixture_gen PRIVATE doccraft_cfb doccraft_crypto)
 
+# M20 synthetic edge-corpus writer. Not a test target: gen_edge_corpus.py
+# drives it to refresh the checked-in tests/corpus/edge/ samples.
+add_executable(edge_gen edge_gen.cc cfb_test_util.cc)
+target_link_libraries(edge_gen PRIVATE doccraft_cfb)
+target_compile_features(edge_gen PRIVATE cxx_std_23)
+
 add_test(NAME m6_rc4_cli COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/m6_rc4_cli.py $<TARGET_FILE:doccraft>
   ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc
@@ -83,6 +89,8 @@ add_test(NAME docx_zip_validate COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:doccraft> ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc)
 add_test(NAME corpus_text_consistency COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/corpus/compare_text.py $<TARGET_FILE:doccraft>)
+add_test(NAME edge_corpus COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/corpus/run_edge_corpus.py $<TARGET_FILE:doccraft>)
 add_test(NAME poi_corpus_smoke COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/poi_corpus_smoke.py $<TARGET_FILE:doccraft>)
 add_test(NAME wmf_emf_render_check COMMAND ${Python3_EXECUTABLE}
