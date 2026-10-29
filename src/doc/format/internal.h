@@ -237,7 +237,8 @@ inline constexpr uint8_t kDropCapNormal = 1, kDropCapMargin = 2;
 inline constexpr uint8_t kMaxDropCapLines = 10;
 inline constexpr size_t kRevisionAuthorMinSize = 2;
 inline constexpr size_t kRevisionPropertyMinSize = 4;
-// sprmCDttmRMark / sprmCDttmRMarkDel carry one 4-byte DTTM ([MS-DOC] 2.9.60).
+// sprmCDttmRMark / sprmCDttmRMarkDel carry one 4-byte DTTM ([MS-DOC] 2.9.60
+// definition; 2.9.65 validity).
 inline constexpr size_t kRevisionDateMinSize = 4;
 
 // sprmPWHeightAbs: bit 15 marks an exact height, bits 0-14 hold the height.

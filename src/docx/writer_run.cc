@@ -230,20 +230,25 @@ const std::string& RevisionAuthor(const model::Document* document, int index) {
 }
 
 std::string RevisionDate(uint32_t dttm) {
-  // [MS-DOC] 2.9.65 DTTM: minute 0-5, hour 6-10, day 11-15, month 16-19,
-  // year 20-28 as 1900 + value; bits 29-31 hold an unused weekday. A day or
-  // month of 0 means the DTTM MUST be ignored, so it formats to no value
-  // (this also covers an all-zero DTTM). Otherwise the fields are expanded
-  // literally (no month-length validation).
+  // [MS-DOC] 2.9.60 defines the DTTM layout, 2.9.65 gives the valid ranges:
+  // minute 0-59 (bits 0-5), hour 0-23 (6-10), day 1-31 (11-15), month 1-12
+  // (16-19), year 20-28 as 1900 + value; bits 29-31 hold an unused weekday. A
+  // day or month of 0, or any field outside its range, means the DTTM MUST be
+  // ignored, so it formats to no value (this also covers an all-zero DTTM).
+  // The 5-bit day and 9-bit year cannot overflow their maxima (31 and 2411),
+  // so only minute, hour and month need an explicit bound. Otherwise the
+  // fields are expanded literally, with no month-length validation.
   constexpr uint32_t kMinuteMask = 0x3F, kHourMask = 0x1F, kDayMask = 0x1F,
                      kMonthMask = 0xF, kYearMask = 0x1FF;
   constexpr uint32_t kHourShift = 6, kDayShift = 11, kMonthShift = 16,
                      kYearShift = 20, kYearBase = 1900;
+  constexpr uint32_t kMaxMinute = 59, kMaxHour = 23, kMaxMonth = 12;
   const unsigned minute = dttm & kMinuteMask;
   const unsigned hour = (dttm >> kHourShift) & kHourMask;
   const unsigned day = (dttm >> kDayShift) & kDayMask;
   const unsigned month = (dttm >> kMonthShift) & kMonthMask;
-  if (day == 0 || month == 0) {
+  if (day == 0 || month == 0 || month > kMaxMonth || hour > kMaxHour ||
+      minute > kMaxMinute) {
     return {};
   }
   const unsigned year = kYearBase + ((dttm >> kYearShift) & kYearMask);

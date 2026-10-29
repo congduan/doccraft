@@ -390,6 +390,105 @@ TEST(M19Revisions, ZeroMonthDttmIgnored) {
   EXPECT_EQ(std::string::npos, xml.find("w:date="));
 }
 
+// [MS-DOC] 2.9.65 bounds the decoded fields: minute 0-59, hour 0-23 and month
+// 1-12 (day is already capped at 31 by its 5-bit field). A field outside its
+// range makes the DTTM invalid, so no @w:date is written even though the bits
+// would format to something that looks like a date.
+TEST(M19Revisions, MinuteOutOfRangeDttmIgnored) {
+  // 2026-10-29T14:60:00Z: minute 60 is one past the last valid minute.
+  constexpr uint32_t kDttm =
+      60 | (14 << 6) | (29 << 11) | (10 << 16) | (126 << 20);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(kDttm, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
+// Hour 24 is one past the last valid hour.
+TEST(M19Revisions, HourOutOfRangeDttmIgnored) {
+  // 2026-10-29T24:05:00Z: hour 24 is not a valid wall-clock hour.
+  constexpr uint32_t kDttm =
+      5 | (24 << 6) | (29 << 11) | (10 << 16) | (126 << 20);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(kDttm, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
+// Month 13 is one past the last valid month.
+TEST(M19Revisions, MonthOutOfRangeDttmIgnored) {
+  // month 13, day 29, year 2026, 14:05.
+  constexpr uint32_t kDttm =
+      5 | (14 << 6) | (29 << 11) | (13 << 16) | (126 << 20);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(kDttm, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
+// The zero/out-of-range rules apply to sprmCDttmRMarkDel too: w:del keeps its
+// deleted text and author, only @w:date is dropped.
+TEST(M19Revisions, DeleteZeroDayDttmIgnored) {
+  // month 5, day 0, year 2026, 14:05.
+  constexpr uint32_t kDttm =
+      5 | (14 << 6) | (0 << 11) | (5 << 16) | (126 << 20);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0800, {1}), Prl(0x6864, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  const model::Run& run = d->paragraphs[0].runs[0];
+  EXPECT_TRUE(run.revision_delete);
+  EXPECT_EQ(kDttm, run.revision_date_delete);
+  const std::string xml = Xml(*d);
+  const size_t del = xml.find(R"(<w:del )");
+  ASSERT_NE(std::string::npos, del);
+  const size_t text =
+      xml.find(R"(<w:delText xml:space="preserve">X</w:delText>)");
+  ASSERT_NE(std::string::npos, text);
+  EXPECT_LT(del, text);
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
+// Out-of-range fields are ignored on the delete path as well.
+TEST(M19Revisions, DeleteOutOfRangeDttmIgnored) {
+  // minute 60, hour 24 and month 13 with every other field in range.
+  const std::vector<uint32_t> cases{
+      60 | (14 << 6) | (29 << 11) | (10 << 16) | (126 << 20),
+      5 | (24 << 6) | (29 << 11) | (10 << 16) | (126 << 20),
+      5 | (14 << 6) | (29 << 11) | (13 << 16) | (126 << 20)};
+  for (const uint32_t value : cases) {
+    SCOPED_TRACE(value);
+    auto d = Synthetic(Prl(0x0000, {0}),
+                       Sprms({Prl(0x0800, {1}), Prl(0x6864, Dttm(value))}),
+                       AuthorsTable({"Unknown"}));
+    ASSERT_TRUE(d.has_value());
+    ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+    EXPECT_TRUE(d->paragraphs[0].runs[0].revision_delete);
+    EXPECT_EQ(value, d->paragraphs[0].runs[0].revision_date_delete);
+    const std::string xml = Xml(*d);
+    EXPECT_NE(std::string::npos, xml.find(R"(<w:del )"));
+    EXPECT_NE(std::string::npos,
+              xml.find(R"(<w:delText xml:space="preserve">X</w:delText>)"));
+    EXPECT_EQ(std::string::npos, xml.find("w:date="));
+  }
+}
+
 // Without sprmCDttmRMark* the mark keeps the old shape: no @w:date at all.
 TEST(M19Revisions, NoDateWithoutDttm) {
   auto d = Synthetic(Prl(0x0000, {0}), Sprms({Prl(0x0801, {1})}),

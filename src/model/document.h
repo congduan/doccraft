@@ -144,9 +144,11 @@ struct Run {
   // (SttbfRMark). 0 is the spec default and names the "Unknown" author.
   int revision_author_insert = 0, revision_author_delete = 0,
       revision_property = 0;
-  // sprmCDttmRMark / sprmCDttmRMarkDel: raw 4-byte DTTM ([MS-DOC] 2.9.60)
-  // recorded on the mark. 0 means the sprm was absent, so no @w:date is
-  // written; the writer formats any non-zero value as ISO-8601.
+  // sprmCDttmRMark / sprmCDttmRMarkDel: raw 4-byte DTTM ([MS-DOC] 2.9.60
+  // definition; 2.9.65 validity) recorded on the mark. 0 means the sprm was
+  // absent, and a stored 0 (or any DTTM 2.9.65 deems invalid: zero or
+  // out-of-range day/month, minute > 59, hour > 23) also writes no @w:date;
+  // any other value is formatted as ISO-8601.
   uint32_t revision_date_insert = 0, revision_date_delete = 0;
   // Footnote/endnote reference: id within its own note class, as written to
   // w:footnoteReference / w:endnoteReference. -1 = not a reference.
