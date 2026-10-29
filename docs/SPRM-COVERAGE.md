@@ -230,7 +230,7 @@
 | ✅ | `0x9411` | sprmTDyaFromText | A YAS_nonNeg value that specifies the minimum vertical distance between the top edge of the table and the bottom edge of text that wraps around the table. | 表格 TAP §2.6.3；w:tblpPr/@w:topFromText；M3Batch7.TableStyleAndFloatingPosition |
 | ✅ | `0xD612` | sprmTDefTableShd | A DefTableShdOperand value that specifies the default shading for cells 1 – 22 in the row, or all cells in the row if the row contains fewer than 22 cells. | 表格 TAP §2.6.3 |
 | ✅ | `0xD613` | sprmTTableBorders | A TableBordersOperand value that specifies the borders for this row unless modified by other Sprms applied to the cells. | 表格 TAP §2.6.3 |
-| ✅ | `0xF614` | sprmTTableWidth | An FtsWWidth_Table structure that specifies the preferred total width of the table of which this row is a part. | 表格 TAP §2.6.3 |
+| ✅ | `0xF614` | sprmTTableWidth | An FtsWWidth_Table structure that specifies the preferred total width of the table of which this row is a part. fts=auto(1) 已接受；未知 fts 按 [MS-DOC] MUST be ignored 跳过（M19，POI 真实语料 30 样本回归）。 | 表格 TAP §2.6.3 |
 | ✅ | `0x3615` | sprmTFAutofit | A Bool8 value that specifies whether the table column widths are to be automatically resized to best fit the contents of the whole table. | 表格 TAP §2.6.3 |
 | ✅ | `0xD616` | sprmTDefTableShd2nd | A DefTableShdOperand that specifies the default shading for cells 23 – 44 in the row, or all remaining cells in the row beginning with cell 23 if the row contains fewer than 44 cells. | 表格 TAP §2.6.3 |
 | N/A | `0xF617` | sprmTWidthBefore | An FtsWWidth_TablePart structure that specifies the preferred additional leading indent of the first cell of the row, relative to the leading edge of the table as a whole. | 表格 TAP §2.6.3；行级额外前置缩进；docx 只有表级 w:tblInd |
