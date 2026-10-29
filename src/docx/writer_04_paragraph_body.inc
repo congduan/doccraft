@@ -390,10 +390,10 @@ std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
       Attr(wrapper, "w:author",
            RevisionAuthor(ctx.document, deleted ? r.revision_author_delete
                                                 : r.revision_author_insert));
-      const uint32_t date =
-          deleted ? r.revision_date_delete : r.revision_date_insert;
-      if (date != 0)
-        Attr(wrapper, "w:date", RevisionDate(date));
+      const std::string date = RevisionDate(deleted ? r.revision_date_delete
+                                                    : r.revision_date_insert);
+      if (!date.empty())
+        Attr(wrapper, "w:date", date);
     }
     if (r.comment_range_end >= 0) {
       IntAttr(pn.append_child("w:commentRangeEnd"), "w:id",

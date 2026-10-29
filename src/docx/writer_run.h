@@ -26,8 +26,9 @@ namespace doccraft::docx {
 // degrades to the historical placeholder author "doccraft".
 const std::string& RevisionAuthor(const model::Document* document, int index);
 
-// Formats a [MS-DOC] 2.9.60 DTTM as the ISO-8601 UTC value used by @w:date
-// on w:ins / w:del.
+// Formats a [MS-DOC] 2.9.65 DTTM as the ISO-8601 UTC value used by @w:date
+// on w:ins / w:del. A DTTM with a zero day or month (including all-zero)
+// MUST be ignored and yields an empty string.
 std::string RevisionDate(uint32_t dttm);
 
 void RunPr(pugi::xml_node parent, const model::Run& run,

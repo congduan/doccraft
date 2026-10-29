@@ -344,6 +344,52 @@ TEST(M19Revisions, DeleteDateFromDttm) {
   EXPECT_NE(std::string::npos, xml.find(R"(w:date="1999-01-02T03:04:00Z")"));
 }
 
+// [MS-DOC] 2.9.65 DTTM: a day or month of 0 means the whole DTTM MUST be
+// ignored, so an explicitly stored all-zero value yields no @w:date.
+TEST(M19Revisions, ZeroDttmIgnored) {
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, Dttm(0))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(0u, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
+// A non-zero DTTM whose day field is 0 is ignored as well.
+TEST(M19Revisions, ZeroDayDttmIgnored) {
+  // month 5, day 0, year 2026, 14:05.
+  constexpr uint32_t kDttm =
+      5 | (14 << 6) | (0 << 11) | (5 << 16) | (126 << 20);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(kDttm, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
+// A non-zero DTTM whose month field is 0 is ignored as well.
+TEST(M19Revisions, ZeroMonthDttmIgnored) {
+  // month 0, day 15, year 2026, 14:05.
+  constexpr uint32_t kDttm =
+      5 | (14 << 6) | (15 << 11) | (0 << 16) | (126 << 20);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(kDttm, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
 // Without sprmCDttmRMark* the mark keeps the old shape: no @w:date at all.
 TEST(M19Revisions, NoDateWithoutDttm) {
   auto d = Synthetic(Prl(0x0000, {0}), Sprms({Prl(0x0801, {1})}),
