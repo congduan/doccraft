@@ -1172,6 +1172,31 @@ TEST(M15StoryPlc, CommentInitialsUseTwoByteCountAndUtf16Payload) {
             std::string::npos);
 }
 
+TEST(M15StoryPlc, CommentInitialsDropInvalidXmlCharacters) {
+  Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
+  s.fib.and_ref = PutCommentRefPlc(s, 1);
+  s.fib.and_txt = PutTextCpPlc(s, s.fib.ccp_atn);
+  const size_t record = s.fib.and_ref.offset + 8;
+  Put16(s.table, record, 3);
+  Put16(s.table, record + 2, 0);
+  Put16(s.table, record + 4, 0x001f);
+  Put16(s.table, record + 6, 'A');
+  Put16(s.table, record + 20, 0xffff);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->comments.size(), 1u);
+  EXPECT_EQ(parsed->comments[0].initials, "A");
+  EXPECT_EQ(parsed->comments[0].author, "A");
+  EXPECT_TRUE(parsed->warnings.empty());
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string comments = Part(*zip, "word/comments.xml");
+  EXPECT_NE(comments.find("w:initials=\"A\""), std::string::npos);
+  EXPECT_NE(comments.find("w:author=\"A\""), std::string::npos);
+  EXPECT_NE(comments.find("Comment"), std::string::npos);
+  EXPECT_EQ(comments.find('\0'), std::string::npos);
+}
+
 TEST(M15StoryPlc, CommentInitialsFillNineCharacterBuffer) {
   Synthetic s = Build("Body\r", "", "", "Comment\r\r", "");
   s.fib.and_ref = PutCommentRefPlc(s, 1);

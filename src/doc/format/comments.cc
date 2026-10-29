@@ -35,6 +35,19 @@ static_assert(kInitialsCchSize + kInitialsCapacity * kUtf16CodeUnitSize ==
               kAuthorIndexOffset);
 constexpr size_t kBookmarkTagOffset = 26;
 constexpr size_t kAtnbeSize = 10;
+constexpr uint16_t kXmlTab = 0x9;
+constexpr uint16_t kXmlLineFeed = 0xA;
+constexpr uint16_t kXmlCarriageReturn = 0xD;
+constexpr uint16_t kXmlFirstPrintable = 0x20;
+constexpr uint16_t kXmlLastBeforeSurrogates = 0xD7FF;
+constexpr uint16_t kXmlFirstAfterSurrogates = 0xE000;
+constexpr uint16_t kXmlLastBmp = 0xFFFD;
+
+bool IsXmlCharacter(uint16_t c) {
+  return c == kXmlTab || c == kXmlLineFeed || c == kXmlCarriageReturn ||
+         (c >= kXmlFirstPrintable && c <= kXmlLastBeforeSurrogates) ||
+         (c >= kXmlFirstAfterSurrogates && c <= kXmlLastBmp);
+}
 
 struct CommentAnchor {
   uint32_t cp = 0;
@@ -69,8 +82,10 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(
                             std::to_string(i + 1));
     } else {
       for (size_t k = 0; k < cch; ++k) {
-        AppendUtf8(anchor.initials,
-                   U16(plc, atrd + kInitialsCchSize + k * kUtf16CodeUnitSize));
+        const uint16_t c =
+            U16(plc, atrd + kInitialsCchSize + k * kUtf16CodeUnitSize);
+        if (IsXmlCharacter(c))
+          AppendUtf8(anchor.initials, c);
       }
     }
     const uint16_t author = U16(plc, atrd + kAuthorIndexOffset);
