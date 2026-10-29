@@ -4,6 +4,8 @@
 
 1. 测试仍以结构化回归用例和 1000 次确定性单字节变异为主；尚无真实语料变异或持续运行的 libFuzzer 入口。三项已知崩溃输入均已加入结构化测试。
 
+> M19 全库扩展与警告分类（7cf5fb3 后）：语料扩至 547 个（POI 159 + LibreOffice sw/qa 289 + wvWare 56 + Aspose 46，md5 全局去重、全部 CFB 验证）。全库跑测：367 成功 / 108 警告 / 75 拒绝 / 0 崩溃。警告按类型聚类：①52 个「ignored non-XML control in field instruction」（fast-saved 域代码内的二进制标记，行为正确且已去重为单次警告）；②43 个 Word 6/95 unsupported sprms（`NormalizeLegacySprms` 遇未知 1 字节 opcode 即停止，该 range 后续修饰全丢——待引入 wvWare/LO 的 Word6 sprm 定长表后可改为跳过未知项继续解析，最大消警点）；③30 个故事 PLC CP 范围损坏跳过（行为正确，样本多为 Aspose/LO 回归文件）。75 个拒绝全部定性为损坏/fuzz/加密样本，拒绝正确。
+>
 > M19 冒烟常驻：`tests/poi_corpus_smoke.py` 入 ctest（`poi_corpus_smoke`），断言语料 ≥100 文件、成功 ≥100、零崩溃/超时；语料目录缺失时干净跳过（上游 CI 无语料也能过）。
 >
 > M19 语料回归：引入 Apache POI test-data 159 个真实 Word `.doc`（/home/ubuntu/doccraft-corpus/poi-test-data），首轮冒烟 87 成功/26 警告/46 拒绝/0 崩溃。修复 sprmTTableWidth/sprmTCellWidth 的 fts 处理（d5383fc）后为 102 成功/32 警告/25 拒绝。剩余 25 个拒绝逐项核验均为正确行为：6 个 clusterfuzz 变异样本与 1 个截断文件（partial sector）、3 个加密文档（需 --password）、3 个畸形图片尺寸、2 个缺流、2 个非法目录名、其余为 CFB 结构损坏。fuzz 样本拒绝不是缺陷。
