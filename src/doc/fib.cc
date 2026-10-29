@@ -121,7 +121,15 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
     f.sed = pair_at(kLegacySedPair);
     f.headers = pair_at(kLegacyHddPair);
     f.dop = pair_at(kLegacyDopPair);
-    for (const Fib::Range& range : {f.sed, f.headers, f.dop})
+    // Word 6/95 keeps PlcffndRef/PlcffndTxt in WordDocument under the same
+    // pair numbers as Word 97+. LibreOffice reads them with the modern
+    // (n+1 CPs + 2-byte FRD) / (n+1 CPs) layout for pre-Word 97 files too.
+    constexpr size_t kLegacyFndRefPair = 2;
+    constexpr size_t kLegacyFndTxtPair = 3;
+    f.fnd_ref = pair_at(kLegacyFndRefPair);
+    f.fnd_txt = pair_at(kLegacyFndTxtPair);
+    for (const Fib::Range& range :
+         {f.sed, f.headers, f.dop, f.fnd_ref, f.fnd_txt})
       if (range.size && (range.offset > word.size() ||
                          range.size > word.size() - range.offset))
         return std::unexpected(

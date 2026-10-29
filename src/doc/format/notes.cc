@@ -24,6 +24,11 @@
 namespace doccraft::doc::detail {
 namespace {
 
+// Word 6/95 footnote/endnote text PLCs may end up to two CPs past the story
+// length: those CPs are the final story's paragraph marks, like PlcfHdd
+// (LibreOffice reads the raw PLC without clamping). Word 97+ stays exact.
+constexpr uint32_t kLegacyNoteTextGuard = 2;
+
 // PlcffndRef / PlcfendRef: (n + 1) CPs followed by n 2-byte FRD entries.
 std::expected<std::vector<uint32_t>, Error> ReadReferenceCps(Bytes table,
                                                              Fib::Range r) {
@@ -66,12 +71,17 @@ std::expected<std::vector<uint32_t>, Error> ReadTextCps(Bytes table,
 }  // namespace
 
 std::expected<NoteReferenceSet, Error> ReadNoteReferences(
-    Bytes table, const Fib& fib, std::vector<std::string>* warnings) {
+    Bytes word, Bytes table, const Fib& fib,
+    std::vector<std::string>* warnings) {
   NoteReferenceSet out;
+  // Word 6/95 keeps both note PLCs in WordDocument; Word 97+ uses the table
+  // stream.
+  Bytes source = fib.legacy ? word : table;
+  const uint32_t text_guard = fib.legacy ? kLegacyNoteTextGuard : 0;
   auto read = [&](Fib::Range reference, Fib::Range text, uint32_t length,
                   const char* name, std::vector<uint32_t>* target) {
-    auto refs = ReadReferenceCps(table, reference);
-    auto texts = ReadTextCps(table, text);
+    auto refs = ReadReferenceCps(source, reference);
+    auto texts = ReadTextCps(source, text);
     std::string error;
     if (!refs)
       error = refs.error().message;
@@ -83,7 +93,7 @@ std::expected<NoteReferenceSet, Error> ReadNoteReferences(
       error = "note PLC entry count mismatch";
     else if (refs->size() > 1 && (*refs)[refs->size() - 2] >= fib.ccp_text)
       error = "invalid note reference PLC CP range";
-    else if (!texts->empty() && texts->back() > length)
+    else if (!texts->empty() && texts->back() > length + text_guard)
       error = "invalid note text PLC CP range";
     if (!error.empty()) {
       if (!warnings)
@@ -104,11 +114,14 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
                                      const std::vector<FormatRange>& chpx,
                                      const std::vector<FormatRange>& papx,
                                      const BookmarkMarks& bookmarks) {
-  auto footnotes = ReadTextCps(table, fib.fnd_txt);
-  auto endnotes = ReadTextCps(table, fib.end_txt);
+  // Word 6/95 keeps the note PLCs and their field PLCs in WordDocument; Word
+  // 97+ uses the table stream.
+  Bytes source = fib.legacy ? word : table;
+  auto footnotes = ReadTextCps(source, fib.fnd_txt);
+  auto endnotes = ReadTextCps(source, fib.end_txt);
   // The reference PLC is authoritative for how many notes exist: some
   // producers append an extra guard CP to the text PLC.
-  auto refs = ReadNoteReferences(table, fib, nullptr);
+  auto refs = ReadNoteReferences(word, table, fib, nullptr);
   if (!refs) {
     return std::unexpected(refs.error());
   }
@@ -169,7 +182,7 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
                          const char* what) {
     std::map<uint32_t, uint8_t> status;
     if (auto parsed_status =
-            ReadStoryFieldStatus(table, r, base, story_length)) {
+            ReadStoryFieldStatus(source, r, base, story_length)) {
       status = std::move(*parsed_status);
     } else {
       doc.warnings.push_back(std::string("skipped ") + what +

@@ -534,7 +534,8 @@ struct NoteReferenceSet {
 };
 
 std::expected<NoteReferenceSet, Error> ReadNoteReferences(
-    Bytes table, const Fib& fib, std::vector<std::string>* warnings);
+    Bytes word, Bytes table, const Fib& fib,
+    std::vector<std::string>* warnings);
 
 // Fills Document::notes with the footnote and endnote bodies.
 std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,

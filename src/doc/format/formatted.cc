@@ -225,7 +225,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   const size_t declared_sections = sections.size();
   if (!sections.empty())
     doc.section = sections.back().second;
-  auto note_refs = ReadNoteReferences(table, fib, &doc.warnings);
+  auto note_refs = ReadNoteReferences(word, table, fib, &doc.warnings);
   if (!note_refs) {
     return std::unexpected(note_refs.error());
   }

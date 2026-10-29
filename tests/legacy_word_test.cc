@@ -900,4 +900,119 @@ TEST(LegacyWord, ReadsBoundedSummaryCodepage) {
   summary.resize(47);
   EXPECT_EQ(doccraft::doc::ReadSummaryCodepage(summary), 0U);
 }
+
+size_t CountWarnings(const std::vector<std::string>& warnings,
+                     const std::string& needle) {
+  size_t hits = 0;
+  for (const auto& warning : warnings)
+    if (warning.find(needle) != std::string::npos)
+      ++hits;
+  return hits;
+}
+
+size_t Count(const std::string& text, const std::string& needle) {
+  size_t hits = 0, at = 0;
+  while ((at = text.find(needle, at)) != std::string::npos) {
+    ++hits;
+    at += needle.size();
+  }
+  return hits;
+}
+
+// Builds a Word 6/95 document with body "A\x02\r" and one footnote body
+// "\x02F\r". Pair 2/3 carry the reference and text PLCs in WordDocument, as
+// Word 97+ keeps them in the table stream. The footnote story is contiguous
+// after the body because this document is not complex.
+struct LegacyFootnoteSample {
+  bool corrupt_reference_cps = false;
+};
+
+std::vector<uint8_t> Word6FootnoteDocument(uint16_t ident, uint16_t nfib,
+                                           const LegacyFootnoteSample& sample) {
+  constexpr size_t kFcMin = 768;
+  constexpr size_t kRefPlc = 900;
+  constexpr size_t kTxtPlc = 920;
+  std::string body = "A";
+  body.push_back('\x02');
+  body.push_back('\r');
+  std::string note;
+  note.push_back('\x02');
+  note += "F\r";
+  std::vector<uint8_t> word(2048, 0);
+  Put16(word, 0, ident);
+  Put16(word, 2, nfib);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, kFcMin);
+  Put32(word, 52, static_cast<uint32_t>(body.size()));
+  Put32(word, 56, static_cast<uint32_t>(note.size()));
+  Put32(word, 60, 0);
+  Put32(word, 28, static_cast<uint32_t>(kFcMin + body.size() + note.size()));
+  std::copy(body.begin(), body.end(), word.begin() + kFcMin);
+  std::copy(note.begin(), note.end(), word.begin() + kFcMin + body.size());
+  // PlcffndRef: two CPs (reference site 1, guard 3) then one 2-byte FRD.
+  Put32(word, 88 + 2 * 8, kRefPlc);
+  Put32(word, 92 + 2 * 8, 10);
+  Put32(word, kRefPlc, 1);
+  Put32(word, kRefPlc + 4, sample.corrupt_reference_cps ? 0 : 3);
+  // PlcffndTxt: one note plus a trailing guard.
+  Put32(word, 88 + 3 * 8, kTxtPlc);
+  Put32(word, 92 + 3 * 8, 8);
+  Put32(word, kTxtPlc, 0);
+  Put32(word, kTxtPlc + 4, static_cast<uint32_t>(note.size()));
+  return word;
+}
+
+void ExpectSingleFootnote(const doccraft::model::Document& document) {
+  ASSERT_EQ(document.notes.size(), 1u);
+  EXPECT_FALSE(document.notes[0].endnote);
+  ASSERT_EQ(document.notes[0].paragraphs.size(), 1u);
+  ASSERT_EQ(document.notes[0].paragraphs[0].runs.size(), 1u);
+  EXPECT_EQ(document.notes[0].paragraphs[0].runs[0].text, "F");
+  bool has_reference = false;
+  for (const auto& run : document.paragraphs[0].runs)
+    has_reference = has_reference || run.note_ref == 1;
+  EXPECT_TRUE(has_reference);
+}
+
+TEST(LegacyWord, Word6FootnoteBodyReachesDocx) {
+  auto word = Word6FootnoteDocument(0xA5DC, 0x65, {});
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ExpectSingleFootnote(*document);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string footnotes = Part(*zip, "word/footnotes.xml");
+  ASSERT_FALSE(footnotes.empty());
+  EXPECT_EQ(Count(footnotes, "<w:footnote w:id="), 1u);
+  EXPECT_NE(footnotes.find(">F</w:t>"), std::string::npos);
+  EXPECT_NE(
+      Part(*zip, "word/document.xml").find("<w:footnoteReference w:id=\"1\"/>"),
+      std::string::npos);
+}
+
+TEST(LegacyWord, Word95FootnoteBodyReachesDocx) {
+  auto word = Word6FootnoteDocument(0xA699, 0x68, {});
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ExpectSingleFootnote(*document);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/footnotes.xml").find(">F</w:t>"),
+            std::string::npos);
+}
+
+TEST(LegacyWord, LegacyCorruptFootnotePlcWarnsAndKeepsBody) {
+  LegacyFootnoteSample sample;
+  sample.corrupt_reference_cps = true;
+  auto word = Word6FootnoteDocument(0xA5DC, 0x65, sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_TRUE(document->notes.empty());
+  ASSERT_FALSE(document->paragraphs.empty());
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "A");
+  EXPECT_EQ(CountWarnings(document->warnings, "skipped footnote story PLC"),
+            1u);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+}
 }  // namespace
