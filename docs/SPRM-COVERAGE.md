@@ -383,12 +383,15 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > `GetWW6SprmSearcher` 的完整宽度表：已映射项按上表宽度翻译；表内定长或变长
 > 但未映射的 opcode 按宽度整项跳过，后续修饰继续解析；表外 opcode 或操作数
 > 截断仍停止该组并警告（无法确定宽度时不能把操作数误当 opcode）。
+> ChgTabs 家族（`0x0F`/`0x17`）的 cb 为 `0xFF` 时不按 256 字节消费，而是按
+> 操作数自带的删除项数（4B/项）与插入项数（3B/项）重算长度；计数越界同样停止。
 
 | 旧版 opcode | sprm | 现代去向 | 备注 |
 |---|---|---|---|
 | `0x05` | sprmPJc | sprmPJc80 | 1B |
 | `0x07`/`0x08`/`0x09` | sprmPFKeep/KeepFollow/PageBreakBefore | 同名 | 1B |
-| `0x0F` | sprmPChgTabsPapx | —（丢弃） | 变长，按 cb 消费避免错位；制表位不迁移 |
+| `0x0F` | sprmPChgTabsPapx | —（丢弃） | 变长，按 cb 消费避免错位；cb=0xFF 时按 ChgTabsOperand 的删除/插入计数定长（LO `GetSprmTailLen` case 23）；制表位不迁移 |
+| `0x17` | sprmPChgTabs | —（丢弃） | 同上；`LegacyWord.LegacyScanResolvesChgTabsExtendedLength` |
 | `0x10`/`0x11`/`0x13` | sprmPDxaRight/Left/Left1 | sprmPDxa*80 | 2B |
 | `0x14` | sprmPDyaLine | 同名 | 4B |
 | `0x15`/`0x16` | sprmPDyaBefore/After | 同名 | 2B |
