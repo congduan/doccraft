@@ -308,10 +308,11 @@ TEST(DocxWriterRelations, PlainHeaderHasNoRelationshipsPart) {
 }
 
 TEST(DocxWriterRelations, UnknownTargetReturnsNamedError) {
-  auto type = docx::detail::RelationshipTypeFor("future-part.xml");
+  auto type = docx::detail::RelationshipTypeFor("document.xml",
+                                               "future-part.xml");
   ASSERT_FALSE(type);
   EXPECT_EQ(type.error().message,
-            "unknown relationship target: future-part.xml");
+            "Unknown relationship target: document.xml -> future-part.xml");
 }
 
 TEST(DocxWriterRelations, RegisteredTargetsHaveExplicitTypes) {
@@ -324,7 +325,7 @@ TEST(DocxWriterRelations, RegisteredTargetsHaveExplicitTypes) {
            {"comments.xml", "comments"},
            {"embeddings/ole1.bin", "oleObject"},
            {"footer1.xml", "footer"}}) {
-    auto type = docx::detail::RelationshipTypeFor(target);
+    auto type = docx::detail::RelationshipTypeFor("document.xml", target);
     ASSERT_TRUE(type) << target;
     EXPECT_EQ(*type, expected);
   }

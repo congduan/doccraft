@@ -32,8 +32,9 @@
 #include "third_party/pugixml/pugixml.hpp"
 
 namespace doccraft::docx {
+// Unknown targets mean the writer's internal target and type map disagree.
 std::expected<std::string_view, Error> detail::RelationshipTypeFor(
-    std::string_view target) {
+    std::string_view source, std::string_view target) {
   if (target.starts_with("header"))
     return "header";
   if (target.starts_with("media/"))
@@ -48,8 +49,9 @@ std::expected<std::string_view, Error> detail::RelationshipTypeFor(
     return "oleObject";
   if (target.starts_with("footer"))
     return "footer";
-  return std::unexpected(
-      Error{"unknown relationship target: " + std::string(target)});
+  return std::unexpected(Error{"Unknown relationship target: " +
+                               std::string(source) + " -> " +
+                               std::string(target)});
 }
 
 namespace {
@@ -272,7 +274,7 @@ std::expected<pugi::xml_document, Error> BuildRelationships(
       continue;
     const int rid = relation.id;
     const std::string& target = relation.target;
-    auto type = detail::RelationshipTypeFor(target);
+    auto type = detail::RelationshipTypeFor(source, target);
     if (!type)
       return std::unexpected(type.error());
     auto rel = relations.append_child("Relationship");

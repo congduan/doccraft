@@ -32,8 +32,9 @@ inline constexpr size_t kMaxWriterPartBytes = 512 * 1024 * 1024;
 // text at the same offset; the explicit tab stop reproduces that without
 // depending on a style definition the package does not carry.
 inline constexpr int kNoteTextTabTwips = 340;
+// Defend writer-generated relationships against targets missing from this map.
 std::expected<std::string_view, Error> RelationshipTypeFor(
-    std::string_view target);
+    std::string_view source, std::string_view target);
 // Internal limit injection for writer tests; production callers use Write().
 std::expected<std::vector<uint8_t>, Error> WriteWithBufferLimit(
     const model::Document& document, size_t max_buffer_bytes,
