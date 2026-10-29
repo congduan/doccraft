@@ -17,6 +17,8 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "miniz.h"
