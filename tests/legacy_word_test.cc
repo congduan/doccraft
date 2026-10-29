@@ -288,6 +288,39 @@ std::vector<uint8_t> Word6PapxDocument(const std::vector<uint8_t>& sprms) {
   return word;
 }
 
+// Builds a Word 6/95 document whose single PAPX FKP range carries `sprms`,
+// with the BX parked at page offset 500 so the grpprl has eight bytes instead
+// of the four available at the page tail. `sprms` must be an even number of
+// bytes.
+std::vector<uint8_t> Word6PapxDocumentWithRoom(
+    const std::vector<uint8_t>& sprms) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 772);
+  Put32(word, 52, 4);
+  word[768] = 'A';
+  word[769] = 'B';
+  word[770] = 'C';
+  word[771] = '\r';
+  // PAPX BTE PLC at 2060 points at FKP page 3 (1536).
+  Put32(word, 88 + 13 * 8, 2060);
+  Put32(word, 92 + 13 * 8, 10);
+  Put32(word, 2060, 768);
+  Put32(word, 2064, 772);
+  Put16(word, 2068, 3);
+  // PAPX FKP: one range, BX at page offset 500 (rgb[0] = 250).
+  Put32(word, 1536, 768);
+  Put32(word, 1540, 772);
+  word[1544] = 250;
+  word[2036] = static_cast<uint8_t>((2 + sprms.size()) / 2);
+  std::copy(sprms.begin(), sprms.end(), word.begin() + 2039);
+  word[2047] = 1;
+  return word;
+}
+
 std::expected<doccraft::model::Document, doccraft::doc::Error> ParseWord6(
     const std::vector<uint8_t>& word) {
   auto fib = doccraft::doc::ParseFib(word);
@@ -343,6 +376,44 @@ TEST(LegacyWord, Word6ClidSetsDefaultAndEastAsianLanguage) {
   EXPECT_NE(Part(*zip, "word/document.xml")
                 .find("<w:lang w:val=\"ja-JP\" w:eastAsia=\"ja-JP\""),
             std::string::npos);
+}
+
+TEST(LegacyWord, LegacyPWrInCharacterStreamIgnoredAndLaterCharSprmApplies) {
+  // r19 normalizes legacy sprmPWr in every grpprl, but the modern opcode is a
+  // paragraph property. In a CHPX it must be a no-op for the run stream rather
+  // than shifting the scan: the following bold modifier must still apply, and
+  // no frame properties may reach the paragraph or the XML.
+  auto document = ParseWord6(Word6ChpxDocument({0x25, 2, 0x55, 1}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].frame_wrap, -1);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_EQ(xml.find("w:framePr"), std::string::npos);
+  EXPECT_NE(xml.find("<w:b/>"), std::string::npos);
+}
+
+TEST(LegacyWord, LegacyClidInParagraphStreamIgnoredAndLaterParaSprmApplies) {
+  // Legacy sprmCLid expands to sprmCRgLid0/sprmCRgLid1, both character
+  // properties. A PAPX carrying it must not leak w:lang onto the run, and the
+  // following sprmPDxaRight (0x10) must still set the paragraph indent.
+  auto document = ParseWord6(
+      Word6PapxDocumentWithRoom({0x61, 0x09, 0x04, 0x10, 0x40, 0x01}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].right, 320);
+  EXPECT_TRUE(document->paragraphs[0].right_set);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].lang.empty());
+  EXPECT_TRUE(document->paragraphs[0].runs[0].lang_east_asia.empty());
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_EQ(xml.find("w:lang"), std::string::npos);
+  EXPECT_NE(xml.find("<w:ind w:right=\"320\""), std::string::npos);
 }
 
 TEST(LegacyWord, Word6OversizedPictureFailsWholeDocument) {
