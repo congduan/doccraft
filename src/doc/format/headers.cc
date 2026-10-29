@@ -50,6 +50,9 @@ constexpr uint8_t kLegacyStoryFlags[kStoryCount] = {0x01, 0x02, 0x04,
 // The final CP of a Word 6/95 PlcfHdd may sit up to two CPs past ccpHdd: those
 // CPs are the last story's paragraph marks, outside the counted text.
 constexpr uint32_t kLegacyHddGuard = 2;
+// Without a usable section table the story bits fall back to the even/odd
+// header and footer stories, so their PlcHdd entries are still consumed.
+constexpr uint8_t kLegacyDefaultStoryFlags = 0x0F;
 // [MS-DOC] §2.9.210: cbGrpprl is signed and at most 0x3FA2.
 constexpr size_t kMaxSepxSize = 0x3FA2;
 
@@ -107,8 +110,19 @@ std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
     Bytes word, const Fib& fib, size_t sections,
     std::vector<std::string>* warnings) {
   std::vector<LegacyStoryFlags> out(sections);
-  if (!sections || !fib.sed.size)
+  if (!sections)
     return out;
+  if (!fib.sed.size) {
+    // A missing section table would otherwise drop every header and footer
+    // without a trace; fall back to the even/odd stories and say so once.
+    if (fib.ccp_hdd && warnings)
+      warnings->push_back(
+          "legacy section table unavailable; header/footer story bits "
+          "default to odd+even");
+    for (LegacyStoryFlags& flags : out)
+      flags.stories = kLegacyDefaultStoryFlags;
+    return out;
+  }
   if (!Valid(word, fib.sed) || fib.sed.size < 20 || (fib.sed.size - 4) % 16)
     return std::unexpected(Error{"invalid Word 6/95 SED PLC"});
   Bytes plc = word.subspan(fib.sed.offset, fib.sed.size);
@@ -453,6 +467,10 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
       // DOP.grpfIhdt reserves one leading story per set bit (separators and
       // notices); LibreOffice skips them the same way (WW8PLCF_HdFt).
       index = std::popcount(static_cast<unsigned>(dop >> 8) & 0x3Fu);
+    } else {
+      doc.warnings.push_back(
+          "legacy document properties truncated; header/footer story skip "
+          "count defaults to 0");
     }
     for (size_t section = 0; section < sections; ++section) {
       for (size_t story = 0; story < kStoryCount; ++story) {

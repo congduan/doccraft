@@ -723,6 +723,8 @@ struct LegacyHeaderSample {
   bool title_page = false;
   uint8_t word_ihdt = 0;
   bool truncate_plcf = false;
+  bool missing_sed = false;
+  uint32_t dop_lcb = 88;
 };
 
 std::vector<uint8_t> Word6HeaderDocument(uint16_t ident, uint16_t nfib,
@@ -753,28 +755,30 @@ std::vector<uint8_t> Word6HeaderDocument(uint16_t ident, uint16_t nfib,
   }
   // DOP: fFacingPages plus the word-level grpfIhdt skip count (zero here).
   Put32(word, 88 + 31 * 8, kDop);
-  Put32(word, 92 + 31 * 8, 88);
+  Put32(word, 92 + 31 * 8, sample.dop_lcb);
   word[kDop] = sample.facing_pages ? 1 : 0;
   word[kDop + 1] = sample.word_ihdt;
   // Plcfsed: aCP array then 12-byte SEDs. Word 6/95 keeps it in WordDocument.
   const size_t sections = sample.section_flags.size();
-  Put32(word, 88 + 6 * 8, kSed);
-  Put32(word, 92 + 6 * 8,
-        static_cast<uint32_t>(4 * (sections + 1) + 12 * sections));
-  for (size_t i = 0; i < sections; ++i)
-    Put32(word, kSed + 4 * (i + 1), sample.section_ends[i]);
-  for (size_t i = 0; i < sections; ++i) {
-    size_t pos = kSed + 4 * (sections + 1) + 12 * i;
-    size_t sepx = kSepx + 40 * i;
-    Put32(word, pos + 2, static_cast<uint32_t>(sepx));
-    Put32(word, pos + 8, 0xFFFFFFFF);
-    size_t len = sample.title_page ? 4 : 2;
-    Put16(word, sepx, static_cast<uint16_t>(len));
-    word[sepx + 2] = 0x99;  // sprmSGprfIhdt.
-    word[sepx + 3] = sample.section_flags[i];
-    if (sample.title_page) {
-      word[sepx + 4] = 0x8F;  // sprmSFTitlePage.
-      word[sepx + 5] = 1;
+  if (!sample.missing_sed) {
+    Put32(word, 88 + 6 * 8, kSed);
+    Put32(word, 92 + 6 * 8,
+          static_cast<uint32_t>(4 * (sections + 1) + 12 * sections));
+    for (size_t i = 0; i < sections; ++i)
+      Put32(word, kSed + 4 * (i + 1), sample.section_ends[i]);
+    for (size_t i = 0; i < sections; ++i) {
+      size_t pos = kSed + 4 * (sections + 1) + 12 * i;
+      size_t sepx = kSepx + 40 * i;
+      Put32(word, pos + 2, static_cast<uint32_t>(sepx));
+      Put32(word, pos + 8, 0xFFFFFFFF);
+      size_t len = sample.title_page ? 4 : 2;
+      Put16(word, sepx, static_cast<uint16_t>(len));
+      word[sepx + 2] = 0x99;  // sprmSGprfIhdt.
+      word[sepx + 3] = sample.section_flags[i];
+      if (sample.title_page) {
+        word[sepx + 4] = 0x8F;  // sprmSFTitlePage.
+        word[sepx + 5] = 1;
+      }
     }
   }
   // PlcfHdd: only the stories present in the document are stored.
@@ -1012,6 +1016,46 @@ TEST(LegacyWord, LegacyCorruptFootnotePlcWarnsAndKeepsBody) {
   EXPECT_EQ(document->paragraphs[0].runs[0].text, "A");
   EXPECT_EQ(CountWarnings(document->warnings, "skipped footnote story PLC"),
             1u);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+}
+
+TEST(LegacyWord, MissingLegacySectionTableWarnsAndDefaultsStories) {
+  auto sample = HeaderSample({"EH\r", "OH\r", "EF\r", "OF\r"}, {0x12}, {5});
+  sample.missing_sed = true;
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "Body");
+  EXPECT_EQ(
+      CountWarnings(document->warnings, "legacy section table unavailable"),
+      1u);
+  // The fallback consumes the even/odd header and footer entries; even stories
+  // stay unattached without fFacingPages, so only the odd pair is emitted.
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "OH");
+  ASSERT_EQ(document->section.headers[3].size(), 1u);
+  EXPECT_EQ(document->section.headers[3][0].runs[0].text, "OF");
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+}
+
+TEST(LegacyWord, TruncatedLegacyDopWarnsAndKeepsBody) {
+  auto sample = HeaderSample({"HDR\r", "FTR\r"}, {0x0A}, {4});
+  sample.dop_lcb = 1;
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "Body");
+  EXPECT_EQ(
+      CountWarnings(document->warnings, "legacy document properties truncated"),
+      1u);
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "HDR");
+  ASSERT_EQ(document->section.headers[3].size(), 1u);
+  EXPECT_EQ(document->section.headers[3][0].runs[0].text, "FTR");
   auto zip = doccraft::docx::Write(*document);
   ASSERT_TRUE(zip) << zip.error().message;
 }
