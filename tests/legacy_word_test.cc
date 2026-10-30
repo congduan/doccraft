@@ -353,6 +353,50 @@ std::vector<uint8_t> Word6PapxDocumentWithWideGrpprl(
   return word;
 }
 
+// Builds a Word 6/95 document holding one one-row, two-cell table. The cell
+// paragraph "A" and its cell mark carry `cell_sprms`; the second cell "B" and
+// the row-end mark (0x07 with sprmPFTtp) carry `row_sprms`, and the final CR
+// is a body paragraph outside the table with default properties. Both
+// grpprls must be an even number of bytes so the BX length covers exactly the
+// two style bytes plus the modifiers.
+std::vector<uint8_t> Word6TableDocument(const std::vector<uint8_t>& cell_sprms,
+                                        const std::vector<uint8_t>& row_sprms) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 773);
+  Put32(word, 52, 5);
+  word[768] = 'A';
+  word[769] = 0x07;  // Cell mark.
+  word[770] = 'B';
+  word[771] = 0x07;  // Row-end mark.
+  word[772] = '\r';
+  // PAPX BTE PLC at 2060 covers the FC range 768-773.
+  Put32(word, 88 + 13 * 8, 2060);
+  Put32(word, 92 + 13 * 8, 10);
+  Put32(word, 2060, 768);
+  Put32(word, 2064, 773);
+  Put16(word, 2068, 3);
+  // PAPX FKP with three ranges: 768-770 (cell), 770-772 (row end) and
+  // 772-773 (body paragraph).
+  Put32(word, 1536, 768);
+  Put32(word, 1540, 770);
+  Put32(word, 1544, 772);
+  Put32(word, 1548, 773);
+  word[1552] = 32;   // Cell BX at page offset 64.
+  word[1559] = 100;  // Row BX at page offset 200.
+  word[1566] = 132;  // Body BX at page offset 264.
+  word[1600] = static_cast<uint8_t>((2 + cell_sprms.size()) / 2);
+  std::copy(cell_sprms.begin(), cell_sprms.end(), word.begin() + 1603);
+  word[1736] = static_cast<uint8_t>((2 + row_sprms.size()) / 2);
+  std::copy(row_sprms.begin(), row_sprms.end(), word.begin() + 1739);
+  word[1800] = 1;  // Style only, no modifiers.
+  word[2047] = 3;
+  return word;
+}
+
 std::expected<doccraft::model::Document, doccraft::doc::Error> ParseWord6(
     const std::vector<uint8_t>& word) {
   auto fib = doccraft::doc::ParseFib(word);
@@ -780,6 +824,103 @@ TEST(LegacyWord, LegacyScanConsumesTableShadingWithoutExtraFixedByte) {
   EXPECT_EQ(document->paragraphs[0].align, 2);
   for (const auto& warning : document->warnings)
     EXPECT_NE(warning, "Word 6/95 FKP contains unsupported sprms");
+}
+
+TEST(LegacyWord, LegacyScanMapsTableProperties) {
+  // Word 6/95 table sprms 0xB6..0xBD share the TAP layout that Word 97+
+  // keeps: LibreOffice ww8scan.cxx GetWW6SprmSearcher lists 0xB6/0xB7/0xB8
+  // and 0xBD as two-byte, 0xB9/0xBA as one-byte operands ("tap.jc jc (low
+  // order byte is significant)", "tap.fCantSplit 1 or 0 byte", ...). The
+  // modern handlers read sprmTJc/sprmTDxaLeft/sprmTDxaGapHalf as two bytes
+  // ([MS-DOC] 2.9.144/2.9.145), sprmTFCantSplit/sprmTTableHeader as Bool8 and
+  // sprmTDyaRowHeight as a signed YAS, so the operands pass through unchanged.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {0xB6, 0x01, 0x00, 0xB7, 0x40, 0x01,
+                                    0xB8, 0x6C, 0x00, 0xB9, 0x01, 0xBA,
+                                    0x01, 0xBD, 0x2C, 0x01};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> expected = {
+      0x8A, 0x54, 0x01, 0x00,  // sprmTJc (0x548A), center.
+      0x01, 0x96, 0x40, 0x01,  // sprmTDxaLeft (0x9601), 320 twips.
+      0x02, 0x96, 0x6C, 0x00,  // sprmTDxaGapHalf (0x9602), 108 twips.
+      0x66, 0x34, 0x01,        // sprmTFCantSplit (0x3466).
+      0x04, 0x34, 0x01,        // sprmTTableHeader (0x3404).
+      0x07, 0x94, 0x2C, 0x01,  // sprmTDyaRowHeight (0x9407), 300 twips.
+  };
+  EXPECT_EQ(out, expected);
+  // Only the low byte of the legacy sprmTJc word is significant, so a stray
+  // high byte is cleared: the modern handler rejects values above 2.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0xB6, 0x02, 0xFF}, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  EXPECT_EQ(out, (std::vector<uint8_t>{0x8A, 0x54, 0x02, 0x00}));
+  // A truncated operand still stops the scan.
+  out.clear();
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(std::vector<uint8_t>{0xB9}, out),
+      doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_TRUE(out.empty());
+}
+
+TEST(LegacyWord, Word6TablePropertiesReachDocx) {
+  // Synthetic byte stream built from the LibreOffice v6 widths (see
+  // LegacyScanMapsTableProperties) and the [MS-DOC] operand semantics:
+  // sprmTJc center, sprmTDxaLeft 320 twips, sprmTDxaGapHalf 108 twips and
+  // sprmTDyaRowHeight 300 twips on the cell paragraph, sprmTFCantSplit and
+  // sprmTTableHeader on the row-end mark that also carries sprmPFTtp.
+  const std::vector<uint8_t> table = {
+      0xB6, 0x01, 0x00,  // sprmTJc: center.
+      0xB7, 0x40, 0x01,  // sprmTDxaLeft: 320 twips.
+      0xB8, 0x6C, 0x00,  // sprmTDxaGapHalf: 108 twips.
+      0xBD, 0x2C, 0x01,  // sprmTDyaRowHeight: 300 twips.
+  };
+  std::vector<uint8_t> cell = table;
+  cell.insert(cell.end(), {0x18, 1});  // sprmPFInTable.
+  std::vector<uint8_t> row = table;
+  row.insert(row.end(), {0xB9, 1});  // sprmTFCantSplit.
+  row.insert(row.end(), {0xBA, 1});  // sprmTTableHeader.
+  row.insert(row.end(), {0x19, 1});  // sprmPFTtp.
+  row.insert(row.end(), {0x18, 1});  // sprmPFInTable.
+  auto document = ParseWord6(Word6TableDocument(cell, row));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table_ir = document->tables[0];
+  EXPECT_EQ(table_ir.align, 1);
+  EXPECT_EQ(table_ir.left_origin, 320);
+  EXPECT_EQ(table_ir.gap_half, 108);
+  EXPECT_EQ(table_ir.indent, 212);
+  ASSERT_EQ(table_ir.rows.size(), 1u);
+  ASSERT_EQ(table_ir.row_properties.size(), 1u);
+  EXPECT_TRUE(table_ir.row_properties[0].cant_split);
+  EXPECT_TRUE(table_ir.row_properties[0].header);
+  EXPECT_EQ(table_ir.row_properties[0].height, 300);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  for (const char* fragment :
+       {"<w:jc w:val=\"center\"/>", "<w:tblInd w:w=\"212\" w:type=\"dxa\"/>",
+        "<w:cantSplit/>", "<w:tblHeader/>",
+        "<w:trHeight w:val=\"300\" w:hRule=\"atLeast\"/>"})
+    EXPECT_NE(xml.find(fragment), std::string::npos) << fragment << "\n" << xml;
+}
+
+TEST(LegacyWord, LegacyScanStopsAfterTablePropertiesOnUnknownOpcode) {
+  // The six table sprms are mapped, but an opcode outside the Word 6 table
+  // still stops the scan so its operand bytes are never read as modifiers.
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0xB9, 1, 0xBA, 1, 0xF0, 0xAA}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(out, (std::vector<uint8_t>{0x66, 0x34, 1, 0x04, 0x34, 1}));
+  auto document =
+      ParseWord6(Word6PapxDocumentWithRoom({0xB9, 1, 0xBA, 1, 0xF0, 0xAA}));
+  ASSERT_TRUE(document) << document.error().message;
+  bool warned = false;
+  for (const auto& warning : document->warnings)
+    warned = warned || warning == "Word 6/95 FKP contains unsupported sprms";
+  EXPECT_TRUE(warned);
 }
 
 TEST(LegacyWord, Word6BadPictureReferenceIsSkippedWithWarning) {
