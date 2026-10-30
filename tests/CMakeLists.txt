@@ -279,3 +279,24 @@ add_test(NAME m21_missing_pool_cli COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_SOURCE_DIR}/tests/m21_cli.py $<TARGET_FILE:m21_cli_fixture>
   $<TARGET_FILE:doccraft> missing-pool
   ${CMAKE_SOURCE_DIR}/tests/fixtures/ole-embedded.doc)
+
+# The embedding API used by WebAssembly, Android and iOS builds.
+add_executable(api_test api_test.cc)
+target_link_libraries(api_test PRIVATE doccraft_api gtest_main)
+target_compile_definitions(api_test PRIVATE
+  DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  DOCCRAFT_VERSION="${PROJECT_VERSION}")
+gtest_discover_tests(api_test)
+
+# The API and the CLI must agree byte for byte on the same input.
+add_executable(api_cli_fixture api_cli_fixture.cc)
+target_link_libraries(api_cli_fixture PRIVATE doccraft_api)
+add_test(NAME api_cli_parity COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/api_cli_parity.py $<TARGET_FILE:api_cli_fixture>
+  $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/plain-text.doc
+  ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/cyrillic-text.doc
+  ${CMAKE_SOURCE_DIR}/tests/corpus/corpus/complex-table.doc
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/ole-embedded.doc
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/inline-image.doc
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/footnote-endnote.doc)
