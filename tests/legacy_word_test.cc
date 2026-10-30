@@ -728,8 +728,9 @@ TEST(LegacyWord, LegacyScanMapsEastAsianParagraphFlags) {
   // [MS-DOC] 2.9.215 lists the one-byte isprm space shared with Word 6/95:
   // 0x35..0x3A are sprmPFKinsoku, sprmPFWordWrap, sprmPFOverflowPunct,
   // sprmPFTopLinePunct, sprmPFAutoSpaceDE and sprmPFAutoSpaceDN, each with a
-  // one-byte Bool8 operand. Bug51944.doc's '內文' style ends with
-  // `37 00 3A 00 39 00`, so these flags must translate instead of stopping.
+  // one-byte Bool8 operand. This synthetic byte stream exercises the same
+  // flags; the `37 00 3A 00 39 00` tail observed in Bug51944.doc's '內文'
+  // style motivates translating them instead of stopping.
   std::vector<uint8_t> out;
   const std::vector<uint8_t> raw = {0x35, 0, 0x36, 0, 0x37, 0,
                                     0x38, 0, 0x39, 0, 0x3A, 0};
@@ -759,11 +760,12 @@ TEST(LegacyWord, LegacyScanMapsEastAsianParagraphFlags) {
 }
 
 TEST(LegacyWord, LegacyScanConsumesTableShadingWithoutExtraFixedByte) {
-  // sprmTDefTableShd (0xBF) is a spra=6 operand ([MS-DOC] 2.2.5.1): the first
-  // byte counts the rest of the operand. Bug50955.doc ends a PAPX grpprl with
-  // `BF 04 01 05 01 05` (cb = 4 and four shading bytes); adding the one fixed
-  // byte LibreOffice lists for L_VAR overruns the grpprl by one byte and stops
-  // the scan.
+  // sprmTDefTableShd (0xBF) is a spra=6 operand ([MS-DOC] 2.2.5.1): the cb
+  // byte counts the operand bytes that follow it, so the operand is cb + 1
+  // bytes. This synthetic grpprl is built from the `BF 04 01 05 01 05` byte
+  // sequence (cb = 4 and four shading bytes) observed at the end of a
+  // Bug50955.doc PAPX grpprl; adding the one fixed byte LibreOffice lists for
+  // L_VAR overruns the grpprl by one byte and stops the scan.
   std::vector<uint8_t> out;
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
                 std::vector<uint8_t>{0xBF, 0x04, 0x01, 0x05, 0x01, 0x05}, out),

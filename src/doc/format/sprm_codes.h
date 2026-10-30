@@ -107,9 +107,10 @@ inline constexpr uint8_t kLegacySprmCPicLocation = 0x44;
 //
 // kFix: `size` operand bytes. kVar: one cb byte, `size` extra fixed bytes,
 // then cb operand bytes. kVar2: a 16-bit count of (operand bytes + 1).
-// LibreOffice's L_VAR `nLen` is not an extra fixed width for spra = 6 operands:
-// [MS-DOC] 2.2.5.1 says the cb byte counts the rest of the operand, so
-// sprmTDefTableShd (0xBF) carries no extra byte here.
+// For spra = 6 operands [MS-DOC] 2.2.5.1 makes the cb byte the count of the
+// operand bytes that follow it, so the operand occupies cb + 1 bytes in total;
+// LibreOffice's L_VAR `nLen` is not an extra fixed width, and sprmTDefTableShd
+// (0xBF) therefore carries no extra byte here.
 // Only unmapped opcodes are consumed through this table; the mapped subset is
 // translated by NormalizeLegacySprms, which keeps the measured width of
 // sprmCPicLocation (0x44, four bytes) even though LibreOffice marks it L_VAR.
@@ -288,10 +289,11 @@ inline constexpr LegacySprmSpec kLegacySprmSpecs[] = {
     {0xBC, 0, LegacySprmWidth::kVar2},  // sprmTDefTable10
     {0xBD, 2, LegacySprmWidth::kFix},   // sprmTDyaRowHeight
     {0xBE, 0, LegacySprmWidth::kVar2},  // sprmTDefTable
-    // spra = 6 ([MS-DOC] 2.2.5.1): the cb byte counts the whole operand, so
-    // there is no extra fixed byte. Bug50955.doc ends a PAPX grpprl with
-    // `BF 04 01 05 01 05` (cb = 4 plus four shading bytes), which LibreOffice's
-    // extra `1` (L_VAR nLen) would overrun by one byte.
+    // spra = 6 ([MS-DOC] 2.2.5.1): the cb byte counts the operand bytes that
+    // follow it, so the operand is cb + 1 bytes and there is no extra fixed
+    // byte. Bug50955.doc ends a PAPX grpprl with `BF 04 01 05 01 05` (cb = 4
+    // plus four shading bytes), which LibreOffice's extra `1` (L_VAR nLen)
+    // would overrun by one byte.
     {0xBF, 0, LegacySprmWidth::kVar},  // sprmTDefTableShd
     {0xC0, 4, LegacySprmWidth::kFix},  // sprmTTlp
     {0xC1, 5, LegacySprmWidth::kFix},  // sprmTSetBrc
