@@ -382,6 +382,54 @@ TEST(CfbReaderTest, ToleratesTrailingEndOfChainSector) {
   EXPECT_EQ(data->size(), 512u);
 }
 
+// Some real-world producers pad the container with a trailing fragment that
+// is shorter than one sector (wvWare test files end with a single zero byte).
+// The fragment carries no chain data, so it must be ignored rather than
+// rejected; every stream still reads back exactly as declared.
+TEST(CfbReaderTest, ToleratesTrailingPartialSector) {
+  CfbBuilder builder;
+  auto payload = MakePayload(8192, 0xAB);
+  builder.AddStream("WordDocument", payload);
+  auto container = builder.Build();
+  constexpr size_t kSectorSizes[] = {512, 4096};
+  for (uint32_t sector_size : kSectorSizes) {
+    auto base = sector_size == 512 ? container
+                                   : CfbBuilder()
+                                         .SetSectorSize(4096)
+                                         .AddStream("WordDocument", payload)
+                                         .Build();
+    for (size_t extra = 1; extra < sector_size; extra = extra * 2 + 1) {
+      auto bytes = base;
+      bytes.insert(bytes.end(), extra, 0x00);
+      auto reader = CfbReader::Open(bytes);
+      ASSERT_TRUE(reader.has_value())
+          << "sector=" << sector_size << " extra=" << extra << ": "
+          << reader.error().message;
+      EXPECT_EQ(reader->sector_size(), sector_size);
+      auto stream = reader->ReadStream("WordDocument");
+      ASSERT_TRUE(stream.has_value()) << stream.error().message;
+      EXPECT_EQ(*stream, payload)
+          << "sector=" << sector_size << " extra=" << extra;
+    }
+  }
+}
+
+// A container with less than one complete sector cannot hold a directory,
+// so it stays rejected even after trailing fragments are tolerated.
+TEST(CfbReaderTest, RejectsFileShorterThanOneSector) {
+  auto container = CfbBuilder()
+                       .SetSectorSize(4096)
+                       .AddStream("s", MakePayload(8192, 1))
+                       .Build();
+  ASSERT_GT(container.size(), 4096u);
+  container.resize(3000);  // header intact, but no full 4096-byte sector
+  auto result = CfbReader::Open(container);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code, ErrorCode::kTruncated);
+  EXPECT_NE(result.error().message.find("partial sector"), std::string::npos)
+      << result.error().message;
+}
+
 // ReadStream: '/' disambiguation — full path wins over bare entry name.
 TEST(CfbReaderTest, ReadStreamPrefersFullPathOverEntryName) {
   // storage "a" containing stream "b", plus a top-level stream "a/b".
