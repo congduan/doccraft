@@ -93,8 +93,13 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
     f.ccp_text = U32(word, 52);
     f.ccp_ftn = U32(word, 56);
     f.ccp_hdd = U32(word, 60);
-    const uint64_t text_cps =
-        static_cast<uint64_t>(f.ccp_text) + f.ccp_ftn + f.ccp_hdd;
+    // Word 6/95 keeps the same FibRgLw tail as Word 97+ (ccpMcr, ccpAtn,
+    // ccpEdn); LibreOffice reads all three for Ver67 (ww8scan.cxx). ccpMcr is
+    // always zero, so only the annotation and endnote lengths matter here.
+    f.ccp_atn = U32(word, 68);
+    f.ccp_edn = U32(word, 72);
+    const uint64_t text_cps = static_cast<uint64_t>(f.ccp_text) + f.ccp_ftn +
+                              f.ccp_hdd + f.ccp_atn + f.ccp_edn;
     if (f.fc_min < kLegacyHeaderSize + kLegacyPairCount * 8 ||
         f.fc_min > fc_max || fc_max > word.size() || text_cps > word.size())
       return std::unexpected(Error{"invalid Word 6/95 text range"});
@@ -128,8 +133,23 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
     constexpr size_t kLegacyFndTxtPair = 3;
     f.fnd_ref = pair_at(kLegacyFndRefPair);
     f.fnd_txt = pair_at(kLegacyFndTxtPair);
+    // Word 6/95 inserts four 16-bit BTE indices (pnChpFirst, pnPapFirst,
+    // cpnBteChp, cpnBtePap) after pair 37, so pairs 38 and later sit ten bytes
+    // past their Word 97 offset. fcPlcfendRef/fcPlcfendTxt are pairs 46/47 in
+    // both formats (ww8scan.hxx lists 0x1D2/0x1DA, ten past 0x1C8/0x1D0).
+    constexpr size_t kLegacyPairShift = 10;
+    constexpr size_t kLegacyEndRefPair = 46;
+    constexpr size_t kLegacyEndTxtPair = 47;
+    auto shifted_pair = [&](size_t i) -> Fib::Range {
+      const size_t at = kLegacyPairStart + i * 8 + kLegacyPairShift;
+      if (at + 8 > word.size())
+        return {};
+      return {U32(word, at), U32(word, at + 4)};
+    };
+    f.end_ref = shifted_pair(kLegacyEndRefPair);
+    f.end_txt = shifted_pair(kLegacyEndTxtPair);
     for (const Fib::Range& range :
-         {f.sed, f.headers, f.dop, f.fnd_ref, f.fnd_txt})
+         {f.sed, f.headers, f.dop, f.fnd_ref, f.fnd_txt, f.end_ref, f.end_txt})
       if (range.size && (range.offset > word.size() ||
                          range.size > word.size() - range.offset))
         return std::unexpected(
