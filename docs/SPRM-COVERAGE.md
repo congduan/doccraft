@@ -388,13 +388,15 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > 截断仍停止该组并警告（无法确定宽度时不能把操作数误当 opcode）。
 > ChgTabs 家族（`0x0F`/`0x17`）的 cb 为 `0xFF` 时不按 256 字节消费，而是按
 > 操作数自带的删除项数（4B/项）与插入项数（3B/项）重算长度；计数越界同样停止。
+> r30 起两个 opcode 翻译为现代 0xC60D/0xC615 进入 `Paragraph::tabs`；该 cb=0xFF
+> 形态因 4 字节删除项与 PChgTabsPapxOperand 的 2 字节布局不符，仍只消费不翻译。
 
 | 旧版 opcode | sprm | 现代去向 | 备注 |
 |---|---|---|---|
 | `0x05` | sprmPJc | sprmPJc80 | 1B |
 | `0x07`/`0x08`/`0x09` | sprmPFKeep/KeepFollow/PageBreakBefore | 同名 | 1B |
-| `0x0F` | sprmPChgTabsPapx | —（丢弃） | 变长，按 cb 消费避免错位；cb=0xFF 时按 ChgTabsOperand 的删除/插入计数定长（LO `GetSprmTailLen` case 23）；制表位不迁移 |
-| `0x17` | sprmPChgTabs | —（丢弃） | 同上；`LegacyWord.LegacyScanResolvesChgTabsExtendedLength` |
+| `0x0F` | sprmPChgTabsPapx | sprmPChgTabsPapx (0xC60D) | 变长，按 cb 消费避免错位；删除项 2B/项（`080_080742.doc` 实测）；cb=0xFF 时按 ChgTabsOperand 的删除/插入计数定长但不翻译；`LegacyWord.Word6ChgTabsPapxReachesDocx` |
+| `0x17` | sprmPChgTabs | sprmPChgTabs (0xC615) | 同上，删除项 4B/项；cb=0xFF 只消费不翻译；`LegacyWord.Word6ChgTabsFlatFormReachesDocx`、`LegacyWord.LegacyScanResolvesChgTabsExtendedLength` |
 | `0x10`/`0x11`/`0x13` | sprmPDxaRight/Left/Left1 | sprmPDxa*80 | 2B |
 | `0x14` | sprmPDyaLine | 同名 | 4B |
 | `0x15`/`0x16` | sprmPDyaBefore/After | 同名 | 2B |
