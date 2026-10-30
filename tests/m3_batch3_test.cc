@@ -218,6 +218,53 @@ TEST(M3Batch3, TableSetBorderShadingPaddingMergeAndDirection) {
   EXPECT_NE(xml.find("<w:top w:w=\"120\""), std::string::npos);
 }
 
+// [MS-DOC] sprmTCellPadding (0xD632) carries a half-open cell range. Real
+// Word 97 files contain empty ranges (itcFirst == itcLim); LibreOffice's
+// WW8TabBandDesc::ProcessSpecificSpacing returns silently for those instead of
+// rejecting the document, so the parser must treat them as a no-op.
+TEST(M3Batch3, TableCellPaddingIgnoresEmptyCellRange) {
+  auto d = SyntheticTable(Prl(0xD632, {6, 3, 3, 2, 3, 120, 0}));
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  const auto& cells = d->tables[0].row_properties[0].cells;
+  ASSERT_EQ(cells.size(), 2u);
+  for (const auto& cell : cells)
+    for (int margin : cell.margins)
+      EXPECT_EQ(margin, -1);
+  EXPECT_EQ(Xml(*d).find("<w:tcMar>"), std::string::npos);
+}
+
+// A range that names more cells than the row owns is clipped to the row:
+// LibreOffice applies the margins per cell inside [start, end) and ignores
+// indices past the row's last cell.
+TEST(M3Batch3, TableCellPaddingClampsRangeToRow) {
+  auto d = SyntheticTable(Prl(0xD632, {6, 0, 5, 2, 3, 120, 0}));
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  const auto& cells = d->tables[0].row_properties[0].cells;
+  ASSERT_EQ(cells.size(), 2u);
+  EXPECT_EQ(cells[0].margins[1], 120);
+  EXPECT_EQ(cells[1].margins[1], 120);
+  // The writer adds one twip to the left inset to compensate OOXML rounding.
+  EXPECT_NE(Xml(*d).find("<w:left w:w=\"121\""), std::string::npos);
+}
+
+// Everything outside the widened range semantics stays strict.
+TEST(M3Batch3, TableCellPaddingStillRejectsMalformedOperands) {
+  const std::vector<std::vector<uint8_t>> cases = {
+      // sides mask with a bit above 0x0F
+      {6, 0, 2, 16, 3, 120, 0},
+      // ftsWidth neither ftsNil (0) nor ftsDxa (3)
+      {6, 0, 2, 2, 1, 120, 0},
+      // width above kMaxTwips (31680); 40000 == 0x9C40
+      {6, 0, 2, 2, 3, 0x40, 0x9C},
+      // declared cb does not match the operand length
+      {5, 0, 2, 2, 3, 120, 0}};
+  for (const auto& value : cases) {
+    auto d = SyntheticTable(Prl(0xD632, value));
+    EXPECT_FALSE(d.has_value())
+        << "accepted operands of length " << value.size();
+  }
+}
+
 TEST(M3Batch3, TableInsertDeleteSplitAndDefaultShading) {
   std::vector<uint8_t> sprms;
   Add(sprms, 0x7621, {1, 1, 100, 0});
