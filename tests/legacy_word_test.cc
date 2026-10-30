@@ -321,6 +321,38 @@ std::vector<uint8_t> Word6PapxDocumentWithRoom(
   return word;
 }
 
+// Builds a Word 6/95 document whose single PAPX FKP range carries `sprms`,
+// with the BX at page offset 100 so the grpprl may run to several dozen bytes.
+// `sprms` must be an even number of bytes.
+std::vector<uint8_t> Word6PapxDocumentWithWideGrpprl(
+    const std::vector<uint8_t>& sprms) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 772);
+  Put32(word, 52, 4);
+  word[768] = 'A';
+  word[769] = 'B';
+  word[770] = 'C';
+  word[771] = '\r';
+  // PAPX BTE PLC at 2060 points at FKP page 3 (1536).
+  Put32(word, 88 + 13 * 8, 2060);
+  Put32(word, 92 + 13 * 8, 10);
+  Put32(word, 2060, 768);
+  Put32(word, 2064, 772);
+  Put16(word, 2068, 3);
+  // PAPX FKP: one range, BX at page offset 100 (rgb word 50).
+  Put32(word, 1536, 768);
+  Put32(word, 1540, 772);
+  word[1544] = 50;
+  word[1636] = static_cast<uint8_t>((2 + sprms.size()) / 2);
+  std::copy(sprms.begin(), sprms.end(), word.begin() + 1639);
+  word[2047] = 1;
+  return word;
+}
+
 std::expected<doccraft::model::Document, doccraft::doc::Error> ParseWord6(
     const std::vector<uint8_t>& word) {
   auto fib = doccraft::doc::ParseFib(word);
@@ -375,6 +407,77 @@ TEST(LegacyWord, Word6ClidSetsDefaultAndEastAsianLanguage) {
   ASSERT_TRUE(zip) << zip.error().message;
   EXPECT_NE(Part(*zip, "word/document.xml")
                 .find("<w:lang w:val=\"ja-JP\" w:eastAsia=\"ja-JP\""),
+            std::string::npos);
+}
+
+TEST(LegacyWord, LegacyScanTranslatesChgTabsOpcode) {
+  // sprmPChgTabsPapx (0x0F) and sprmPChgTabs (0x17) are translated onto the
+  // Word 97+ opcodes that already feed Paragraph::tabs; the operand keeps its
+  // byte layout (both carry cb first, then the deleted and added counts).
+  std::vector<uint8_t> out;
+  // cb=2: no deleted stop, no added stop.
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x0F, 0x02, 0x00, 0x00}, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  ASSERT_EQ(out.size(), 5u);
+  EXPECT_EQ(out[0], 0x0D);
+  EXPECT_EQ(out[1], 0xC6);  // little-endian sprmPChgTabsPapx (0xC60D).
+  EXPECT_EQ(out[2], 0x02);  // cb, then the two zero counts.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x17, 0x02, 0x00, 0x00}, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  ASSERT_EQ(out.size(), 5u);
+  EXPECT_EQ(out[0], 0x15);
+  EXPECT_EQ(out[1], 0xC6);  // little-endian sprmPChgTabs (0xC615).
+}
+
+TEST(LegacyWord, Word6ChgTabsPapxReachesDocx) {
+  // Word 6/95 sprmPChgTabsPapx uses the PChgTabsPapxOperand layout: a cb byte,
+  // one deleted count with 2-byte XAS entries, then one added count with
+  // 2-byte positions and one TBD byte each ([MS-DOC] 2.9.180/2.9.183). Real
+  // Word 95 samples confirm the 2-byte entry width: 080_080742.doc carries
+  // 0F 07 01 0000 01 30FD 00 (cb=7 with a 2-byte deleted position).
+  auto document = ParseWord6(
+      Word6PapxDocumentWithWideGrpprl({0x0F, 0x0A, 0x01, 0x30, 0xFD, 0x02, 0xD0,
+                                       0x02, 0xA0, 0x05, 0x09, 0x02}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  const auto& tabs = document->paragraphs[0].tabs;
+  ASSERT_EQ(tabs.size(), 2u);
+  EXPECT_EQ(tabs[0].position, 720);
+  EXPECT_EQ(tabs[0].align, 1);
+  EXPECT_EQ(tabs[0].leader, 1);
+  EXPECT_EQ(tabs[1].position, 1440);
+  EXPECT_EQ(tabs[1].align, 2);
+  EXPECT_EQ(tabs[1].leader, 0);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tab w:val=\"center\" w:pos=\"720\" w:leader=\"dot\""),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:tab w:val=\"right\" w:pos=\"1440\""),
+            std::string::npos);
+}
+
+TEST(LegacyWord, Word6ChgTabsFlatFormReachesDocx) {
+  // sprmPChgTabs (0x17) carries a ChgTabsOperand: the deleted positions are
+  // 32-bit (LibreOffice ww8scan.cxx GetSprmTailLen resolves the same width for
+  // its case 23 / 0xC615). The trailing zero is PAPX word padding.
+  auto document = ParseWord6(
+      Word6PapxDocumentWithWideGrpprl({0x17, 0x09, 0x01, 0x30, 0xFD, 0xFF, 0xFF,
+                                       0x01, 0xD0, 0x02, 0x09, 0x00}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  const auto& tabs = document->paragraphs[0].tabs;
+  ASSERT_EQ(tabs.size(), 1u);
+  EXPECT_EQ(tabs[0].position, 720);
+  EXPECT_EQ(tabs[0].align, 1);
+  EXPECT_EQ(tabs[0].leader, 1);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/document.xml")
+                .find("<w:tab w:val=\"center\" w:pos=\"720\" w:leader=\"dot\""),
             std::string::npos);
 }
 
@@ -568,11 +671,14 @@ TEST(LegacyWord, LegacyScanResolvesChgTabsExtendedLength) {
   EXPECT_EQ(out[0], 0x36);
   EXPECT_EQ(out[1], 0x08);  // little-endian sprmCFItalic (0x0836).
   EXPECT_EQ(out[2], 0x01);
-  // sprmPChgTabsPapx (0x0F) shares the layout and is dropped, not translated.
+  // sprmPChgTabsPapx (0x0F) shares the width rule, and its cb=0xFF form is
+  // still consumed without being translated: the 4-byte deleted entries of the
+  // resolved width do not fit the 2-byte PChgTabsPapxOperand. Like the 0x17
+  // form it now reports the dropped modifier as a skip.
   out.clear();
   raw[0] = 0x0F;
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
-            doccraft::doc::detail::LegacySprmScan::kComplete);
+            doccraft::doc::detail::LegacySprmScan::kPartial);
   ASSERT_EQ(out.size(), 3u);
   EXPECT_EQ(out[0], 0x36);
   // Empty counts leave a three-byte operand: 0xFF, nDel=0, nIns=0.
@@ -591,6 +697,11 @@ TEST(LegacyWord, LegacyScanResolvesChgTabsExtendedLength) {
   out.clear();
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
                 std::vector<uint8_t>{0x17, 0xFF, 0x00, 0x03, 0x00, 0x00}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  // The Papx form uses the same count guard for its extended width.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x0F, 0xFF, 0x04, 0x00, 0x00}, out),
             doccraft::doc::detail::LegacySprmScan::kStopped);
 }
 
