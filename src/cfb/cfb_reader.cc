@@ -72,6 +72,16 @@ std::span<const uint8_t> SectorView(std::span<const uint8_t> bytes,
                        sector_size);
 }
 
+// [MS-CFB] §2.2 describes the container as a whole number of sectors after the
+// 512-byte header. Some real-world producers append a trailing fragment that is
+// shorter than one sector (the wvWare samples end with a single zero byte).
+// Such a fragment cannot belong to any FAT chain, so ignore it instead of
+// rejecting the file. Anything reaching a chain that references the dropped
+// bytes still fails cleanly in ReadChain ("sector outside file").
+size_t UsableSize(size_t size, uint32_t sector_size) {
+  return size / sector_size * sector_size;
+}
+
 std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes) {
   constexpr std::array<uint8_t, 8> signature{0xD0, 0xCF, 0x11, 0xE0,
                                              0xA1, 0xB1, 0x1A, 0xE1};
@@ -101,8 +111,7 @@ std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes) {
         Fail(ErrorCode::kCorruptFat, "invalid byte order or mini cutoff"));
   }
   header.sector_size = 1u << shift;
-  if (bytes.size() < header.sector_size ||
-      bytes.size() % header.sector_size != 0) {
+  if (bytes.size() < header.sector_size) {
     return std::unexpected(Fail(ErrorCode::kTruncated, "partial sector"));
   }
   // [MS-CFB] §2.2: Number of Directory Sectors (offset 40). Must be 0 for
@@ -386,6 +395,10 @@ std::expected<CfbReader, Error> CfbReader::Open(
   if (!header) {
     return std::unexpected(header.error());
   }
+  // Drop any trailing partial sector before sector, FAT or directory reads.
+  // The unchecked byte helpers (U16/U32) would otherwise be able to run past
+  // the real end of the buffer when the last sector is only partially present.
+  bytes = bytes.first(UsableSize(bytes.size(), header->sector_size));
   auto tables = LoadFatTables(bytes, *header);
   if (!tables) {
     return std::unexpected(tables.error());
