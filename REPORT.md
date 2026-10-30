@@ -120,6 +120,10 @@ pixelcompare（150 DPI / 0.1%）：
 | page-fields | 1 | 0.000% | PASS |
 | comments-bookmarks | 1 | 0.000% | PASS |
 
+> 后续（2026-10-31）：`aa133ee` 已修复嵌套表的行列解析缺陷；HEAD 复测为
+> 208 bad_px（0.010%）PASS。上表的 0.305% 保留为本批当时的原始测量，
+> 当前基线以 `docs/PIXEL-BASELINE.md` 为准。
+
 已写入 `docs/PIXEL-BASELINE.md` 的 “M20 corpus expansion (2026-10-29)”
 一节，并追加到 `docs/pixel-baseline.tsv`。
 
@@ -266,6 +270,9 @@ format_exit=0
    位置线索：`src/doc/format/formatted.cc` 的 `close_row` / `FinishTableRow`
    对空 `para` 的处理。按本批边界未改产品代码，已记录到
    `docs/PIXEL-BASELINE.md`。
+   后续（2026-10-31）：`aa133ee` 已按 `sprmPFInnerTableCell`/
+   `sprmPFInnerTtp` 在深度 ≥ 2 的 CR 标记上分割行列，HEAD 复测为 2×2 内表、
+   每格 1 段，pixelcompare 0.010% PASS；本条保留为历史记录。
 
 2. **FKP 结构损坏是降级而非拒绝**
    FC 倒序、run count 越界、PAPX 长度溢出、重复页、页越界都只跳过该 FKP 页
