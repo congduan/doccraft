@@ -50,6 +50,12 @@ bool IsXmlBmpCharacter(uint16_t c) {
          (c >= kXmlFirstAfterSurrogates && c <= kXmlLastBmp);
 }
 
+// A comment text PLC may end up to kNoteTextPlcGuardCps past ccpAtn; the
+// affected range is clamped to the story instead of being dropped.
+uint32_t ClampCommentEnd(uint32_t last, uint32_t story_length) {
+  return last > story_length ? story_length : last;
+}
+
 bool IsXmlCodePoint(uint32_t c) {
   return (c >= kUtf16SurrogateBase && c <= kXmlLastCodePoint) ||
          (c <= kXmlLastBmp && IsXmlBmpCharacter(static_cast<uint16_t>(c)));
@@ -158,7 +164,10 @@ std::expected<void, Error> ValidateCommentStory(Bytes table, const Fib& fib) {
     if (U32(text, 4 * i) <= U32(text, 4 * (i - 1)))
       return std::unexpected(Error{"invalid comment text PLC CP order"});
   }
-  if (U32(text, 4 * (count - 1)) > fib.ccp_atn ||
+  // Mainstream writers end PlcfandTxt up to two CPs past ccpAtn (the final
+  // comment's paragraph marks); that margin is accepted and the affected
+  // range is clamped to the story. A larger overshoot is structural damage.
+  if (U32(text, 4 * (count - 1)) > fib.ccp_atn + kNoteTextPlcGuardCps ||
       anchors->back().cp >= fib.ccp_text)
     return std::unexpected(Error{"invalid comment PLC CP range"});
   auto authors = ReadAuthors(table, fib.atn_owners);
@@ -326,15 +335,15 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
   std::vector<std::pair<uint64_t, uint64_t>> ranges;
   for (size_t i = 0; i < count; ++i) {
     const uint32_t first = U32(text, 4 * i);
-    const uint32_t last = U32(text, 4 * (i + 1));
-    if (last > first && last <= fib.ccp_atn)
+    const uint32_t last = ClampCommentEnd(U32(text, 4 * (i + 1)), fib.ccp_atn);
+    if (last > first)
       ranges.emplace_back(base + first, base + last);
   }
   const BookmarkMarks story_bookmarks =
       FilterStoryBookmarks(bookmarks, ranges, "comment", &doc.warnings);
   for (size_t i = 0; i < count; i++) {
     const uint32_t first = U32(text, 4 * i);
-    const uint32_t last = U32(text, 4 * (i + 1));
+    const uint32_t last = ClampCommentEnd(U32(text, 4 * (i + 1)), fib.ccp_atn);
     model::Comment comment;
     if ((*anchors)[i].author >= 0 &&
         static_cast<size_t>((*anchors)[i].author) < authors.size()) {
@@ -343,7 +352,7 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
       comment.author = (*anchors)[i].initials;
     }
     comment.initials = (*anchors)[i].initials;
-    if (last > first && last <= fib.ccp_atn) {
+    if (last > first) {
       comment.paragraphs =
           ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base, first,
                               last, &field_status, &story_bookmarks);

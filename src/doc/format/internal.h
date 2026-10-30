@@ -453,6 +453,14 @@ void ReadLists(model::Document& doc, Bytes table, const Fib& fib);
 
 model::Run InheritedRun(const model::Document& doc, int style);
 
+// PlcffndTxt / PlcfendTxt / PlcfandTxt (and their Word 6/95 counterparts) may
+// end up to two CPs past their story: those CPs are the final story's
+// paragraph marks. Word 6/95 and mainstream Word 97+ producers (LibreOffice,
+// Aspose, POI, wvWare) all write that margin, so both paths accept it and
+// clamp an affected note range to the story length. A larger overshoot means
+// the PLC is damaged and the whole story is rejected.
+inline constexpr uint32_t kNoteTextPlcGuardCps = 2;
+
 // Parses one story's Plcfld ([MS-DOC]: (n+1) CPs then n 2-byte Fld records)
 // into a map keyed by the field-begin CP in absolute document CP
 // space (`base` + the PLC's story-relative CP); the value is the Fld.grffld

@@ -24,11 +24,6 @@
 namespace doccraft::doc::detail {
 namespace {
 
-// Word 6/95 footnote/endnote text PLCs may end up to two CPs past the story
-// length: those CPs are the final story's paragraph marks, like PlcfHdd
-// (LibreOffice reads the raw PLC without clamping). Word 97+ stays exact.
-constexpr uint32_t kLegacyNoteTextGuard = 2;
-
 // PlcffndRef / PlcfendRef: (n + 1) CPs followed by n 2-byte FRD entries.
 std::expected<std::vector<uint32_t>, Error> ReadReferenceCps(Bytes table,
                                                              Fib::Range r) {
@@ -77,7 +72,6 @@ std::expected<NoteReferenceSet, Error> ReadNoteReferences(
   // Word 6/95 keeps both note PLCs in WordDocument; Word 97+ uses the table
   // stream.
   Bytes source = fib.legacy ? word : table;
-  const uint32_t text_guard = fib.legacy ? kLegacyNoteTextGuard : 0;
   auto read = [&](Fib::Range reference, Fib::Range text, uint32_t length,
                   const char* name, std::vector<uint32_t>* target) {
     auto refs = ReadReferenceCps(source, reference);
@@ -93,7 +87,7 @@ std::expected<NoteReferenceSet, Error> ReadNoteReferences(
       error = "note PLC entry count mismatch";
     else if (refs->size() > 1 && (*refs)[refs->size() - 2] >= fib.ccp_text)
       error = "invalid note reference PLC CP range";
-    else if (!texts->empty() && texts->back() > length + text_guard)
+    else if (!texts->empty() && texts->back() > length + kNoteTextPlcGuardCps)
       error = "invalid note text PLC CP range";
     if (!error.empty()) {
       if (!warnings)
@@ -117,7 +111,6 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
   // Word 6/95 keeps the note PLCs and their field PLCs in WordDocument; Word
   // 97+ uses the table stream.
   Bytes source = fib.legacy ? word : table;
-  const uint32_t text_guard = fib.legacy ? kLegacyNoteTextGuard : 0;
   auto footnotes = ReadTextCps(source, fib.fnd_txt);
   auto endnotes = ReadTextCps(source, fib.end_txt);
   // The reference PLC is authoritative for how many notes exist: some
@@ -155,15 +148,13 @@ std::expected<void, Error> ReadNotes(model::Document& doc, Bytes word,
   auto append = [&](const std::vector<uint32_t>& text_cps, uint64_t base,
                     uint32_t story_length, size_t count, bool endnote,
                     const std::map<uint32_t, uint8_t>& field_status) {
-    // Word 6/95 text PLCs may end up to two CPs past the story (the final
-    // story's paragraph marks). Clamp such a range to the story instead of
-    // dropping the note, otherwise the reference in the main story keeps
-    // pointing at a missing footnotes.xml entry. Word 97+ keeps exact CPs:
-    // an over-long range is skipped, never clamped.
+    // Note text PLCs may end up to two CPs past the story (the final story's
+    // paragraph marks). Clamp such a range to the story instead of dropping
+    // the note, otherwise the reference in the main story keeps pointing at a
+    // missing footnotes.xml entry. The header check in ReadNoteReferences
+    // bound the overshoot, so only the tail entry can hit this.
     auto resolve_range = [&](uint32_t first, uint32_t last, uint32_t* end) {
       if (last > story_length) {
-        if (text_guard == 0)
-          return false;
         last = story_length;
         if (last <= first)
           return false;
