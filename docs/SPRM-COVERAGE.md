@@ -406,6 +406,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0x25` | sprmPWr | sprmPWr | 1B；`LegacyWord.Word6FkpMapsFrameWrapAndLanguage` |
 | `0x2C` | sprmPFNoAutoHyph | 同名 | 1B；M13 |
 | `0x33` | sprmPFWidowControl | 同名 | 1B |
+| `0x35`–`0x3A` | sprmPFKinsoku/WordWrap/OverflowPunct/TopLinePunct/AutoSpaceDE/AutoSpaceDN | 同名 | 1B；[MS-DOC] 2.9.215（Prm0 isprm）给出同编号映射，LO/wv 宽度表缺这几行；`LegacyWord.LegacyScanMapsEastAsianParagraphFlags` |
 | `0x55`/`0x56`/`0x57` | sprmCFBold/Italic/Strike | 同名 | 1B |
 | `0x5D` | sprmCFtc | sprmCRgFtc0 | 2B；M13 起映射字体名 |
 | `0x5E` | sprmCKul | 同名 | 1B |
@@ -426,9 +427,12 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0x85`/`0x92`/`0x94`/`0x95`/`0xA3`/`0xAB` | sprmSOlstAnm/SFAutoPgn/SDyaPgn/SDxaPgn/SBCustomize/SDMPaperReq | —（按宽度跳过） | 0x85 变长、0x94/0x95/0xAB 2B、0x92 1B、0xA3 0B；r28 未映射 |
 | `0x99` | sprmSGprfIhdt | —（故事选择专用） | 1B；页眉读取消费，不施加为节属性 |
 
-> 实测样本中仍遇到的未映射项：`Bug51944.doc` 的表外 opcode `0x37`（十进制 55）与
-> `Bug50955.doc` 的 `0xBF` 变长操作数截断，二者仍按保守策略停止并警告。`0x25`
-> 与 `0x61` 自 r19 起已映射（见上表），不再走跳过路径。
+> r31 收尾：`Bug51944.doc` 样式 `內文` 尾部的 `0x37`/`0x3A`/`0x39` 按 [MS-DOC]
+> 2.9.215 映射为现代东亚段落开关（`0x35`/`0x36`/`0x38` 一并补入）；`Bug50955.doc`
+> 的 `0xBF`（sprmTDefTableShd，spra=6）改为「cb 计整个操作数、无额外定长字节」，
+> `BF 04 01 05 01 05` 恰好消费到组尾，不再截断。两份样本的 unsupported-sprms
+> 警告均已消除（`Bug50955.doc` 仍保留 PICF 越界图片警告）。`0x25` 与 `0x61`
+> 自 r19 起已映射（见上表），不再走跳过路径。
 
 ## 规范外旧账别名（不计入 314）
 
