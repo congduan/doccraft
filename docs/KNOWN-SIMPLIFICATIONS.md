@@ -161,3 +161,21 @@
   运行不需要 .NET。升级 SDK 或修正生成器后要重跑：
   `dotnet run --project tools/schema-gen/DumpSdkMetadata -- tools/schema-gen/wml-metadata.json`
   然后 `python3 tools/schema-gen/gen_wml_schema.py tools/schema-gen/wml-metadata.json src/ooxml/generated`。
+
+## 平台与字符集（M20b）
+
+- ANSI 代码页解码按构建目标选择后端：有 iconv 的平台（Linux、macOS、Android NDK 与
+  当前 iOS SDK 均提供）走 iconv；Windows 走 `MultiByteToWideChar`；两者都没有的目标
+  （WebAssembly）只剩内置 CP1252 表。CP1252 本身**永远**走内置表（不用平台后端），
+  这样默认代码页的解码结果逐字节不随平台变化。症状差异：无后端目标上 CP1250/1251/
+  1258/932/936/949/950 等文本按 CP1252 近似输出（拉丁重音正确、其他文种变成乱码），
+  `SupportsCodepage()` 对这些代码页返回 false，`convert` 的 SummaryInformation 代码页
+  探测已按该返回值降级。可在 WASM 上补内置表的后续批解决，见 `docs/DESIGN.md` §2.1。
+- glibc 的 CP1255（希伯来）与 CP1258（越南）是**有状态**映射：单字节输入时它先把字符
+  留在内部状态里、不产出 UTF-8，直到下一个字节到达才吐出。`base::DecodeAnsiChar` 的接口
+  是「一次一个字符」，因此这两种代码页的文本会整体后移一个字符、末尾丢失一个字符
+  （重构前即如此，非本批引入；`tests/charset_test.cc` 因此不对这两页做单字节断言）。
+  Windows 的 `MultiByteToWideChar` 无此状态，两个平台对这两页的输出因此不同。修法需要
+  把解码接口改成有状态的流式 API，会触及 `src/doc/`，留待后续批。
+- `SupportsCodepage(10000)`（Macintosh）在 iconv 目标上为 true、Windows 上为 false：
+  10000 不是 Windows 代码页，`MultiByteToWideChar` 不认识它。

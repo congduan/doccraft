@@ -15,11 +15,30 @@
 #include "base/charset.h"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string>
 
 #include "base/utf8.h"
 
-#ifdef DOCCRAFT_HAVE_ICONV
+#if defined(DOCCRAFT_HAVE_ICONV)
 #include <iconv.h>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
+#if defined(DOCCRAFT_HAVE_ICONV) || defined(_WIN32)
+// Exactly one platform decoder is compiled in: iconv where the C library has
+// it (Linux, macOS, and any BSD or glibc-based target), MultiByteToWideChar on
+// Windows. Android and current iOS SDKs ship a usable iconv too, so they pick
+// the first branch; WebAssembly has neither and keeps the built-in table.
+#define DOCCRAFT_CHARSET_HAS_BACKEND 1
 #endif
 
 namespace doccraft::base {
@@ -88,7 +107,32 @@ constexpr uint32_t kCp1252High(uint8_t c) {
   }
 }
 
-#ifdef DOCCRAFT_HAVE_ICONV
+// The ANSI code pages a .doc can name, by Windows number. 10000 (Macintosh) is
+// deliberately absent: it is not a Windows code page, only iconv knows it, and
+// the Win32 backend must not claim it.
+constexpr bool IsWindowsCodepage(uint32_t codepage) {
+  switch (codepage) {
+    case 874:
+    case 932:
+    case 936:
+    case 949:
+    case 950:
+    case 1250:
+    case 1251:
+    case 1252:
+    case 1253:
+    case 1254:
+    case 1255:
+    case 1256:
+    case 1257:
+    case 1258:
+      return true;
+    default:
+      return false;
+  }
+}
+
+#if defined(DOCCRAFT_HAVE_ICONV)
 const char* IconvName(uint32_t codepage) {
   switch (codepage) {
     case 874:
@@ -145,7 +189,87 @@ iconv_t CachedIconv(uint32_t codepage) {
   cached_key = key;
   return cached_cd;
 }
-#endif  // DOCCRAFT_HAVE_ICONV
+
+bool BackendSupports(uint32_t codepage) {
+  return IconvName(codepage) != nullptr;
+}
+
+// Converts exactly `len` bytes (1 or 2) as one character; false when they do
+// not form one character in `codepage`.
+bool DecodeBackendChar(uint32_t codepage, const uint8_t* bytes, size_t len,
+                       std::string* out) {
+  iconv_t cd = CachedIconv(codepage);
+  if (cd == reinterpret_cast<iconv_t>(-1)) {
+    return false;
+  }
+  iconv(cd, nullptr, nullptr, nullptr, nullptr);  // reset shift state
+  std::array<char, 8> buffer{};
+  char* source = const_cast<char*>(reinterpret_cast<const char*>(bytes));
+  size_t source_left = len;
+  char* target = buffer.data();
+  size_t target_left = buffer.size();
+  const size_t result = iconv(cd, &source, &source_left, &target, &target_left);
+  if (result == static_cast<size_t>(-1) || source_left != 0) {
+    return false;
+  }
+  out->append(buffer.data(), buffer.size() - target_left);
+  return true;
+}
+#elif defined(_WIN32)
+// Windows numbers the same code pages; MultiByteToWideChar decodes them into
+// UTF-16 and AppendUtf8 re-encodes, so no table is duplicated. MB_ERR_INVALID_
+// CHARS is what makes an undefined byte or a lone lead byte fail, matching the
+// EILSEQ/EINVAL behaviour of the iconv path above.
+bool BackendSupports(uint32_t codepage) {
+  return IsWindowsCodepage(codepage);
+}
+
+bool DecodeBackendChar(uint32_t codepage, const uint8_t* bytes, size_t len,
+                       std::string* out) {
+  wchar_t wide[2] = {};
+  const int written = ::MultiByteToWideChar(
+      static_cast<UINT>(codepage), MB_ERR_INVALID_CHARS,
+      reinterpret_cast<const char*>(bytes), static_cast<int>(len), wide, 2);
+  if (written <= 0) {
+    return false;
+  }
+  for (int i = 0; i < written; ++i) {
+    uint32_t cp = static_cast<uint32_t>(wide[i]);
+    if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < written) {
+      const uint32_t low = static_cast<uint32_t>(wide[i + 1]);
+      if (low >= 0xDC00 && low <= 0xDFFF) {
+        cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+        ++i;
+      }
+    }
+    AppendUtf8(*out, cp);
+  }
+  return true;
+}
+#else
+bool BackendSupports(uint32_t /*codepage*/) {
+  return false;
+}
+
+bool DecodeBackendChar(uint32_t /*codepage*/, const uint8_t* /*bytes*/,
+                       size_t /*len*/, std::string* /*out*/) {
+  return false;
+}
+#endif
+
+// A character is one byte or one DBCS pair: try a single byte first (every
+// single-byte page, plus the half-width katakana bytes of CP932), then the pair
+// that follows a lead byte.
+size_t DecodePlatformChar(uint32_t codepage, Bytes in, std::string& out) {
+  for (size_t len = 1; len <= 2 && len <= in.size(); ++len) {
+    std::string decoded;
+    if (DecodeBackendChar(codepage, in.data(), len, &decoded)) {
+      out.append(decoded);
+      return len;
+    }
+  }
+  return 0;
+}
 
 }  // namespace
 
@@ -204,11 +328,9 @@ uint32_t CodepageForLid(uint16_t lid) {
 }
 
 bool SupportsCodepage(uint32_t codepage) {
-#ifdef DOCCRAFT_HAVE_ICONV
-  return IconvName(codepage) != nullptr;
-#else
-  return codepage == kDefaultCodepage;
-#endif
+  // CP1252 never needs a backend: the built-in table decodes it identically on
+  // every platform.
+  return codepage == kDefaultCodepage || BackendSupports(codepage);
 }
 
 size_t DecodeAnsiChar(uint32_t codepage, Bytes in, std::string& out) {
@@ -222,36 +344,27 @@ size_t DecodeAnsiChar(uint32_t codepage, Bytes in, std::string& out) {
     out.push_back(static_cast<char>(in[0]));
     return 1;
   }
-#ifdef DOCCRAFT_HAVE_ICONV
-  if (codepage != kDefaultCodepage || SupportsCodepage(codepage) == false) {
-    iconv_t cd = CachedIconv(codepage);
-    if (cd == reinterpret_cast<iconv_t>(-1)) {
-      return 0;
-    }
-    // Try a single byte first; a DBCS lead byte fails with EINVAL and the
-    // two-byte attempt below picks up the pair that follows it.
-    for (size_t len = 1; len <= 2; ++len) {
-      if (in.size() < len) {
-        break;
-      }
-      iconv(cd, nullptr, nullptr, nullptr, nullptr);  // reset shift state
-      std::array<char, 8> buffer{};
-      char* source =
-          const_cast<char*>(reinterpret_cast<const char*>(in.data()));
-      size_t source_left = len;
-      char* target = buffer.data();
-      size_t target_left = buffer.size();
-      size_t result = iconv(cd, &source, &source_left, &target, &target_left);
-      if (result != static_cast<size_t>(-1) && source_left == 0) {
-        out.append(buffer.data(), buffer.size() - target_left);
-        return len;
-      }
-    }
-    return 0;
+  if (codepage == kDefaultCodepage) {
+    // CP1252 always uses the built-in table, even when iconv is available: it
+    // maps the five undefined positions to U+0080..U+009F instead of rejecting
+    // them, and it is the one decoder that must not vary by platform.
+    AppendUtf8(out, kCp1252High(in[0]));
+    return 1;
   }
-#endif  // DOCCRAFT_HAVE_ICONV
+  if (BackendSupports(codepage)) {
+    return DecodePlatformChar(codepage, in, out);
+  }
+#ifdef DOCCRAFT_CHARSET_HAS_BACKEND
+  // A platform decoder is compiled in and does not know this code page, so
+  // these bytes are undecodable: the caller emits U+FFFD and skips one byte.
+  return 0;
+#else
+  // No decoder at all (WebAssembly): the built-in CP1252 table is the
+  // documented fallback, which keeps Latin text readable and turns everything
+  // else into its CP1252 approximation.
   AppendUtf8(out, kCp1252High(in[0]));
   return 1;
+#endif
 }
 
 }  // namespace doccraft::base

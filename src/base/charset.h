@@ -33,7 +33,10 @@ inline constexpr uint32_t kDefaultCodepage = 1252;
 // Maps a Windows LID (FibBase.lid, [MS-DOC] §2.5.1) to its ANSI code page.
 uint32_t CodepageForLid(uint16_t lid);
 
-// True when this build can decode `codepage` (iconv present, or 1252 itself).
+// True when this build can decode `codepage`: always for 1252 (the built-in
+// table), and for the other ANSI pages only when the platform decoder of this
+// build knows them - iconv on POSIX, MultiByteToWideChar on Windows. A
+// WebAssembly build has neither and reports false for everything but 1252.
 bool SupportsCodepage(uint32_t codepage);
 
 // Decodes the character at the start of `in` (UTF-8 output appended to `out`).

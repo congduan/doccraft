@@ -97,3 +97,51 @@ TEST(CharsetTest, InvalidSequenceReportsZero) {
 TEST(CharsetTest, ZeroCodePageFallsBackToCp1252) {
   EXPECT_EQ(Decode(0, {0x80}), "\xE2\x82\xAC");
 }
+
+// The platform backend (iconv on POSIX, MultiByteToWideChar on Windows) must
+// agree with what SupportsCodepage() reports. These are the tests that actually
+// exercise the Windows backend in CI; on a build with no backend (WebAssembly)
+// each iteration is skipped, leaving CP1252 as the only decoder.
+TEST(CharsetTest, SupportedLatinCodepagesDecodeTheirBytes) {
+  // Pages that define nearly the whole 0x80-0xFF range; the handful of
+  // undefined positions are backend-specific and stay out of the count.
+  for (uint32_t codepage : {1250u, 1251u, 1253u, 1254u, 1257u}) {
+    SCOPED_TRACE(codepage);
+    if (!SupportsCodepage(codepage))
+      continue;
+    int decoded = 0;
+    for (int byte = 0x80; byte <= 0xFF; ++byte) {
+      if (!Decode(codepage, {static_cast<uint8_t>(byte)}).empty())
+        ++decoded;
+    }
+    // 0x80-0xFF is 128 positions and only a handful are undefined in these
+    // pages; a backend that decodes nothing at all would fall far below this.
+    EXPECT_GE(decoded, 100);
+  }
+}
+
+TEST(CharsetTest, SupportedCodepagesDecodeKnownLetters) {
+  struct Sample {
+    uint32_t codepage;
+    uint8_t byte;
+    const char* utf8;
+  };
+  // Thai ko kai and Arabic alef. CP1255 and CP1258 are left out on purpose:
+  // glibc implements both as stateful tables that hold a character back until
+  // the next byte arrives, so a single byte cannot be asserted here; the known
+  // gap is recorded in docs/KNOWN-SIMPLIFICATIONS.md.
+  for (const Sample& sample :
+       {Sample{874, 0xA1, "\xE0\xB8\x81"}, Sample{1256, 0xC7, "\xD8\xA7"}}) {
+    SCOPED_TRACE(sample.codepage);
+    if (!SupportsCodepage(sample.codepage))
+      continue;
+    EXPECT_EQ(Decode(sample.codepage, {sample.byte}), sample.utf8);
+  }
+}
+
+// 437 (DOS US) is not an ANSI code page a .doc can name, so no backend may
+// claim it; the byte then falls through the documented fallback path.
+TEST(CharsetTest, UnknownCodepageIsNotClaimed) {
+  EXPECT_FALSE(SupportsCodepage(437));
+  EXPECT_TRUE(SupportsCodepage(1252));
+}
