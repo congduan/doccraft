@@ -833,7 +833,9 @@ TEST(LegacyWord, LegacyScanMapsTableProperties) {
   // order byte is significant)", "tap.fCantSplit 1 or 0 byte", ...). The
   // modern handlers read sprmTJc/sprmTDxaLeft/sprmTDxaGapHalf as two bytes
   // ([MS-DOC] 2.9.144/2.9.145), sprmTFCantSplit/sprmTTableHeader as Bool8 and
-  // sprmTDyaRowHeight as a signed YAS, so the operands pass through unchanged.
+  // sprmTDyaRowHeight as a signed YAS. All operands pass through unchanged
+  // except sprmTJc: only its low byte is significant, so a stray high byte
+  // is cleared (see the case below).
   std::vector<uint8_t> out;
   const std::vector<uint8_t> raw = {0xB6, 0x01, 0x00, 0xB7, 0x40, 0x01,
                                     0xB8, 0x6C, 0x00, 0xB9, 0x01, 0xBA,
