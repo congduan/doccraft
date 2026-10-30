@@ -904,6 +904,33 @@ TEST(LegacyWord, Word6TablePropertiesReachDocx) {
         "<w:cantSplit/>", "<w:tblHeader/>",
         "<w:trHeight w:val=\"300\" w:hRule=\"atLeast\"/>"})
     EXPECT_NE(xml.find(fragment), std::string::npos) << fragment << "\n" << xml;
+  // sprmTDyaRowHeight carries a signed YAS: a negative operand marks an exact
+  // row height. The parser keeps the sign and the writer takes the absolute
+  // value with w:hRule="exact", so BD AC FE (-340) must not collapse into a
+  // positive atLeast height. The other TAP sprms repeat the positive case so
+  // the row structure is identical and only the height differs.
+  const std::vector<uint8_t> exact_height = {
+      0xB6, 0x01, 0x00,  // sprmTJc: center.
+      0xB7, 0x40, 0x01,  // sprmTDxaLeft: 320 twips.
+      0xB8, 0x6C, 0x00,  // sprmTDxaGapHalf: 108 twips.
+      0xBD, 0xAC, 0xFE,  // sprmTDyaRowHeight: -340 twips.
+  };
+  std::vector<uint8_t> exact_cell = exact_height;
+  exact_cell.insert(exact_cell.end(), {0x18, 1});  // sprmPFInTable.
+  std::vector<uint8_t> exact_row = exact_height;
+  exact_row.insert(exact_row.end(), {0x19, 1});  // sprmPFTtp.
+  exact_row.insert(exact_row.end(), {0x18, 1});  // sprmPFInTable.
+  auto exact = ParseWord6(Word6TableDocument(exact_cell, exact_row));
+  ASSERT_TRUE(exact) << exact.error().message;
+  ASSERT_EQ(exact->tables.size(), 1u);
+  ASSERT_EQ(exact->tables[0].row_properties.size(), 1u);
+  EXPECT_EQ(exact->tables[0].row_properties[0].height, -340);
+  auto exact_zip = doccraft::docx::Write(*exact);
+  ASSERT_TRUE(exact_zip) << exact_zip.error().message;
+  const std::string exact_xml = Part(*exact_zip, "word/document.xml");
+  EXPECT_NE(exact_xml.find("<w:trHeight w:val=\"340\" w:hRule=\"exact\"/>"),
+            std::string::npos)
+      << exact_xml;
 }
 
 TEST(LegacyWord, LegacyScanStopsAfterTablePropertiesOnUnknownOpcode) {
