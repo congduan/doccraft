@@ -379,7 +379,10 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > 旧版 grpprl 用 1 字节 opcode（LibreOffice `sprmids.hxx` v6 命名空间 + wvWare
 > `rgsprmWord6` 双源核对）。`src/doc/format/fkp.cc` 的 `ScanLegacySprms` /
 > `NormalizeLegacySprms` 把已支持项翻译为上表现代 opcode 后走同一 IR 路径；
-> FKP 与样式 UPX 共用。`sprm_codes.h` 的 `kLegacySprmSpecs` 逐行转写 LO
+> FKP 与样式 UPX 共用。旧版 SEPX（节属性）自 r28 起走同一宽度表的另一个入口：
+> `WalkLegacySepx` 逐项回调，`formatted_helpers.cc` 的
+> `ApplyLegacySectionSprm` 把节 opcode 映到现代 `ApplySection`；页眉读取仍只
+> 消费 `sprmSGprfIhdt`/`sprmSFTitlePage`。`sprm_codes.h` 的 `kLegacySprmSpecs` 逐行转写 LO
 > `GetWW6SprmSearcher` 的完整宽度表：已映射项按上表宽度翻译；表内定长或变长
 > 但未映射的 opcode 按宽度整项跳过，后续修饰继续解析；表外 opcode 或操作数
 > 截断仍停止该组并警告（无法确定宽度时不能把操作数误当 opcode）。
@@ -406,6 +409,18 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0x61` | sprmCLid | sprmCRgLid0 + sprmCRgLid1 | 2B；同一 LID 操作数双写（wvWare 同时置 lidDefault 与 lidFE）；`LegacyWord.Word6FkpMapsFrameWrapAndLanguage`、`LegacyWord.Word6ClidSetsDefaultAndEastAsianLanguage` |
 | `0x62` | sprmCIco | 同名 | 1B |
 | `0x63` | sprmCHps | 同名 | **2B**；wvWare spra 位与 LO aSprms 表双证，hps<256 时与 1 字节读法等价；M13 修正 |
+| `0x83`/`0x84` | sprmScnsPgn/sprmSiHeadingPgn | 同名 | 1B；r28 节属性 |
+| `0x88`/`0x89` | sprmSDxaColWidth/Spacing | 同名 | 3B（列序号 + 2B 值）；r28；`LegacyWord.Word6SepxSectionPropertiesReachDocx` |
+| `0x8A`/`0x8B`/`0x8E`/`0x8F`/`0x96`/`0x97`/`0x98`/`0x9E`/`0x9F` | sprmSFEvenlySpaced/SFProtected/SBkc/SFTitlePage/SFPgnRestart/SFEndnote/SLnc/SLBetween/SVjc | 同名 | 1B；r28；`0x8F` 同时供首页故事挂接 |
+| `0x8C`/`0x8D` | sprmSDmBinFirst/sprmSDmBinOther | 同名 | 2B；r28 |
+| `0x90`/`0x91` | sprmSCcolumns/sprmSDxaColumns | 同名 | 2B；r28 |
+| `0x93` | sprmSNfcPgn | 同名 | 1B（宽度表如此，非 2B）；r28 |
+| `0x9A`/`0x9B`/`0x9C`/`0x9D`/`0xA0` | sprmSNLnnMod/SDxaLnn/SDyaHdrTop/SDyaHdrBottom/SLnnMin | 同名 | 2B；r28 |
+| `0xA1` | sprmSPgnStart | sprmSPgnStart97 | 2B；r28 |
+| `0xA2` | sprmSBOrientation | 同名 | 1B（宽度表如此，非 2B）；r28 |
+| `0xA4`–`0xAA` | sprmSXaPage/SYaPage/SDxaLeft/SDxaRight/SDyaTop/SDyaBottom/SDzaGutter | 同名 | 2B；r28；`LegacyWord.Word6SepxSectionPropertiesReachDocx`、`LegacyWord.Word6PerSectionSepxPropertiesFollowSection` |
+| `0x85`/`0x92`/`0x94`/`0x95`/`0xA3`/`0xAB` | sprmSOlstAnm/SFAutoPgn/SDyaPgn/SDxaPgn/SBCustomize/SDMPaperReq | —（按宽度跳过） | 0x85 变长、0x94/0x95/0xAB 2B、0x92 1B、0xA3 0B；r28 未映射 |
+| `0x99` | sprmSGprfIhdt | —（故事选择专用） | 1B；页眉读取消费，不施加为节属性 |
 
 > 实测样本中仍遇到的未映射项：`Bug51944.doc` 的表外 opcode `0x37`（十进制 55）与
 > `Bug50955.doc` 的 `0xBF` 变长操作数截断，二者仍按保守策略停止并警告。`0x25`
