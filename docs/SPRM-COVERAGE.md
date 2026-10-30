@@ -172,8 +172,8 @@
 | ✅ | `0x2448` | sprmPFAdjustRight | A Bool8 value that specifies whether this paragraph is set to automatically adjust the right indent when a document grid for East Asian characters is defined. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
 | ✅ | `0x6649` | sprmPItap | An integer value that specifies the table depth of this paragraph. | 段落 PAP §2.6.2；sprmPItap 作为表格嵌套深度的权威来源；M3NestedTable.DepthTwoTableLivesInTheEnclosingCell、M4FastSaved.PiecePItapPlacesParagraphInsideTable |
 | ✅ | `0x664A` | sprmPDtap | A signed integer that specifies an addition or subtraction to the existing table depth of this paragraph. | 段落 PAP §2.6.2；深度增量形式，累加到 sprmPItap；M3NestedTable.DeltaDepthIsAccumulated、M3NestedTable.DeltaDepthWideArithmetic |
-| ✅ | `0x244B` | sprmPFInnerTableCell | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table cell. | 段落 PAP §2.6.2；嵌套表单元格边界（CR 标记），按 sprmPItap 深度分派；M3NestedTable.TwoRowInnerTableSplitsRowsAndCells、M3NestedTable.CorpusNestedTableKeepsTwoRowsAndFourCells |
-| ✅ | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2；嵌套表行结束标记（CR 标记），按 sprmPItap 深度分派；M3NestedTable.TwoRowInnerTableSplitsRowsAndCells、M3NestedTable.CorpusNestedTableKeepsTwoRowsAndFourCells |
+| ✅ | `0x244B` | sprmPFInnerTableCell | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table cell. | 段落 PAP §2.6.2；嵌套表单元格边界（CR 标记），按 sprmPItap 深度分派；M3NestedTable.TwoRowInnerTableSplitsRowsAndCells、M3NestedTable.CorpusNestedTableKeepsTwoRowsAndFourCells、M3NestedTable.CorpusNestedTableWritesGridAndCellWidths |
+| ✅ | `0x244C` | sprmPFInnerTtp | A Bool8 value that specifies whether this paragraph is the final paragraph in a nested table row. | 段落 PAP §2.6.2；嵌套表行结束标记（CR 标记），按 sprmPItap 深度分派；M3NestedTable.TwoRowInnerTableSplitsRowsAndCells、M3NestedTable.CorpusNestedTableKeepsTwoRowsAndFourCells、M3NestedTable.CorpusNestedTableWritesGridAndCellWidths |
 | ✅ | `0xC64D` | sprmPShd | A SHDOperand value that specifies the background shading for the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xC64E` | sprmPBrcTop | A BrcOperand value which specifies the top border of the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xC64F` | sprmPBrcLeft | A BrcOperand value that specifies the logical left border of the paragraph. | 段落 PAP §2.6.2；M3Batch6.ExistingParagraphAndCharacterPaths |
@@ -218,7 +218,7 @@
 | ✅ | `0x3404` | sprmTTableHeader | A Bool8 value that specifies that the current table row is a header row. | 表格 TAP §2.6.3 |
 | ✅ | `0xD605` | sprmTTableBorders80 | A TableBordersOperand80 value that specifies border information for the cells in a table row. | 表格 TAP §2.6.3 |
 | ✅ | `0x9407` | sprmTDyaRowHeight | A YAS value that specifies the height of the row. | 表格 TAP §2.6.3 |
-| ✅ | `0xD608` | sprmTDefTable | A TDefTableOperand value that specifies the number of columns in the table row, the width of each column, border attributes, and a variety of other settings. | 表格 TAP §2.6.3 |
+| ✅ | `0xD608` | sprmTDefTable | A TDefTableOperand value that specifies the number of columns in the table row, the width of each column, border attributes, and a variety of other settings. | 表格 TAP §2.6.3；M3NestedTable.CorpusNestedTableWritesGridAndCellWidths |
 | ✅ | `0xD609` | sprmTDefTableShd80 | A DefTableShd80Operand value that specifies the default shading applied to each cell in a row. | 表格 TAP §2.6.3；M3Batch7.TableRowShd80 |
 | ✅ | `0x740A` | sprmTTlp | A TLP structure that specifies the table style options for this table. | 表格 TAP §2.6.3；M3Batch8.TableStyleOptionsAndAnchors；M3Styles.TableStyleDefaultsAndConditionals |
 | ✅ | `0x560B` | sprmTFBiDi | A Bool16 value that specifies whether this table is right-to-left. | 表格 TAP §2.6.3 |

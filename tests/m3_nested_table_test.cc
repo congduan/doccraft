@@ -454,6 +454,54 @@ TEST(M3NestedTable, CorpusNestedTableKeepsTwoRowsAndFourCells) {
   EXPECT_EQ(CountOccurrences(inner_xml, "<w:p>"), 4u);
 }
 
+TEST(M3NestedTable, CorpusNestedTableWritesGridAndCellWidths) {
+  auto d = ParseCorpus("nested-tables");
+  ASSERT_TRUE(d);
+  ASSERT_EQ(d->tables.size(), 2u);
+
+  const model::Table* outer = nullptr;
+  for (const auto& block : d->blocks) {
+    if (block.table) {
+      outer = &d->tables[block.index];
+      break;
+    }
+  }
+  ASSERT_NE(outer, nullptr);
+  const std::vector<int> outer_widths{1994, 1994, 1994, 1994, 1996};
+  EXPECT_EQ(outer->columns, outer_widths);
+
+  const auto& second = outer->rows[0][1].blocks;
+  ASSERT_EQ(second.size(), 3u);
+  ASSERT_TRUE(second[1].table);
+  const model::Table& inner = d->tables[second[1].index];
+  const std::vector<int> inner_widths{996, 998};
+  EXPECT_EQ(inner.columns, inner_widths);
+  ASSERT_EQ(inner.row_properties.size(), 2u);
+  for (const auto& row : inner.row_properties) {
+    ASSERT_EQ(row.cells.size(), 2u);
+    EXPECT_EQ(row.cells[0].width, 996);
+    EXPECT_EQ(row.cells[1].width, 998);
+  }
+
+  // The written geometry must match the LibreOffice reference: an empty
+  // w:tblGrid (the pre-aa133ee flattened-cell output) makes the renderer
+  // stack all four inner paragraphs into one column.
+  const std::string xml = Xml(*d);
+  ASSERT_FALSE(xml.empty());
+  const std::string outer_xml = ElementSlice(xml, "w:tbl", 0);
+  const std::string inner_xml = ElementSlice(xml, "w:tbl", 1);
+  ASSERT_FALSE(outer_xml.empty());
+  ASSERT_FALSE(inner_xml.empty());
+  EXPECT_EQ(CountOccurrences(outer_xml, "<w:gridCol w:w=\"1994\"/>"), 4u);
+  EXPECT_EQ(CountOccurrences(outer_xml, "<w:gridCol w:w=\"1996\"/>"), 1u);
+  EXPECT_EQ(CountOccurrences(inner_xml, "<w:gridCol w:w=\"996\"/>"), 1u);
+  EXPECT_EQ(CountOccurrences(inner_xml, "<w:gridCol w:w=\"998\"/>"), 1u);
+  EXPECT_EQ(CountOccurrences(inner_xml, "<w:tcW w:w=\"996\" w:type=\"dxa\"/>"),
+            2u);
+  EXPECT_EQ(CountOccurrences(inner_xml, "<w:tcW w:w=\"998\" w:type=\"dxa\"/>"),
+            2u);
+}
+
 TEST(M3NestedTable, DeltaDepthIsAccumulated) {
   // sprmPDtap adjusts the depth that sprmPItap established. Both operands
   // are spra 3 (4-byte signed) and clamp to [0, kMaxTableDepth] through the
