@@ -197,27 +197,17 @@ void SortTabsByPosition(std::vector<model::TabStop>* tabs) {
                    });
 }
 
-// Tabs to write for a paragraph. OOXML still inherits the style's stops
-// through w:pStyle, so only the paragraph's own changes are emitted: an add
-// overrides the inherited stop, and a clear is kept only when the inherited
-// set really has that position. An unmatched clear is dropped because it would
-// name a stop no consumer can hold (LibreOffice does the same). Without a
-// resolvable paragraph style there is nothing to compare against, so the
-// operand is written verbatim.
-std::vector<model::TabStop> WrittenParagraphTabs(
-    const model::Paragraph& p, const model::Document* document) {
-  if (p.tabs.empty() || !document || p.style < 0 ||
-      static_cast<size_t>(p.style) >= document->styles.size()) {
-    return p.tabs;
-  }
-  const model::Style& style = document->styles[p.style];
-  if (style.type != 1) {
-    return p.tabs;
-  }
-  const std::vector<model::TabStop>& inherited = style.resolved_paragraph.tabs;
+// Applies a ChgTabs operand list to the tab set it inherits. Only the operand's
+// own effects are returned: an add overrides the inherited stop, and a clear is
+// kept only when the inherited set really has that position. An unmatched clear
+// is dropped because it would name a stop no consumer can hold (LibreOffice
+// does the same). Clears come first, then additions in position order.
+std::vector<model::TabStop> MergedTabs(
+    const std::vector<model::TabStop>& inherited,
+    const std::vector<model::TabStop>& operands) {
   std::vector<model::TabStop> effective = inherited;
   std::vector<int> added;
-  for (const auto& tab : p.tabs) {
+  for (const auto& tab : operands) {
     auto it = std::find_if(effective.begin(), effective.end(),
                            [&](const auto& stop) {
                              return stop.position == tab.position;
@@ -255,6 +245,23 @@ std::vector<model::TabStop> WrittenParagraphTabs(
   SortTabsByPosition(&additions);
   clears.insert(clears.end(), additions.begin(), additions.end());
   return clears;
+}
+
+// Tabs to write for a paragraph. OOXML still inherits the style's stops
+// through w:pStyle, so only the paragraph's own changes are emitted. Without a
+// resolvable paragraph style there is nothing to compare against, so the
+// operand is written verbatim.
+std::vector<model::TabStop> WrittenParagraphTabs(
+    const model::Paragraph& p, const model::Document* document) {
+  if (p.tabs.empty() || !document || p.style < 0 ||
+      static_cast<size_t>(p.style) >= document->styles.size()) {
+    return p.tabs;
+  }
+  const model::Style& style = document->styles[p.style];
+  if (style.type != 1) {
+    return p.tabs;
+  }
+  return MergedTabs(style.resolved_paragraph.tabs, p.tabs);
 }
 
 void WriteParagraphTabs(pugi::xml_node pr,

@@ -227,7 +227,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 ### 6.7 样式系统
 - ✅ STSH 全量解析（基于样式继承链展开；Word 6/95 旧版 STSH 自 M13 起接入同一链路：名称/基于/下一样式与 UPX 的段落、字符修饰经归一化后同规则叠加；M14 对 STSHI 默认字体和损坏记录给出有界处理与警告，旧版默认字号尚未还原）
 - ✅ 样式映射到 docx styles.xml（段落/字符/表格/编号样式，含表样式条件格式 `w:tblStylePr`）
-- ◐ 直接格式 vs 样式格式的优先级正确叠加（表样式条件格式已按 [MS-DOC] 2.4.6.6 的条带、列、行、角顺序输出；r37 起段落制表位在样式 based-on 链与直接 PAPX 之间按 [MS-DOC] 2.9.183 求值，`M3Styles.TabsMergeWithBaseInsteadOfReplacing`、`M3Styles.StyleOutputUsesResolvedTabsAndClearsDeletedBaseStop`、`M3Styles.ParagraphTab*`；其余段落/字符/编号属性仍未完整按规范求值）
+- ◐ 直接格式 vs 样式格式的优先级正确叠加（表样式条件格式已按 [MS-DOC] 2.4.6.6 的条带、列、行、角顺序输出；r37 起段落制表位在样式 based-on 链与直接 PAPX 之间按 [MS-DOC] 2.9.183 求值，表样式条件块（`w:tblStylePr`）的 tabs 同样相对所属表样式的 resolved 集求值，`M3Styles.TabsMergeWithBaseInsteadOfReplacing`、`M3Styles.StyleOutputUsesResolvedTabsAndClearsDeletedBaseStop`、`M3Styles.ParagraphTab*`、`M3Styles.TableConditionalTabs*`；其余段落/字符/编号属性仍未完整按规范求值）
 
 ### 6.8 加密
 - ◐ XOR obfuscation 解密（`--password`）：ASCII 1–15 字节口令的合成 `.doc`

@@ -83,7 +83,20 @@ void WriteConditionalCellPr(pugi::xml_node tcpr,
   }
 }
 
+// A w:tblStylePr block applies on top of its table style, so its tab operand
+// is evaluated against the table style's resolved set, exactly like paragraph
+// tabs against their paragraph style. With no operand there is nothing to
+// write; with an empty inherited set, every unmatched clear is dropped.
+std::vector<model::TabStop> ConditionalTabs(
+    const model::Style& style, const model::ConditionalProperties& c) {
+  if (c.paragraph.tabs.empty()) {
+    return {};
+  }
+  return MergedTabs(style.resolved_paragraph.tabs, c.paragraph.tabs);
+}
+
 void WriteStyleConditional(pugi::xml_node sn,
+                           const model::Style& style,
                            const model::ConditionalProperties& c,
                            const model::Document& document) {
   const char* type = ConditionalType(c.type);
@@ -93,7 +106,8 @@ void WriteStyleConditional(pugi::xml_node sn,
   auto block = sn.append_child("w:tblStylePr");
   Attr(block, "w:type", type);
   // CT_TblStylePr keeps the ECMA-376 child order: pPr, rPr, tblPr, trPr, tcPr.
-  ParaPr(block, c.paragraph, true);
+  std::vector<model::TabStop> tabs = ConditionalTabs(style, c);
+  ParaPr(block, c.paragraph, true, &tabs);
   RunPr(block, c.run, &document);
   WriteConditionalCellPr(block.append_child("w:tcPr"), c);
 }
@@ -194,7 +208,7 @@ void WriteStyle(pugi::xml_node styles, const model::Document& document,
     WriteStyleTablePr(sn, style);
   }
   for (const auto& conditional : style.conditionals) {
-    WriteStyleConditional(sn, conditional, document);
+    WriteStyleConditional(sn, style, conditional, document);
   }
 }
 

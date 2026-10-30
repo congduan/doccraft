@@ -581,3 +581,183 @@ TEST(M3Styles, UnstyledParagraphKeepsDirectTabsVerbatim) {
   EXPECT_LT(first, second);
   EXPECT_LT(second, add);
 }
+
+// ---------------------------------------------------------------------------
+// r37 fix: table-style conditional blocks (w:tblStylePr) stack on the table
+// style, so their ChgTabs operands are evaluated against the style's resolved
+// tab set instead of being written verbatim.
+namespace {
+// One table style with its own PAPX tabs plus a first-row condition carrying a
+// nested tab change.
+Std TableTabsStyle(const std::vector<TabAdd>& style_tabs,
+                   const std::vector<int>& deleted,
+                   const std::vector<TabAdd>& added) {
+  Std style;
+  style.type = 3;
+  style.name = "GridTabs";
+  style.blocks.push_back(Sprms({Prl(
+      0xD66A, Cnf(0x0001, Sprms({Prl(0xC60D, ChgTabs(deleted, added))})))}));
+  std::vector<uint8_t> papx;
+  if (!style_tabs.empty())
+    papx = Prl(0xC60D, ChgTabs({}, style_tabs));
+  papx.insert(papx.begin(), {0, 0});
+  style.blocks.push_back(papx);
+  style.blocks.push_back({});
+  return style;
+}
+
+std::string ConditionalBlock(const std::string& xml, const std::string& type) {
+  const std::string open = "<w:tblStylePr w:type=\"" + type + "\">";
+  size_t start = xml.find(open);
+  if (start == std::string::npos)
+    return {};
+  size_t end = xml.find("</w:tblStylePr>", start);
+  return xml.substr(start, end - start);
+}
+
+size_t CountOf(const std::string& haystack, const std::string& needle) {
+  size_t count = 0;
+  for (size_t p = haystack.find(needle); p != std::string::npos;
+       p = haystack.find(needle, p + 1)) {
+    count++;
+  }
+  return count;
+}
+}  // namespace
+
+TEST(M3Styles, TableConditionalTabsMergeWithTableStyleStops) {
+  // The table style has 1in left and 2in right. The first-row condition clears
+  // the 1in stop and adds a 1.5in one; the untouched 2in stop stays inherited.
+  model::Document d;
+  d.styles = Read(BuildStsh(
+      {TableTabsStyle({{1440, 0, 0}, {2880, 2, 0}}, {1440}, {{2160, 0, 0}})}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const std::string xml = Part(d, "word/styles.xml");
+  const std::string block = ConditionalBlock(xml, "firstRow");
+  ASSERT_FALSE(block.empty());
+  const std::string clear = "<w:tab w:val=\"clear\" w:pos=\"1440\"/>";
+  const std::string add = "<w:tab w:val=\"left\" w:pos=\"2160\"/>";
+  size_t clear_at = block.find(clear);
+  size_t add_at = block.find(add);
+  ASSERT_NE(clear_at, std::string::npos);
+  ASSERT_NE(add_at, std::string::npos);
+  EXPECT_LT(clear_at, add_at);
+  EXPECT_EQ(block.find("w:pos=\"2880\""), std::string::npos);
+}
+
+TEST(M3Styles, TableConditionalTabClearAndAddAtSamePositionKeepsAddOnly) {
+  // The operand clears the inherited 1.5in stop, then adds a right-aligned one
+  // there. The net effect is a replacement: one add, no clear.
+  model::Document d;
+  d.styles =
+      Read(BuildStsh({TableTabsStyle({{1440, 0, 0}}, {1440}, {{1440, 2, 0}})}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const std::string block =
+      ConditionalBlock(Part(d, "word/styles.xml"), "firstRow");
+  ASSERT_FALSE(block.empty());
+  EXPECT_NE(block.find("<w:tab w:val=\"right\" w:pos=\"1440\"/>"),
+            std::string::npos);
+  EXPECT_EQ(block.find("w:val=\"clear\""), std::string::npos);
+  EXPECT_EQ(CountOf(block, "w:pos=\"1440\""), 1u);
+}
+
+TEST(M3Styles, TableConditionalUnmatchedClearIsDropped) {
+  // The cleared position is not in the table style's set, so there is no stop
+  // the conditional could remove: nothing is written.
+  model::Document d;
+  d.styles = Read(BuildStsh({TableTabsStyle({{1440, 0, 0}}, {3600}, {})}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const std::string block =
+      ConditionalBlock(Part(d, "word/styles.xml"), "firstRow");
+  ASSERT_FALSE(block.empty());
+  EXPECT_EQ(block.find("<w:tabs>"), std::string::npos);
+}
+
+TEST(M3Styles, TableConditionalClearWithoutTableStyleTabsIsDropped) {
+  // A table style with no resolved tabs has no inherited stop, so an unmatched
+  // clear in its conditional block must not be emitted.
+  model::Document d;
+  d.styles = Read(BuildStsh({TableTabsStyle({}, {1440}, {})}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  EXPECT_TRUE(d.styles[0].resolved_paragraph.tabs.empty());
+  const std::string block =
+      ConditionalBlock(Part(d, "word/styles.xml"), "firstRow");
+  ASSERT_FALSE(block.empty());
+  EXPECT_EQ(block.find("<w:tabs>"), std::string::npos);
+}
+
+TEST(M3Styles, TableConditionalTabsOrderClearsThenAdditions) {
+  model::Document d;
+  d.styles =
+      Read(BuildStsh({TableTabsStyle({{1440, 0, 0}, {2880, 2, 0}}, {2880, 1440},
+                                     {{4320, 0, 0}, {2160, 2, 0}})}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const std::string block =
+      ConditionalBlock(Part(d, "word/styles.xml"), "firstRow");
+  ASSERT_FALSE(block.empty());
+  const size_t clear_1440 = block.find("w:val=\"clear\" w:pos=\"1440\"");
+  const size_t clear_2880 = block.find("w:val=\"clear\" w:pos=\"2880\"");
+  const size_t add_2160 = block.find("w:val=\"right\" w:pos=\"2160\"");
+  const size_t add_4320 = block.find("w:val=\"left\" w:pos=\"4320\"");
+  ASSERT_NE(clear_1440, std::string::npos);
+  ASSERT_NE(clear_2880, std::string::npos);
+  ASSERT_NE(add_2160, std::string::npos);
+  ASSERT_NE(add_4320, std::string::npos);
+  EXPECT_LT(clear_1440, clear_2880);
+  EXPECT_LT(clear_2880, add_2160);
+  EXPECT_LT(add_2160, add_4320);
+}
+
+TEST(M3Styles, ParagraphTabRepeatedAddThenClearLeavesNoEntry) {
+  // Two adds of a position the style does not have, then a clear: the operand
+  // cancels itself out, so neither an add nor a clear is written.
+  model::Document d;
+  d.styles = Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}})}));
+  d.paragraphs.resize(1);
+  d.paragraphs[0].style = 0;
+  d.paragraphs[0].tabs.push_back({3600, 0, 0, false});
+  d.paragraphs[0].tabs.push_back({3600, 2, 0, false});
+  d.paragraphs[0].tabs.push_back({3600, 0, 0, true});
+  const std::string xml = Part(d, "word/document.xml");
+  EXPECT_EQ(xml.find("<w:tabs>"), std::string::npos);
+}
+
+TEST(M3Styles, ParagraphTabAddAndClearAtDifferentPositionsKeepBoth) {
+  model::Document d;
+  d.styles = Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}})}));
+  d.paragraphs.resize(1);
+  d.paragraphs[0].style = 0;
+  d.paragraphs[0].tabs.push_back({4320, 2, 0, false});
+  d.paragraphs[0].tabs.push_back({1440, 0, 0, true});
+  const std::string xml = Part(d, "word/document.xml");
+  const size_t clear = xml.find("<w:tab w:val=\"clear\" w:pos=\"1440\"/>");
+  const size_t add = xml.find("<w:tab w:val=\"right\" w:pos=\"4320\"/>");
+  ASSERT_NE(clear, std::string::npos);
+  ASSERT_NE(add, std::string::npos);
+  EXPECT_LT(clear, add);
+}
+
+TEST(M3Styles, CyclicBaseChainResolvesTabsDeterministically) {
+  // A based on B and B based on A. ResolveStyle breaks the cycle; the tab path
+  // must terminate too and produce the same result on every read.
+  auto build = [] {
+    return BuildStsh({TabStyle("A", 1, {}, {{1440, 0, 0}}),
+                      TabStyle("B", 0, {}, {{2880, 2, 0}})});
+  };
+  auto first = Read(build());
+  auto second = Read(build());
+  ASSERT_EQ(first.size(), 2u);
+  ASSERT_EQ(second.size(), 2u);
+  ASSERT_EQ(first[0].resolved_paragraph.tabs.size(), 2u);
+  ASSERT_EQ(second[0].resolved_paragraph.tabs.size(), 2u);
+  for (size_t i = 0; i < 2; i++) {
+    EXPECT_EQ(first[0].resolved_paragraph.tabs[i].position,
+              second[0].resolved_paragraph.tabs[i].position);
+  }
+  EXPECT_TRUE(HasStop(first[0].resolved_paragraph.tabs, 1440));
+  EXPECT_TRUE(HasStop(first[0].resolved_paragraph.tabs, 2880));
+  model::Document d;
+  d.styles = first;
+  const std::string xml = Part(d, "word/styles.xml");
+  EXPECT_NE(xml.find("<w:tabs>"), std::string::npos);
+}
