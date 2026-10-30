@@ -1054,11 +1054,13 @@ TEST(LegacyWord, LegacyCorruptFootnotePlcWarnsAndKeepsBody) {
 // Builds a Word 6/95 document with body "A\x02\r" and one endnote body
 // "\x02E\r". 0x02 is the in-text mark for both note kinds (0x05 is the comment
 // reference). Pairs 46/47 carry PlcfendRef/PlcfendTxt in WordDocument, but
-// Word 6/95 inserts four 16-bit BTE indices after pair 37, so those slots sit
-// ten bytes past the Word 97 numbering (LibreOffice ww8scan.cxx Ver67 branch;
-// ww8scan.hxx lists fcPlcfendRef at 0x1D2 rather than 0x1C8).
+// Word 6/95 skips a 2-byte reserved field after pair 37 and then reads four
+// 16-bit BTE indices, so those slots sit ten bytes past the Word 97 numbering
+// (LibreOffice ww8scan.cxx Ver67 branch; ww8scan.hxx lists fcPlcfendRef at
+// 0x1D2 rather than 0x1C8).
 struct LegacyEndnoteSample {
   bool corrupt_reference_cps = false;
+  bool end_ref_slot_outside_word_document = false;
 };
 
 std::vector<uint8_t> Word6EndnoteDocument(uint16_t ident, uint16_t nfib,
@@ -1089,7 +1091,10 @@ std::vector<uint8_t> Word6EndnoteDocument(uint16_t ident, uint16_t nfib,
   std::copy(body.begin(), body.end(), word.begin() + kFcMin);
   std::copy(note.begin(), note.end(), word.begin() + kFcMin + body.size());
   // PlcfendRef: two CPs (reference site 1, guard 3) then one 2-byte FRD.
-  Put32(word, kEndRefSlot, kRefPlc);
+  Put32(word, kEndRefSlot,
+        sample.end_ref_slot_outside_word_document
+            ? static_cast<uint32_t>(word.size())
+            : static_cast<uint32_t>(kRefPlc));
   Put32(word, kEndRefSlot + 4, 10);
   Put32(word, kRefPlc, 1);
   Put32(word, kRefPlc + 4, sample.corrupt_reference_cps ? 0 : 3);
@@ -1156,6 +1161,24 @@ TEST(LegacyWord, LegacyCorruptEndnotePlcWarnsAndKeepsBody) {
   auto zip = doccraft::docx::Write(*document);
   ASSERT_TRUE(zip) << zip.error().message;
   EXPECT_TRUE(Part(*zip, "word/endnotes.xml").empty());
+}
+
+TEST(LegacyWord, Word95EndnoteSlotOutsideWordDocumentFails) {
+  const struct {
+    uint16_t ident;
+    uint16_t nfib;
+  } kSignatures[] = {{0xA5DC, 0x65}, {0xA699, 0x68}};
+  for (const auto& signature : kSignatures) {
+    SCOPED_TRACE(signature.nfib);
+    LegacyEndnoteSample sample;
+    sample.end_ref_slot_outside_word_document = true;
+    auto word = Word6EndnoteDocument(signature.ident, signature.nfib, sample);
+    auto document = ParseWord6(word);
+    ASSERT_FALSE(document);
+    // An fc/lcb slot pointing past WordDocument is FIB structural damage, so
+    // the whole document is rejected like the footnote pairs.
+    EXPECT_NE(document.error().message.find("FIB range"), std::string::npos);
+  }
 }
 
 TEST(LegacyWord, MissingLegacySectionTableWarnsAndDefaultsStories) {
