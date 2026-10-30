@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>doccraft — high-fidelity .doc to .docx converter</title>
+<style>
+body{font:16px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1a1a1a}
+h1{border-bottom:2px solid #1f6feb;padding-bottom:.3rem}
+h2{margin-top:2rem}
+table{border-collapse:collapse;margin:1rem 0;width:100%}
+th,td{border:1px solid #d0d7de;padding:.4rem .6rem;text-align:left}
+th{background:#f6f8fa}
+code{background:#f6f8fa;padding:.1rem .3rem;border-radius:4px;font-size:.9em}
+pre code{display:block;padding:1rem;overflow-x:auto}
+img{max-width:100%;border:1px solid #d0d7de;margin:.5rem 0}
+li{margin:.2rem 0}
+a{color:#1f6feb}
+</style>
+</head>
+<body>
+<h1>doccraft</h1>
+<p>High-fidelity <code>.doc</code> → <code>.docx</code> conversion in C++23, packaged as a single binary</p>
+<p>with no third-party runtime dependencies.</p>
+<p>doccraft reads Word 97–2003 binary documents and writes ECMA-376 Transitional</p>
+<p>DOCX. It runs locally without an Office installation. The converter is at</p>
+<p><strong>v0.9.0-rc1 preparation</strong>: the main feature paths are implemented, while M6</p>
+<p>hardening remains open.</p>
+<h2>Quick start</h2>
+<p>Requires CMake 3.20+, a C++23 compiler, and network access for the first</p>
+<p>configure to fetch GoogleTest. The conversion binary itself has no runtime</p>
+<p>Office or third-party library requirement.</p>
+<pre><code>cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+
+build/src/cli/doccraft convert input.doc -o output.docx
+build/src/cli/doccraft convert protected.doc --password secret -o output.docx
+build/src/cli/doccraft inspect input.doc</code></pre>
+<h2>Platform support</h2>
+<p>The conversion core (<code>src/base</code>, <code>src/cfb</code>, <code>src/doc</code>, <code>src/model</code>, <code>src/docx</code>)</p>
+<p>is standard C++23 plus vendored miniz and pugixml, and calls no operating</p>
+<p>system service. Only two places are platform-specific: <code>src/cli</code> (files and</p>
+<p>stdio) and the ANSI code-page decoder in <code>src/base/charset.cc</code>. Targets without</p>
+<p>a command line use the C API in <a href="src/api/doccraft_api.h"><code>src/api/doccraft_api.h</code></a>:</p>
+<p>one <code>.doc</code> buffer in, one <code>.docx</code> buffer out.</p>
+<table><tr><th>Target</th><th>Artifact</th><th>ANSI code pages</th><th>Verified</th></tr><tr><td>Linux</td><td>CLI + libraries</td><td>iconv (glibc)</td><td>built and tested in CI</td></tr><tr><td>macOS</td><td>CLI + libraries</td><td>iconv (libSystem)</td><td>built and tested in CI</td></tr><tr><td>Windows</td><td>CLI + libraries</td><td><code>MultiByteToWideChar</code></td><td>built and tested in CI (MSVC, warnings-as-errors off)</td></tr><tr><td>Android (NDK)</td><td>libraries + C API</td><td>iconv (bionic), else CP1252 only</td><td>CMake options in place, toolchain not run here</td></tr><tr><td>iOS</td><td>libraries + C API</td><td>iconv (libSystem), else CP1252 only</td><td>CMake options in place, toolchain not run here</td></tr><tr><td>WebAssembly</td><td>libraries + C API</td><td>CP1252 only</td><td>library-only build verified on Linux, emsdk not run here</td></tr></table>
+<p>Build the library and C API only (the shape the embedded targets use):</p>
+<pre><code>cmake -B build-lib -DCMAKE_BUILD_TYPE=Release \
+      -DDOCCRAFT_BUILD_CLI=OFF -DDOCCRAFT_BUILD_TESTS=OFF
+cmake --build build-lib -j</code></pre>
+<p>WebAssembly, Android and iOS cross builds use the same two options with the</p>
+<p>toolchain on the command line:</p>
+<pre><code># WebAssembly (needs emsdk on PATH)
+emcmake cmake -B build-wasm -DDOCCRAFT_BUILD_CLI=OFF -DDOCCRAFT_BUILD_TESTS=OFF
+cmake --build build-wasm -j
+
+# Android (the NDK ships its own toolchain file)
+cmake -B build-android -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+      -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-21 \
+      -DDOCCRAFT_BUILD_CLI=OFF -DDOCCRAFT_BUILD_TESTS=OFF
+cmake --build build-android -j
+
+# iOS (community toolchain, e.g. ios-cmake 4.x)
+cmake -B build-ios -G Xcode \
+      -DCMAKE_TOOLCHAIN_FILE=ios.toolchain.cmake -DPLATFORM=OS64 \
+      -DDOCCRAFT_BUILD_CLI=OFF -DDOCCRAFT_BUILD_TESTS=OFF
+cmake --build build-ios --config Release</code></pre>
+<p>Boundaries that matter on those targets:</p>
+<li><strong>WebAssembly has no file system</strong>, so no CLI is built there; the C API is the</li>
+<p>  only entry point. With neither iconv nor <code>MultiByteToWideChar</code>, only CP1252</p>
+<p>  decodes correctly - <code>doccraft_supports_codepage()</code> reports false for the other</p>
+<p>  ANSI pages and the converter degrades their text to a CP1252 approximation.</p>
+<li><strong>Windows</strong>: <code>permissions()</code> there only carries the read-only attribute, so</li>
+<p>  input validation also probes with an open; diagnostics are written in binary</p>
+<p>  mode so they stay byte-identical to the POSIX builds. The CLI takes narrow</p>
+<p>  (ANSI code page) paths because that is what <code>argv</code> holds - pass UTF-8 paths on</p>
+<p>  Windows through the C API instead.</p>
+<li><strong>iOS and Android</strong> ship no command line either. Only the library and C API</li>
+<p>  boundary is provided; a JNI wrapper and a Swift package are separate work.</p>
+<li><strong>CP1255 (Hebrew) and CP1258 (Vietnamese)</strong> decode one character behind on</li>
+<p>  glibc, because its tables are stateful and the decoder is per-character; see</p>
+<p>  <a href="https://github.com/congduan/doccraft/blob/main/docs/KNOWN-SIMPLIFICATIONS.md">known simplifications</a>.</p>
+<h2>What it handles</h2>
+<li>Text and formatting: ANSI and UTF-16 pieces; character, paragraph, and</li>
+<p>  section properties; styles, numbering, headers, footers, and multiple</p>
+<p>  sections.</p>
+<li>Structure: tables, hyperlinks and general fields, bookmarks, comments,</li>
+<p>  footnotes, and endnotes.</p>
+<li>Embedded content: inline and floating images, main-story floating text</li>
+<p>  boxes, and OLE ObjectPool payloads with field-result previews.</p>
+<li>Languages: Unicode text, RTL and complex-script formatting, and document</li>
+<p>  language ID to ANSI code-page mapping. The implementation lists 15 code-page</p>
+<p>  decoders; non-CP1252 decoding requires iconv at build time.</p>
+<li>Recovery: final piece-table reconstruction for fast-saved documents,</li>
+<p>  legacy RC4 and RC4 CryptoAPI decryption with a password, and warnings for</p>
+<p>  selected recoverable formatting or header damage.</p>
+<p>Feature states and their boundaries are in <a href="https://github.com/congduan/doccraft/blob/main/docs/DESIGN.md">the design checklist</a></p>
+<p>and <a href="https://github.com/congduan/doccraft/blob/main/docs/KNOWN-SIMPLIFICATIONS.md">known simplifications</a>. The applicable sprm</p>
+<p>ledger is tracked in <a href="https://github.com/congduan/doccraft/blob/main/docs/SPRM-COVERAGE.md">SPRM coverage</a>.</p>
+<h2>Measured performance</h2>
+<p>The five committed measurements below come from</p>
+<p><a href="tests/perf/baseline.json"><code>tests/perf/baseline.json</code></a>. The benchmark converts</p>
+<p>generated structured DOC files five times per size; wall time is the median,</p>
+<p>and peak RSS is the maximum of those runs. These are measurements from that</p>
+<p>baseline, not cross-machine guarantees.</p>
+<table><tr><th>Input DOC</th><th>Actual size</th><th>Median wall time</th><th>Peak RSS</th></tr><tr><td>1 MiB tier</td><td>1.00 MiB</td><td>0.037 s</td><td>16.6 MiB</td></tr><tr><td>5 MiB tier</td><td>5.00 MiB</td><td>0.180 s</td><td>68.3 MiB</td></tr><tr><td>20 MiB tier</td><td>20.00 MiB</td><td>0.905 s</td><td>261.8 MiB</td></tr><tr><td>50 MiB tier</td><td>50.24 MiB</td><td>1.111 s</td><td>322.2 MiB</td></tr><tr><td>100 MiB tier</td><td>99.99 MiB</td><td>3.990 s</td><td>1,287.9 MiB</td></tr></table>
+<p>Reproduce with <code>tests/perf/gen_corpus.py</code> and <code>tests/perf/run_perf.py</code> after</p>
+<p>building the converter. The 100 MiB result shows that memory use is not yet</p>
+<p>bounded; streaming and an explicit memory cap are M6 work.</p>
+<h2>Visual fidelity</h2>
+<p>The <a href="tests/pixelcompare/README.md">pixel comparison pipeline</a> renders the same</p>
+<p>source <code>.doc</code> through two LibreOffice paths: source DOC → PDF → PNG, and source</p>
+<p>DOC → doccraft DOCX → PDF → PNG. It compares corresponding pages at 150 DPI,</p>
+<p>rejecting a page with a size mismatch or at least 0.1% pixels differing by</p>
+<p>more than 16 grayscale levels. Page-count exceptions require a sample-specific</p>
+<p><code>.allow</code> file.</p>
+<p>At the current baseline, <strong>28 of 33 committed DOC samples pass</strong>, four fail,</p>
+<p>and one cannot be rendered from the output DOCX by LibreOffice. See the</p>
+<p><a href="https://github.com/congduan/doccraft/blob/main/docs/PIXEL-BASELINE.md">per-sample record</a> for the version, exceptions, and</p>
+<p>failures. Pixel agreement in LibreOffice does not establish identical rendering</p>
+<p>in Microsoft Word.</p>
+<h3>Example gallery</h3>
+<p>Each image shows <strong>source DOC on the left</strong> and <strong>doccraft DOCX on the right</strong>,</p>
+<p>both rendered by LibreOffice. These are unretouched first-page captures at</p>
+<p>100 DPI; the <a href="tools/gen_gallery.py">gallery generator</a> can regenerate or check</p>
+<p>their bytes. The fast-saved and OLE examples demonstrate conversion, not a</p>
+<p>pixel PASS claim.</p>
+<table><tr><th>Plain text</th><th>Complex table</th></tr><tr><td><img alt="Plain text source and conversion" src="gallery/plain-text.png"></td><td><img alt="Complex table source and conversion" src="gallery/complex-table.png"></td></tr></table>
+<table><tr><th>CJK text</th><th>Inline image</th></tr><tr><td><img alt="CJK source and conversion" src="gallery/cjk-text.png"></td><td><img alt="Inline image source and conversion" src="gallery/inline-image.png"></td></tr></table>
+<table><tr><th>Floating text box</th><th>OLE object</th></tr><tr><td><img alt="Text box source and conversion" src="gallery/textbox.png"></td><td><img alt="OLE source and conversion" src="gallery/ole-embedded.png"></td></tr></table>
+<table><tr><th>Fast-saved document, first page</th></tr><tr><td><img alt="Fast-saved source and conversion" src="gallery/fast-saved-o-kurs.png"></td></tr></table>
+<p>Regenerate after building the CLI with <code>python3 tools/gen_gallery.py</code>; verify</p>
+<p>the checked-in PNGs with <code>python3 tools/gen_gallery.py --check</code>. This needs</p>
+<p>LibreOffice, Poppler's <code>pdftoppm</code>, and Pillow.</p>
+<h2>Architecture</h2>
+<pre><code>CFB container (src/cfb) → DOC parser (src/doc) → neutral IR (src/model)
+                                                  ↓
+                                         DOCX writer (src/docx)</code></pre>
+<p>The four layers pass data in one direction. Shared byte and character decoding</p>
+<p>primitives live in <code>src/base</code>; the DOC parser and DOCX writer meet only through</p>
+<p>the format-neutral model. See <a href="https://github.com/congduan/doccraft/blob/main/docs/DESIGN.md">DESIGN</a> for the full layout.</p>
+<h2>Known limits</h2>
+<li>Password-protected documents are decrypted from <code>--password</code> for XOR</li>
+<p>  obfuscation, legacy RC4/MD5 and RC4 CryptoAPI/SHA-1. Non-ASCII XOR passwords</p>
+<p>  and interoperability with a Word-produced encrypted sample are still unverified.</p>
+<li>Basic floating shapes and WordArt become positioned VML placeholders with</li>
+<p>  shape type, solid fill, line colour/width and available text. Pattern and</p>
+<p>  gradient fills, rotation, curve geometry and shape text wrap may differ, and</p>
+<p>  floating image wrap polygons are still rectangular.</p>
+<li>Fast-saved samples can preserve text while changing pagination. OLE objects</li>
+<p>  without a field-result image use an EMF/WMF or CF_DIB (bitmap) OlePres preview;</p>
+<p>  <code>\3EPRINT</code> previews and linked-object semantics can remain blank.</p>
+<li>Word 6/95 files read text, core character/paragraph formatting and styles;</li>
+<p>  legacy tabs are dropped, full legacy table properties, headers/footers and</p>
+<p>  non-WMF pictures are not converted, and output layout may degrade.</p>
+<li>Memory is not bounded: very large documents keep the decoded text buffer and</li>
+<p>  the CFB input in RAM until conversion completes (100 MiB ≈ 1.3 GiB RSS).</p>
+<li>The DOCX schema validator checks element structure of the 2006 WordprocessingML</li>
+<p>  namespace; attribute validity, relationship targets and extension-namespace</p>
+<p>  placement are not verified.</p>
+<p>The detailed list is in <a href="https://github.com/congduan/doccraft/blob/main/docs/KNOWN-SIMPLIFICATIONS.md">KNOWN-SIMPLIFICATIONS</a>.</p>
+<h2>License and specifications</h2>
+<p>Licensed under <a href="LICENSE">Apache-2.0</a>. The parser follows</p>
+<p>[[MS-CFB]](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/)</p>
+<p>and [[MS-DOC]](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-doc/);</p>
+<p>the writer targets <a href="https://ecma-international.org/publications-and-standards/standards/ecma-376/">ECMA-376</a></p>
+<p>Transitional OOXML.</p>
+<p><a href="https://github.com/congduan/doccraft">View source on GitHub</a></p>
+</body>
+</html>
