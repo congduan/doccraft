@@ -196,32 +196,33 @@ TEST(M3Batch2, TabStopAlignmentAndLeader) {
 }
 
 TEST(M3Batch2, ChgTabsDeletedStopsBecomeClear) {
-  // [MS-DOC] 2.9.183: a PChgTabsOperand lists the deleted positions before the
-  // added ones, so the IR keeps that order and marks each deleted stop as
-  // clear. sprmPChgTabsPapx deletes with 2-byte XAS entries.
-  const std::vector<uint8_t> operand = {9,    2, 0xD0, 0x02, 0xA0,
-                                        0xFA, 1, 0x10, 0x0E, 0x22};
+  // [MS-DOC] 2.9.183: a PChgTabsOperand lists the deleted positions (in
+  // ascending order) before the added ones, so the IR keeps that order and
+  // marks each deleted stop as clear. sprmPChgTabsPapx deletes with 2-byte
+  // XAS entries.
+  const std::vector<uint8_t> operand = {9,    2, 0xA0, 0xFA, 0xD0,
+                                        0x02, 1, 0x10, 0x0E, 0x22};
   auto d = Synthetic(Prl(0xC60D, operand), {});
   ASSERT_TRUE(d.has_value()) << d.error().message;
   const auto& tabs = d->paragraphs[0].tabs;
   ASSERT_EQ(tabs.size(), 3u);
   EXPECT_TRUE(tabs[0].clear);
-  EXPECT_EQ(tabs[0].position, 720);
+  EXPECT_EQ(tabs[0].position, -1376);
   EXPECT_TRUE(tabs[1].clear);
-  EXPECT_EQ(tabs[1].position, -1376);
+  EXPECT_EQ(tabs[1].position, 720);
   EXPECT_FALSE(tabs[2].clear);
   EXPECT_EQ(tabs[2].position, 3600);
   EXPECT_EQ(tabs[2].align, 2);
   EXPECT_EQ(tabs[2].leader, 4);
   auto xml = Xml(*d);
-  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"720\"/>"),
-            std::string::npos);
   EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"-1376\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"720\"/>"),
             std::string::npos);
   EXPECT_NE(
       xml.find("<w:tab w:val=\"right\" w:pos=\"3600\" w:leader=\"heavy\"/>"),
       std::string::npos);
-  EXPECT_LT(xml.find("w:val=\"clear\" w:pos=\"720\""),
+  EXPECT_LT(xml.find("w:val=\"clear\" w:pos=\"-1376\""),
             xml.find("w:val=\"right\" w:pos=\"3600\""));
 }
 
@@ -276,6 +277,23 @@ TEST(M3Batch2, ChgTabsTruncatedDeleteListAddsNoStops) {
   // The deleted count runs past the operand, so no position can be read: the
   // whole modifier is rejected instead of emitting a bogus clear stop.
   auto d = Synthetic(Prl(0xC60D, {3, 40, 0xD0, 0x02}), {});
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  EXPECT_TRUE(d->paragraphs[0].tabs.empty());
+}
+
+TEST(M3Batch2, ChgTabsDeletedCountAboveMaxAddsNoStops) {
+  // [MS-DOC] 2.9.180 and 2.9.183 cap both counts at 64. A deleted count of 65
+  // must reject the whole operand, matching the added-count overflow path
+  // instead of emitting 65 clear stops.
+  std::vector<uint8_t> operand = {0x87, 65};
+  for (uint16_t i = 1; i <= 65; i++) {
+    const uint16_t pos = static_cast<uint16_t>(i * 20);
+    operand.push_back(static_cast<uint8_t>(pos));
+    operand.push_back(static_cast<uint8_t>(pos >> 8));
+  }
+  operand.push_back(1);  // One added stop follows the deleted list.
+  operand.insert(operand.end(), {0x10, 0x0E, 0x22});
+  auto d = Synthetic(Prl(0xC60D, operand), {});
   ASSERT_TRUE(d.has_value()) << d.error().message;
   EXPECT_TRUE(d->paragraphs[0].tabs.empty());
 }

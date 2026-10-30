@@ -125,7 +125,7 @@
 | ✅ | `0x260A` | sprmPIlvl | An unsigned 8-bit integer that specifies the list level of the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0x460B` | sprmPIlfo | A 16-bit signed integer value that is used to determine which list contains the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0x240C` | sprmPFNoLineNumb | A Bool8 value that specifies whether this paragraph is ignored when the application counts or displays line numbers. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
-| ✅ | `0xC60D` | sprmPChgTabsPapx | A PChgTabsPapxOperand value that specifies custom tab stops to be added or ignored. | 段落 PAP §2.6.2；删除项（PChgTabsDel 的 2 字节 XAS 数组）与新增项按操作数顺序进入 `Paragraph::tabs`，分别输出 `w:tab w:val="clear"` 与对齐/leader 项；计数越界整条丢弃；`M3Batch2.ChgTabsDeletedStopsBecomeClear`、`M3Batch2.ChgTabsTruncatedDeleteListAddsNoStops` |
+| ✅ | `0xC60D` | sprmPChgTabsPapx | A PChgTabsPapxOperand value that specifies custom tab stops to be added or ignored. | 段落 PAP §2.6.2；删除项（PChgTabsDel 的 2 字节 XAS 数组，升序）与新增项按操作数顺序进入 `Paragraph::tabs`，分别输出 `w:tab w:val="clear"` 与对齐/leader 项；删除/新增计数超过 64 或越界时整条丢弃；`M3Batch2.ChgTabsDeletedStopsBecomeClear`、`M3Batch2.ChgTabsTruncatedDeleteListAddsNoStops`、`M3Batch2.ChgTabsDeletedCountAboveMaxAddsNoStops` |
 | ✅ | `0x840E` | sprmPDxaRight80 | An XAS value that specifies the physical right indent of the paragraph, in twips. | 段落 PAP §2.6.2 |
 | ✅ | `0x840F` | sprmPDxaLeft80 | An XAS value that specifies the physical left indent of the paragraph, in twips. | 段落 PAP §2.6.2 |
 | ✅ | `0x4610` | sprmPNest80 | An XAS value that is added to sprmPDxaLeft80 to specify the final indent of a paragraph. | 段落 PAP §2.6.2；累加到 w:ind/@w:left；M3Batch7.ParagraphNestAndListLevelIncrement |
@@ -133,7 +133,7 @@
 | ✅ | `0x6412` | sprmPDyaLine | An LSPD value that specifies the spacing between lines in this paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xA413` | sprmPDyaBefore | A two-byte unsigned integer value that specifies the size, in twips, of the spacing before this paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xA414` | sprmPDyaAfter | A two-byte unsigned integer value that specifies the size, in twips, of the spacing after this paragraph. | 段落 PAP §2.6.2 |
-| ✅ | `0xC615` | sprmPChgTabs | A PChgTabsOperand value that specifies custom tab stops that are added or ignored. | 段落 PAP §2.6.2；删除段为 rgdxaDel 位置数组 + rgdxaClose 半径数组（[MS-DOC] 2.9.181，位置连续存放），半径折叠为位置上的单点 `w:tab w:val="clear"`；`M3Batch2.ChgTabsCloseFormKeepsContiguousPositionArray`、`M3Batch2.ChgTabsCloseFormDeletedStopUsesXasOnly` |
+| ✅ | `0xC615` | sprmPChgTabs | A PChgTabsOperand value that specifies custom tab stops that are added or ignored. | 段落 PAP §2.6.2；删除段为 rgdxaDel 位置数组 + rgdxaClose 半径数组（[MS-DOC] 2.9.181，位置连续存放），半径折叠为位置上的单点 `w:tab w:val="clear"`；删除/新增计数超过 64 或越界时整条丢弃；`M3Batch2.ChgTabsCloseFormKeepsContiguousPositionArray`、`M3Batch2.ChgTabsCloseFormDeletedStopUsesXasOnly` |
 | ✅ | `0x2416` | sprmPFInTable | A Bool8 value that specifies whether this paragraph is in a table.；M3Batch3.TDefTableCellWidthBorderAndMerge | 段落 PAP §2.6.2 |
 | ✅ | `0x2417` | sprmPFTtp | A Bool8 that, when set to 1, specifies that the cell mark it is applied to is a Table Terminating Paragraph (TTP) mark.；M3Batch3.TDefTableCellWidthBorderAndMerge | 段落 PAP §2.6.2 |
 | ✅ | `0x8418` | sprmPDxaAbs | Horizontal absolute position of the paragraph frame relative to its anchor. | 段落 PAP §2.6.2；w:framePr/@w:x；M3Batch7.ParagraphFrameGeometry |

@@ -949,7 +949,7 @@ void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v) {
            delbytes = (op == kSprmPChgTabs ? kTabDelClosePositionSize
                                            : kTabDelPositionSize) *
                       deleted;
-    if (delbytes > v.size() - x)
+    if (deleted > kMaxTabStops || delbytes > v.size() - x)
       return;
     const size_t del_offset = x;
     x += delbytes;
