@@ -1051,6 +1051,113 @@ TEST(LegacyWord, LegacyCorruptFootnotePlcWarnsAndKeepsBody) {
   ASSERT_TRUE(zip) << zip.error().message;
 }
 
+// Builds a Word 6/95 document with body "A\x02\r" and one endnote body
+// "\x02E\r". 0x02 is the in-text mark for both note kinds (0x05 is the comment
+// reference). Pairs 46/47 carry PlcfendRef/PlcfendTxt in WordDocument, but
+// Word 6/95 inserts four 16-bit BTE indices after pair 37, so those slots sit
+// ten bytes past the Word 97 numbering (LibreOffice ww8scan.cxx Ver67 branch;
+// ww8scan.hxx lists fcPlcfendRef at 0x1D2 rather than 0x1C8).
+struct LegacyEndnoteSample {
+  bool corrupt_reference_cps = false;
+};
+
+std::vector<uint8_t> Word6EndnoteDocument(uint16_t ident, uint16_t nfib,
+                                          const LegacyEndnoteSample& sample) {
+  constexpr size_t kFcMin = 768;
+  constexpr size_t kRefPlc = 900;
+  constexpr size_t kTxtPlc = 920;
+  constexpr size_t kLegacyPairShift = 10;
+  constexpr size_t kEndRefSlot = 88 + 46 * 8 + kLegacyPairShift;
+  constexpr size_t kEndTxtSlot = 88 + 47 * 8 + kLegacyPairShift;
+  std::string body = "A";
+  body.push_back('\x02');
+  body.push_back('\r');
+  std::string note;
+  note.push_back('\x02');
+  note += "E\r";
+  std::vector<uint8_t> word(2048, 0);
+  Put16(word, 0, ident);
+  Put16(word, 2, nfib);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, kFcMin);
+  Put32(word, 52, static_cast<uint32_t>(body.size()));
+  Put32(word, 56, 0);
+  Put32(word, 60, 0);
+  Put32(word, 68, 0);
+  Put32(word, 72, static_cast<uint32_t>(note.size()));
+  Put32(word, 28, static_cast<uint32_t>(kFcMin + body.size() + note.size()));
+  std::copy(body.begin(), body.end(), word.begin() + kFcMin);
+  std::copy(note.begin(), note.end(), word.begin() + kFcMin + body.size());
+  // PlcfendRef: two CPs (reference site 1, guard 3) then one 2-byte FRD.
+  Put32(word, kEndRefSlot, kRefPlc);
+  Put32(word, kEndRefSlot + 4, 10);
+  Put32(word, kRefPlc, 1);
+  Put32(word, kRefPlc + 4, sample.corrupt_reference_cps ? 0 : 3);
+  // PlcfendTxt: one note plus a trailing guard.
+  Put32(word, kEndTxtSlot, kTxtPlc);
+  Put32(word, kEndTxtSlot + 4, 8);
+  Put32(word, kTxtPlc, 0);
+  Put32(word, kTxtPlc + 4, static_cast<uint32_t>(note.size()));
+  return word;
+}
+
+void ExpectSingleEndnote(const doccraft::model::Document& document) {
+  ASSERT_EQ(document.notes.size(), 1u);
+  EXPECT_TRUE(document.notes[0].endnote);
+  ASSERT_EQ(document.notes[0].paragraphs.size(), 1u);
+  ASSERT_EQ(document.notes[0].paragraphs[0].runs.size(), 1u);
+  EXPECT_EQ(document.notes[0].paragraphs[0].runs[0].text, "E");
+  bool has_reference = false;
+  for (const auto& run : document.paragraphs[0].runs)
+    has_reference = has_reference || (run.note_ref == 1 && run.note_endnote);
+  EXPECT_TRUE(has_reference);
+}
+
+TEST(LegacyWord, Word6EndnoteBodyReachesDocx) {
+  auto word = Word6EndnoteDocument(0xA5DC, 0x65, {});
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ExpectSingleEndnote(*document);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string endnotes = Part(*zip, "word/endnotes.xml");
+  ASSERT_FALSE(endnotes.empty());
+  EXPECT_EQ(Count(endnotes, "<w:endnote w:id="), 1u);
+  EXPECT_NE(endnotes.find(">E</w:t>"), std::string::npos);
+  EXPECT_NE(
+      Part(*zip, "word/document.xml").find("<w:endnoteReference w:id=\"1\"/>"),
+      std::string::npos);
+}
+
+TEST(LegacyWord, Word95EndnoteBodyReachesDocx) {
+  auto word = Word6EndnoteDocument(0xA699, 0x68, {});
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ExpectSingleEndnote(*document);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/endnotes.xml").find(">E</w:t>"),
+            std::string::npos);
+  EXPECT_NE(
+      Part(*zip, "word/document.xml").find("<w:endnoteReference w:id=\"1\"/>"),
+      std::string::npos);
+}
+
+TEST(LegacyWord, LegacyCorruptEndnotePlcWarnsAndKeepsBody) {
+  LegacyEndnoteSample sample;
+  sample.corrupt_reference_cps = true;
+  auto word = Word6EndnoteDocument(0xA5DC, 0x65, sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_TRUE(document->notes.empty());
+  ASSERT_FALSE(document->paragraphs.empty());
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "A");
+  EXPECT_EQ(CountWarnings(document->warnings, "skipped endnote story PLC"), 1u);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_TRUE(Part(*zip, "word/endnotes.xml").empty());
+}
+
 TEST(LegacyWord, MissingLegacySectionTableWarnsAndDefaultsStories) {
   auto sample = HeaderSample({"EH\r", "OH\r", "EF\r", "OF\r"}, {0x12}, {5});
   sample.missing_sed = true;
