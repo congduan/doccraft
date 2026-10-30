@@ -254,7 +254,7 @@
 | ✅ | `0xD62D` | sprmTSetShd | A TableShadeOperand value that specifies a set of cells in a table row and the background shading for each cell. | 表格 TAP §2.6.3 |
 | ✅ | `0xD62E` | sprmTSetShdOdd | A TableShadeOperand value that specifies a set of cells in a table row and the background shading for odd numbered cells in that set. | 表格 TAP §2.6.3 |
 | ✅ | `0xD62F` | sprmTSetBrc | A TableBrcOperand value that specifies the border type of a set of cells in a table row. | 表格 TAP §2.6.3 |
-| ✅ | `0xD632` | sprmTCellPadding | A CSSAOperand value that specifies the cell margin for one or more cell sides. cssa.ftsWidth MUST be ftsNil (0x00) or ftsDxa (0x03). | 表格 TAP §2.6.3 |
+| ✅ | `0xD632` | sprmTCellPadding | A CSSAOperand value that specifies the cell margin for one or more cell sides. cssa.ftsWidth MUST be ftsNil (0x00) or ftsDxa (0x03). | 表格 TAP §2.6.3；`M3Batch3.TableCellPaddingIgnoresEmptyCellRange`；`M3Batch3.TableCellPaddingClampsRangeToRow`；`M3Batch3.TableCellPaddingStillRejectsMalformedOperands` |
 | ✅ | `0xD633` | sprmTCellSpacingDefault | A CSSAOperand that specifies the cell spacing for each cell in the entire row. cssa.itc.itcFirst MUST be 0, cssa.itc.itcLim MUST be 1, cssa.grfbrc MUST be fbrcSidesOnly (0x0F), cssa.ftsWidth… | 表格 TAP §2.6.3 |
 | ✅ | `0xD634` | sprmTCellPaddingDefault | A CSSAOperand that specifies the cell margin for one or more cell sides for each cell in the entire row. cssa.itc.itcFirst MUST be 0, cssa.itc.itcLim MUST be 1, cssa.ftsWidth MUST be ftsNil… | 表格 TAP §2.6.3 |
 | ✅ | `0xD635` | sprmTCellWidth | Preferred width of one or more table cells. | 表格 TAP §2.6.3 |
