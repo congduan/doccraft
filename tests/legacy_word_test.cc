@@ -488,19 +488,42 @@ TEST(LegacyWord, Word6ChgTabsPapxReachesDocx) {
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->paragraphs.size(), 1u);
   const auto& tabs = document->paragraphs[0].tabs;
-  ASSERT_EQ(tabs.size(), 2u);
-  EXPECT_EQ(tabs[0].position, 720);
-  EXPECT_EQ(tabs[0].align, 1);
-  EXPECT_EQ(tabs[0].leader, 1);
-  EXPECT_EQ(tabs[1].position, 1440);
-  EXPECT_EQ(tabs[1].align, 2);
-  EXPECT_EQ(tabs[1].leader, 0);
+  ASSERT_EQ(tabs.size(), 3u);
+  EXPECT_TRUE(tabs[0].clear);
+  EXPECT_EQ(tabs[0].position, -720);
+  EXPECT_EQ(tabs[1].position, 720);
+  EXPECT_EQ(tabs[1].align, 1);
+  EXPECT_EQ(tabs[1].leader, 1);
+  EXPECT_EQ(tabs[2].position, 1440);
+  EXPECT_EQ(tabs[2].align, 2);
+  EXPECT_EQ(tabs[2].leader, 0);
   auto zip = doccraft::docx::Write(*document);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"-720\"/>"),
+            std::string::npos);
   EXPECT_NE(xml.find("<w:tab w:val=\"center\" w:pos=\"720\" w:leader=\"dot\""),
             std::string::npos);
   EXPECT_NE(xml.find("<w:tab w:val=\"right\" w:pos=\"1440\""),
+            std::string::npos);
+}
+
+TEST(LegacyWord, Word6ChgTabsClearOnlyReachesDocx) {
+  // The gap r36 closes: a paragraph that only deletes a style-inherited stop.
+  // sprmPChgTabsPapx with one deleted position and no additions must still
+  // emit w:tab w:val="clear" so Word drops the inherited stop.
+  auto document = ParseWord6(
+      Word6PapxDocumentWithWideGrpprl({0x0F, 0x04, 0x01, 0xD0, 0x02, 0x00}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  const auto& tabs = document->paragraphs[0].tabs;
+  ASSERT_EQ(tabs.size(), 1u);
+  EXPECT_TRUE(tabs[0].clear);
+  EXPECT_EQ(tabs[0].position, 720);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_NE(Part(*zip, "word/document.xml")
+                .find("<w:tab w:val=\"clear\" w:pos=\"720\"/>"),
             std::string::npos);
 }
 
@@ -514,14 +537,18 @@ TEST(LegacyWord, Word6ChgTabsFlatFormReachesDocx) {
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->paragraphs.size(), 1u);
   const auto& tabs = document->paragraphs[0].tabs;
-  ASSERT_EQ(tabs.size(), 1u);
-  EXPECT_EQ(tabs[0].position, 720);
-  EXPECT_EQ(tabs[0].align, 1);
-  EXPECT_EQ(tabs[0].leader, 1);
+  ASSERT_EQ(tabs.size(), 2u);
+  EXPECT_TRUE(tabs[0].clear);
+  EXPECT_EQ(tabs[0].position, -720);
+  EXPECT_EQ(tabs[1].position, 720);
+  EXPECT_EQ(tabs[1].align, 1);
+  EXPECT_EQ(tabs[1].leader, 1);
   auto zip = doccraft::docx::Write(*document);
   ASSERT_TRUE(zip) << zip.error().message;
-  EXPECT_NE(Part(*zip, "word/document.xml")
-                .find("<w:tab w:val=\"center\" w:pos=\"720\" w:leader=\"dot\""),
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"-720\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:tab w:val=\"center\" w:pos=\"720\" w:leader=\"dot\""),
             std::string::npos);
 }
 

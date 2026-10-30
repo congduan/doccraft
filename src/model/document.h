@@ -181,6 +181,10 @@ struct Run {
 
 struct TabStop {
   int position = 0, align = 0, leader = 0;
+  // A ChgTabs deleted entry: it removes a stop inherited from the style rather
+  // than adding one, so align/leader stay at their defaults and the writer
+  // emits w:val="clear".
+  bool clear = false;
 };
 
 struct Paragraph {

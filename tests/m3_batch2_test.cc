@@ -195,6 +195,91 @@ TEST(M3Batch2, TabStopAlignmentAndLeader) {
   }
 }
 
+TEST(M3Batch2, ChgTabsDeletedStopsBecomeClear) {
+  // [MS-DOC] 2.9.183: a PChgTabsOperand lists the deleted positions before the
+  // added ones, so the IR keeps that order and marks each deleted stop as
+  // clear. sprmPChgTabsPapx deletes with 2-byte XAS entries.
+  const std::vector<uint8_t> operand = {9,    2, 0xD0, 0x02, 0xA0,
+                                        0xFA, 1, 0x10, 0x0E, 0x22};
+  auto d = Synthetic(Prl(0xC60D, operand), {});
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  const auto& tabs = d->paragraphs[0].tabs;
+  ASSERT_EQ(tabs.size(), 3u);
+  EXPECT_TRUE(tabs[0].clear);
+  EXPECT_EQ(tabs[0].position, 720);
+  EXPECT_TRUE(tabs[1].clear);
+  EXPECT_EQ(tabs[1].position, -1376);
+  EXPECT_FALSE(tabs[2].clear);
+  EXPECT_EQ(tabs[2].position, 3600);
+  EXPECT_EQ(tabs[2].align, 2);
+  EXPECT_EQ(tabs[2].leader, 4);
+  auto xml = Xml(*d);
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"720\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"-1376\"/>"),
+            std::string::npos);
+  EXPECT_NE(
+      xml.find("<w:tab w:val=\"right\" w:pos=\"3600\" w:leader=\"heavy\"/>"),
+      std::string::npos);
+  EXPECT_LT(xml.find("w:val=\"clear\" w:pos=\"720\""),
+            xml.find("w:val=\"right\" w:pos=\"3600\""));
+}
+
+TEST(M3Batch2, ChgTabsCloseFormDeletedStopUsesXasOnly) {
+  // sprmPChgTabs uses PChgTabsDelClose ([MS-DOC] 2.9.181): the deleted
+  // positions are followed by one XAS_plusOne close range per position, which
+  // must not shift the added entries.
+  const std::vector<uint8_t> operand = {9,    1, 0xD0, 0x02, 0x19,
+                                        0x00, 1, 0x10, 0x0E, 0x21};
+  auto d = Synthetic(Prl(0xC615, operand), {});
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  const auto& tabs = d->paragraphs[0].tabs;
+  ASSERT_EQ(tabs.size(), 2u);
+  EXPECT_TRUE(tabs[0].clear);
+  EXPECT_EQ(tabs[0].position, 720);
+  EXPECT_FALSE(tabs[1].clear);
+  EXPECT_EQ(tabs[1].position, 3600);
+  EXPECT_EQ(tabs[1].align, 1);
+  EXPECT_EQ(tabs[1].leader, 4);
+  auto xml = Xml(*d);
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"720\"/>"),
+            std::string::npos);
+  EXPECT_NE(
+      xml.find("<w:tab w:val=\"center\" w:pos=\"3600\" w:leader=\"heavy\"/>"),
+      std::string::npos);
+}
+
+TEST(M3Batch2, ChgTabsCloseFormKeepsContiguousPositionArray) {
+  // PChgTabsDelClose stores every deleted position first and then one close
+  // range per position, so the second delete must not be read from the first
+  // entry's trailing bytes. supported-font-features.doc carries this operand:
+  // 0A 02 E0 10 C0 21 19 00 19 00 00 deletes the stops at 4320 and 8640, which
+  // is also what LibreOffice writes to document.xml.
+  auto d = Synthetic(Prl(0xC615, {10, 2, 0xE0, 0x10, 0xC0, 0x21, 0x19, 0x00,
+                                  0x19, 0x00, 0x00}),
+                     {});
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  const auto& tabs = d->paragraphs[0].tabs;
+  ASSERT_EQ(tabs.size(), 2u);
+  EXPECT_TRUE(tabs[0].clear);
+  EXPECT_EQ(tabs[0].position, 4320);
+  EXPECT_TRUE(tabs[1].clear);
+  EXPECT_EQ(tabs[1].position, 8640);
+  auto xml = Xml(*d);
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"4320\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"8640\"/>"),
+            std::string::npos);
+}
+
+TEST(M3Batch2, ChgTabsTruncatedDeleteListAddsNoStops) {
+  // The deleted count runs past the operand, so no position can be read: the
+  // whole modifier is rejected instead of emitting a bogus clear stop.
+  auto d = Synthetic(Prl(0xC60D, {3, 40, 0xD0, 0x02}), {});
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  EXPECT_TRUE(d->paragraphs[0].tabs.empty());
+}
+
 TEST(M3Batch2, FloatingParagraphWrapAndAnchors) {
   std::vector<uint8_t> pap;
   auto wrap = Prl(0x2423, {2});

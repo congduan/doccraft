@@ -219,6 +219,11 @@ inline constexpr unsigned kFlowRotateLeft = 4, kFlowRotateRight = 5;
 // Limits and packed fields in paragraph, section and cell sprms, §2.9.
 // TBD: three-bit tab kind, then three-bit tab leader.
 inline constexpr size_t kTabChangeMinSize = 3, kTabEntrySize = 3;
+// Deleted-stop positions are 2-byte XAS values laid out as one contiguous
+// array. sprmPChgTabs follows that array with one XAS_plusOne close range per
+// position ([MS-DOC] 2.9.181), so its deleted section is twice as wide; only
+// the position array feeds w:tab w:val="clear".
+inline constexpr size_t kTabDelPositionSize = 2, kTabDelClosePositionSize = 4;
 inline constexpr size_t kMaxTabStops = 64;
 inline constexpr uint8_t kTabKindMask = 7, kTabLeaderMask = 7;
 inline constexpr int kTabLeaderShift = 3;

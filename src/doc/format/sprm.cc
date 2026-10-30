@@ -946,15 +946,28 @@ void ApplyPara(model::Paragraph& p, uint16_t op, Bytes v) {
     if (v.size() < kTabChangeMinSize)
       return;
     size_t x = 1, deleted = v[x++],
-           delbytes = (op == kSprmPChgTabs ? 4 : 2) * deleted;
+           delbytes = (op == kSprmPChgTabs ? kTabDelClosePositionSize
+                                           : kTabDelPositionSize) *
+                      deleted;
     if (delbytes > v.size() - x)
       return;
+    const size_t del_offset = x;
     x += delbytes;
     if (x >= v.size())
       return;
     size_t added = v[x++];
     if (added > kMaxTabStops || added * kTabEntrySize > v.size() - x)
       return;
+    // Deleted stops precede added ones in the operand and keep that order: a
+    // later add of the same position wins in Word. Both operand forms hold the
+    // deleted positions as one contiguous 2-byte XAS array; the close ranges
+    // that follow them in sprmPChgTabs only say how near a stop must be.
+    for (size_t i = 0; i < deleted; i++) {
+      model::TabStop stop;
+      stop.position = S16(v, del_offset + kTabDelPositionSize * i);
+      stop.clear = true;
+      p.tabs.push_back(stop);
+    }
     for (size_t i = 0; i < added; i++) {
       int pos = S16(v, x + 2 * i), tbd = v[x + 2 * added + i];
       p.tabs.push_back(

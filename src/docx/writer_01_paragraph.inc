@@ -194,9 +194,16 @@ void WriteParagraphTabs(pugi::xml_node pr, const model::Paragraph& p) {
                            "underscore", "heavy", "middleDot"};
   for (const auto& tab : p.tabs) {
     auto stop = tabs.append_child("w:tab");
-    Attr(stop, "w:val", tab.align < 6 ? aligns[tab.align] : "left");
+    // A deleted stop removes a style-inherited one; Word writes no leader for
+    // it. The IR keeps the operand order (deletes first), so a later add at
+    // the same position wins exactly as it does in Word.
+    if (tab.clear) {
+      Attr(stop, "w:val", "clear");
+    } else {
+      Attr(stop, "w:val", tab.align < 6 ? aligns[tab.align] : "left");
+    }
     IntAttr(stop, "w:pos", tab.position);
-    if (tab.leader) {
+    if (!tab.clear && tab.leader) {
       Attr(stop, "w:leader", tab.leader < 6 ? leaders[tab.leader] : "none");
     }
   }
