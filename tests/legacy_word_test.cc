@@ -724,6 +724,12 @@ struct LegacyHeaderSample {
   uint8_t word_ihdt = 0;
   bool truncate_plcf = false;
   bool missing_sed = false;
+  // Extra section sprms appended to each section's SEPX, in section order; a
+  // missing entry means the section carries no extra properties.
+  std::vector<std::vector<uint8_t>> section_sprms;
+  // Leaves every SED's fcSepx at the undefined value so the section has no
+  // SEPX at all.
+  bool no_sepx = false;
   uint32_t dop_lcb = 88;
 };
 
@@ -769,16 +775,24 @@ std::vector<uint8_t> Word6HeaderDocument(uint16_t ident, uint16_t nfib,
     for (size_t i = 0; i < sections; ++i) {
       size_t pos = kSed + 4 * (sections + 1) + 12 * i;
       size_t sepx = kSepx + 40 * i;
-      Put32(word, pos + 2, static_cast<uint32_t>(sepx));
+      Put32(word, pos + 2,
+            sample.no_sepx ? 0xFFFFFFFFu : static_cast<uint32_t>(sepx));
       Put32(word, pos + 8, 0xFFFFFFFF);
-      size_t len = sample.title_page ? 4 : 2;
-      Put16(word, sepx, static_cast<uint16_t>(len));
-      word[sepx + 2] = 0x99;  // sprmSGprfIhdt.
-      word[sepx + 3] = sample.section_flags[i];
+      if (sample.no_sepx)
+        continue;
+      size_t at = sepx + 2;
+      word[at++] = 0x99;  // sprmSGprfIhdt.
+      word[at++] = sample.section_flags[i];
       if (sample.title_page) {
-        word[sepx + 4] = 0x8F;  // sprmSFTitlePage.
-        word[sepx + 5] = 1;
+        word[at++] = 0x8F;  // sprmSFTitlePage.
+        word[at++] = 1;
       }
+      if (i < sample.section_sprms.size()) {
+        const auto& extra = sample.section_sprms[i];
+        std::copy(extra.begin(), extra.end(), word.begin() + at);
+        at += extra.size();
+      }
+      Put16(word, sepx, static_cast<uint16_t>(at - sepx - 2));
     }
   }
   // PlcfHdd: only the stories present in the document are stored.
@@ -856,6 +870,90 @@ TEST(LegacyWord, Word6PerSectionHeaderStoriesFollowSectionOrder) {
             "ONE");
   ASSERT_EQ(document->section.headers[1].size(), 1u);
   EXPECT_EQ(document->section.headers[1][0].runs[0].text, "TWO");
+}
+
+TEST(LegacyWord, Word6SepxSectionPropertiesReachDocx) {
+  // SXaPage/SYaPage/SDxaLeft/SDyaTop, two columns with spacing, the
+  // three-byte sprmSDxaColWidth form and sprmSFTitlePage.
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {{0xA4, 0x84, 0x2E, 0xA5, 0xC6, 0x41, 0xA6, 0x6E,
+                           0x04, 0xA8, 0x6E, 0x04, 0x90, 0x01, 0x00, 0x91,
+                           0x88, 0x01, 0x88, 0x00, 0xF0, 0x05, 0x8F, 0x01}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 11908);
+  EXPECT_EQ(document->section.height, 16838);
+  EXPECT_EQ(document->section.left, 1134);
+  EXPECT_EQ(document->section.top, 1134);
+  EXPECT_EQ(document->section.columns, 2);
+  EXPECT_EQ(document->section.column_space, 392);
+  ASSERT_EQ(document->section.column_specs.size(), 1u);
+  EXPECT_EQ(document->section.column_specs[0].index, 0);
+  EXPECT_EQ(document->section.column_specs[0].width, 1520);
+  EXPECT_TRUE(document->section.first_page_different);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:pgSz w:w=\"11908\" w:h=\"16838\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:pgMar w:left=\"1134\" w:right=\"1134\" "
+                     "w:top=\"1134\" w:bottom=\"1134\"/>"),
+            std::string::npos);
+  EXPECT_NE(xml.find("<w:titlePg/>"), std::string::npos);
+  EXPECT_NE(xml.find("<w:cols w:num=\"2\" w:space=\"392\" "
+                     "w:equalWidth=\"0\"><w:col w:w=\"1520\"/></w:cols>"),
+            std::string::npos);
+}
+
+TEST(LegacyWord, Word6PerSectionSepxPropertiesFollowSection) {
+  auto sample = HeaderSample({"ONE\r", "TWO\r"}, {0x02, 0x02}, {3, 5});
+  sample.section_sprms = {{0xA4, 0x84, 0x2E}, {0xA4, 0xD0, 0x2F}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65,
+                                  "A\r\x0c"
+                                  "B\r",
+                                  sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section_breaks.size(), 1u);
+  EXPECT_EQ(document->section_breaks[0].second.width, 11908);
+  EXPECT_EQ(document->section.width, 12240);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:pgSz w:w=\"11908\""), std::string::npos);
+  EXPECT_NE(xml.find("<w:pgSz w:w=\"12240\""), std::string::npos);
+}
+
+TEST(LegacyWord, Word6SectionWithoutSepxKeepsDefaultProperties) {
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.no_sepx = true;
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 12240);
+  EXPECT_EQ(document->section.height, 15840);
+  EXPECT_EQ(document->section.left, 1134);
+  EXPECT_EQ(document->section.columns, 1);
+  EXPECT_FALSE(document->section.first_page_different);
+}
+
+TEST(LegacyWord, Word6UnsupportedSectionSprmRejectsDocument) {
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {{0xF0, 0xAA}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_FALSE(document);
+  EXPECT_EQ(document.error().message, "unsupported Word 6/95 SEPX sprm");
+}
+
+TEST(LegacyWord, Word6TruncatedSectionSprmRejectsDocument) {
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {{0xA4, 0x01}};  // SXaPage needs two operand bytes.
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_FALSE(document);
+  EXPECT_EQ(document.error().message, "truncated Word 6/95 SEPX");
 }
 
 TEST(LegacyWord, Word6WordLevelStoryBitsSkipLeadingPlcEntries) {
