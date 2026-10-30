@@ -387,6 +387,33 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = kSprmPFWidowControl;
         size = 1;
         break;
+      // The Word 6/95 East Asian paragraph flags share their opcode numbers
+      // with [MS-DOC] 2.9.215 (Prm0 isprm) and map one-to-one onto the modern
+      // Bool8 sprms, so the operand passes through unchanged.
+      case kLegacySprmPFKinsoku:
+        modern = kSprmPFKinsoku;
+        size = 1;
+        break;
+      case kLegacySprmPFWordWrap:
+        modern = kSprmPFWordWrap;
+        size = 1;
+        break;
+      case kLegacySprmPFOverflowPunct:
+        modern = kSprmPFOverflowPunct;
+        size = 1;
+        break;
+      case kLegacySprmPFTopLinePunct:
+        modern = kSprmPFTopLinePunct;
+        size = 1;
+        break;
+      case kLegacySprmPFAutoSpaceDE:
+        modern = kSprmPFAutoSpaceDE;
+        size = 1;
+        break;
+      case kLegacySprmPFAutoSpaceDN:
+        modern = kSprmPFAutoSpaceDN;
+        size = 1;
+        break;
       case kLegacySprmPFNoAutoHyph:
         modern = kSprmPFNoAutoHyph;
         size = 1;
