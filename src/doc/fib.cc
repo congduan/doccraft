@@ -133,10 +133,11 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
     constexpr size_t kLegacyFndTxtPair = 3;
     f.fnd_ref = pair_at(kLegacyFndRefPair);
     f.fnd_txt = pair_at(kLegacyFndTxtPair);
-    // Word 6/95 inserts four 16-bit BTE indices (pnChpFirst, pnPapFirst,
-    // cpnBteChp, cpnBtePap) after pair 37, so pairs 38 and later sit ten bytes
-    // past their Word 97 offset. fcPlcfendRef/fcPlcfendTxt are pairs 46/47 in
-    // both formats (ww8scan.hxx lists 0x1D2/0x1DA, ten past 0x1C8/0x1D0).
+    // Word 6/95 skips a 2-byte reserved field after pair 37 and then reads
+    // four 16-bit BTE indices (pnChpFirst, pnPapFirst, cpnBteChp, cpnBtePap),
+    // ten bytes in total, so pairs 38 and later sit ten bytes past their Word
+    // 97 offset. fcPlcfendRef/fcPlcfendTxt are pairs 46/47 in both formats
+    // (ww8scan.hxx lists 0x1D2/0x1DA, ten past 0x1C8/0x1D0).
     constexpr size_t kLegacyPairShift = 10;
     constexpr size_t kLegacyEndRefPair = 46;
     constexpr size_t kLegacyEndTxtPair = 47;
