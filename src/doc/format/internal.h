@@ -443,6 +443,12 @@ enum class LegacySprmScan { kComplete, kPartial, kStopped };
 LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 
+// Word 6/95 section SEPX payloads in SED order; an empty span marks a section
+// whose SED has no fcSepx. Shared by the section-property and header readers so
+// both apply the same one-byte-offset correction.
+std::expected<std::vector<Bytes>, Error> ReadLegacySepxPayloads(
+    Bytes word, Bytes plc, size_t sections, std::vector<std::string>* warnings);
+
 void ReadLists(model::Document& doc, Bytes table, const Fib& fib);
 
 model::Run InheritedRun(const model::Document& doc, int style);

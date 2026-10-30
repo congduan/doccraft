@@ -31,11 +31,67 @@ using detail::FormatRange;
 using detail::kSprmTDefTable;
 using detail::kSprmTDefTableObsolete;
 using detail::kUndefinedU32;
+using detail::ReadLegacySepxPayloads;
 using detail::U16;
 using detail::U32;
 using detail::Valid;
 using detail::Walk;
+using detail::WalkLegacySepx;
 using detail::WalkParagraph;
+
+namespace {
+
+struct LegacySectionSprm {
+  uint8_t code;
+  uint16_t modern;
+};
+
+// One-byte Word 6/95 section opcodes and the Word 97+ section sprms they map
+// onto. Opcodes the width table knows but this converter has no modern handler
+// for are skipped by WalkLegacySepx; ApplySection validates every operand.
+constexpr LegacySectionSprm kLegacySectionSprms[] = {
+    {detail::kLegacySprmScnsPgn, detail::kSprmScnsPgn},
+    {detail::kLegacySprmSiHeadingPgn, detail::kSprmSiHeadingPgn},
+    {detail::kLegacySprmSDxaColWidth, detail::kSprmSDxaColWidth},
+    {detail::kLegacySprmSDxaColSpacing, detail::kSprmSDxaColSpacing},
+    {detail::kLegacySprmSFEvenlySpaced, detail::kSprmSFEvenlySpaced},
+    {detail::kLegacySprmSFProtected, detail::kSprmSFProtected},
+    {detail::kLegacySprmSDmBinFirst, detail::kSprmSDmBinFirst},
+    {detail::kLegacySprmSDmBinOther, detail::kSprmSDmBinOther},
+    {detail::kLegacySprmSBkc, detail::kSprmSBkc},
+    {detail::kLegacySprmSFTitlePage, detail::kSprmSFTitlePage},
+    {detail::kLegacySprmSCcolumns, detail::kSprmSCcolumns},
+    {detail::kLegacySprmSDxaColumns, detail::kSprmSDxaColumns},
+    {detail::kLegacySprmSNfcPgn, detail::kSprmSNfcPgn},
+    {detail::kLegacySprmSFPgnRestart, detail::kSprmSFPgnRestart},
+    {detail::kLegacySprmSFEndnote, detail::kSprmSFEndnote},
+    {detail::kLegacySprmSLnc, detail::kSprmSLnc},
+    {detail::kLegacySprmSNLnnMod, detail::kSprmSNLnnMod},
+    {detail::kLegacySprmSDxaLnn, detail::kSprmSDxaLnn},
+    {detail::kLegacySprmSDyaHdrTop, detail::kSprmSDyaHdrTop},
+    {detail::kLegacySprmSDyaHdrBottom, detail::kSprmSDyaHdrBottom},
+    {detail::kLegacySprmSLBetween, detail::kSprmSLBetween},
+    {detail::kLegacySprmSVjc, detail::kSprmSVjc},
+    {detail::kLegacySprmSLnnMin, detail::kSprmSLnnMin},
+    {detail::kLegacySprmSPgnStart, detail::kSprmSPgnStart97},
+    {detail::kLegacySprmSBOrientation, detail::kSprmSBOrientation},
+    {detail::kLegacySprmSXaPage, detail::kSprmSXaPage},
+    {detail::kLegacySprmSYaPage, detail::kSprmSYaPage},
+    {detail::kLegacySprmSDxaLeft, detail::kSprmSDxaLeft},
+    {detail::kLegacySprmSDxaRight, detail::kSprmSDxaRight},
+    {detail::kLegacySprmSDyaTop, detail::kSprmSDyaTop},
+    {detail::kLegacySprmSDyaBottom, detail::kSprmSDyaBottom},
+    {detail::kLegacySprmSDzaGutter, detail::kSprmSDzaGutter},
+};
+
+bool ApplyLegacySectionSprm(model::Section& section, uint8_t code, Bytes v) {
+  for (const auto& entry : kLegacySectionSprms)
+    if (entry.code == code)
+      return ApplySection(section, entry.modern, v);
+  return true;
+}
+
+}  // namespace
 
 // Reads the section descriptor PLC (SED) and the SEPX of each section.
 std::expected<std::vector<std::pair<uint32_t, model::Section>>, Error>
@@ -48,17 +104,34 @@ ReadSections(Bytes word, Bytes table, const Fib& fib) {
       return std::unexpected(Error{"invalid SED PLC"});
     Bytes b = source.subspan(fib.sed.offset, fib.sed.size);
     size_t n = (b.size() - 4) / 16;
+    // Word 6/95 SEPX payloads use the one-byte sprm table. Frame them all up
+    // front so a damaged SEPX rejects the document before any section property
+    // is applied, matching the header reader's error semantics.
+    std::vector<Bytes> legacy_payloads;
+    if (fib.legacy) {
+      auto payloads = ReadLegacySepxPayloads(word, b, n, nullptr);
+      if (!payloads)
+        return std::unexpected(payloads.error());
+      legacy_payloads = std::move(*payloads);
+    }
     uint32_t previous = 0;
     for (size_t i = 0; i < n; i++) {
       uint32_t end = U32(b, 4 * (i + 1));
       if (end <= previous)
         return std::unexpected(Error{"invalid section CP order"});
       previous = end;
-      // Word 6/95 SEPX payloads use the one-byte sprm table, which this
-      // section-property mapper does not understand; only the section bounds
-      // are used so header/footer stories can be split per section.
       if (fib.legacy) {
-        sections.emplace_back(end, model::Section{});
+        model::Section section;
+        bool valid = true;
+        auto walked =
+            WalkLegacySepx(legacy_payloads[i], [&](uint8_t code, Bytes v) {
+              valid &= ApplyLegacySectionSprm(section, code, v);
+            });
+        if (!walked)
+          return std::unexpected(walked.error());
+        if (!valid)
+          return std::unexpected(Error{"invalid SEPX sprm"});
+        sections.emplace_back(end, std::move(section));
         continue;
       }
       size_t pos = 4 * (n + 1) + 12 * i;

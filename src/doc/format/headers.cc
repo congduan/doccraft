@@ -65,42 +65,14 @@ struct LegacyStoryFlags {
 // section's grpfIhdt and title-page flags.
 std::expected<LegacyStoryFlags, Error> ReadLegacySepx(Bytes raw) {
   LegacyStoryFlags flags;
-  for (size_t p = 0; p < raw.size();) {
-    const uint8_t code = raw[p++];
-    if (code == 0)
-      continue;  // Word 6 separator padding.
-    const LegacySprmSpec* spec = FindLegacySprmSpec(code);
-    if (!spec)
-      return std::unexpected(Error{"unsupported Word 6/95 SEPX sprm"});
-    size_t size = 0;
-    switch (spec->width) {
-      case LegacySprmWidth::kFix:
-        size = spec->size;
-        break;
-      case LegacySprmWidth::kVar:
-        if (p >= raw.size())
-          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
-        size = static_cast<size_t>(raw[p]) + 1 + spec->size;
-        break;
-      case LegacySprmWidth::kVar2: {
-        if (raw.size() - p < 2)
-          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
-        const size_t count = U16(raw, p);
-        if (!count)
-          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
-        size = count + 1;
-        break;
-      }
-    }
-    if (size > raw.size() - p)
-      return std::unexpected(Error{"truncated Word 6/95 SEPX"});
-    if (code == kLegacySprmSGprfIhdt && size) {
-      flags.stories = raw[p];
-    } else if (code == kLegacySprmSFTitlePage && size) {
-      flags.title_page = raw[p] != 0;
-    }
-    p += size;
-  }
+  auto walked = WalkLegacySepx(raw, [&](uint8_t code, Bytes v) {
+    if (code == kLegacySprmSGprfIhdt && !v.empty())
+      flags.stories = v[0];
+    else if (code == kLegacySprmSFTitlePage && !v.empty())
+      flags.title_page = v[0] != 0;
+  });
+  if (!walked)
+    return std::unexpected(walked.error());
   return flags;
 }
 
@@ -129,9 +101,31 @@ std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
   const size_t count = (plc.size() - 4) / 16;
   if (count != sections)
     return std::unexpected(Error{"header section count mismatch"});
+  auto payloads = ReadLegacySepxPayloads(word, plc, count, warnings);
+  if (!payloads)
+    return std::unexpected(payloads.error());
   for (size_t i = 0; i < count; ++i) {
-    const size_t pos = 4 * (count + 1) + 12 * i;
-    uint32_t fc = U32(plc, pos + 2);
+    if ((*payloads)[i].empty())
+      continue;
+    auto flags = ReadLegacySepx((*payloads)[i]);
+    if (!flags)
+      return std::unexpected(flags.error());
+    out[i] = *flags;
+  }
+  return out;
+}
+
+}  // namespace
+
+std::expected<std::vector<Bytes>, Error> ReadLegacySepxPayloads(
+    Bytes word, Bytes plc, size_t sections,
+    std::vector<std::string>* warnings) {
+  std::vector<Bytes> out(sections);
+  for (size_t i = 0; i < sections; ++i) {
+    const size_t pos = 4 * (sections + 1) + 12 * i;
+    if (pos + 12 > plc.size())
+      return std::unexpected(Error{"invalid Word 6/95 SED PLC"});
+    const uint32_t fc = U32(plc, pos + 2);
     if (fc == kUndefinedU32)
       continue;
     // A few Word 6 writers store fcSepx one byte past the length prefix; when
@@ -156,15 +150,10 @@ std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
     }
     if (!raw)
       return std::unexpected(raw.error());
-    auto flags = ReadLegacySepx(*raw);
-    if (!flags)
-      return std::unexpected(flags.error());
-    out[i] = *flags;
+    out[i] = *raw;
   }
   return out;
 }
-
-}  // namespace
 
 std::expected<std::map<uint32_t, uint8_t>, Error> ReadStoryFieldStatus(
     Bytes table, Fib::Range r, uint64_t base, uint32_t story_length) {

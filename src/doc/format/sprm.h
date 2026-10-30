@@ -14,10 +14,12 @@
 
 #ifndef SRC_DOC_FORMAT_SPRM_H_
 #define SRC_DOC_FORMAT_SPRM_H_
+#include <expected>
 #include <string>
 #include <vector>
 
 #include "doc/format/internal.h"
+#include "doc/format/sprm_codes.h"
 
 namespace doccraft::doc::detail {
 // Every PRL is parsed by its spra. Unknown modifiers retain their length so
@@ -91,6 +93,47 @@ bool WalkParagraph(Bytes b, Bytes data, F fn, int depth = 0) {
     }
   });
   return walked && valid;
+}
+
+// Steps through a Word 6/95 SEPX using the one-byte operand width table and
+// calls `fn(code, operand)` for every modifier. An opcode outside the table and
+// a truncated operand are reported with the same errors the legacy header
+// reader always used; both leave the SEPX only partially understood.
+template <class F>
+std::expected<void, Error> WalkLegacySepx(Bytes raw, F fn) {
+  for (size_t p = 0; p < raw.size();) {
+    const uint8_t code = raw[p++];
+    if (code == 0)
+      continue;  // Word 6 separator padding.
+    const LegacySprmSpec* spec = FindLegacySprmSpec(code);
+    if (!spec)
+      return std::unexpected(Error{"unsupported Word 6/95 SEPX sprm"});
+    size_t size = 0;
+    switch (spec->width) {
+      case LegacySprmWidth::kFix:
+        size = spec->size;
+        break;
+      case LegacySprmWidth::kVar:
+        if (p >= raw.size())
+          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+        size = static_cast<size_t>(raw[p]) + 1 + spec->size;
+        break;
+      case LegacySprmWidth::kVar2: {
+        if (raw.size() - p < 2)
+          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+        const size_t count = U16(raw, p);
+        if (!count)
+          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+        size = count + 1;
+        break;
+      }
+    }
+    if (size > raw.size() - p)
+      return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+    fn(code, raw.subspan(p, size));
+    p += size;
+  }
+  return {};
 }
 
 // Handles the conditional-formatting sprms of a style sheet (T/C/P/Cnf).

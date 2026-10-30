@@ -42,9 +42,41 @@ inline constexpr uint8_t kLegacySprmPWr = 0x25;
 inline constexpr uint8_t kLegacySprmPFNoAutoHyph = 0x2C;
 inline constexpr uint8_t kLegacySprmPFWidowControl = 0x33;
 // Section properties that identify the header/footer stories of a Word 6/95
-// section; the values are read by the legacy header reader, not translated.
+// section. sprmSGprfIhdt is consumed by the legacy header reader; the other
+// section opcodes are translated onto their Word 97+ counterparts.
 inline constexpr uint8_t kLegacySprmSFTitlePage = 0x8F;
 inline constexpr uint8_t kLegacySprmSGprfIhdt = 0x99;
+inline constexpr uint8_t kLegacySprmScnsPgn = 0x83;
+inline constexpr uint8_t kLegacySprmSiHeadingPgn = 0x84;
+inline constexpr uint8_t kLegacySprmSDxaColWidth = 0x88;
+inline constexpr uint8_t kLegacySprmSDxaColSpacing = 0x89;
+inline constexpr uint8_t kLegacySprmSFEvenlySpaced = 0x8A;
+inline constexpr uint8_t kLegacySprmSFProtected = 0x8B;
+inline constexpr uint8_t kLegacySprmSDmBinFirst = 0x8C;
+inline constexpr uint8_t kLegacySprmSDmBinOther = 0x8D;
+inline constexpr uint8_t kLegacySprmSBkc = 0x8E;
+inline constexpr uint8_t kLegacySprmSCcolumns = 0x90;
+inline constexpr uint8_t kLegacySprmSDxaColumns = 0x91;
+inline constexpr uint8_t kLegacySprmSNfcPgn = 0x93;
+inline constexpr uint8_t kLegacySprmSFPgnRestart = 0x96;
+inline constexpr uint8_t kLegacySprmSFEndnote = 0x97;
+inline constexpr uint8_t kLegacySprmSLnc = 0x98;
+inline constexpr uint8_t kLegacySprmSNLnnMod = 0x9A;
+inline constexpr uint8_t kLegacySprmSDxaLnn = 0x9B;
+inline constexpr uint8_t kLegacySprmSDyaHdrTop = 0x9C;
+inline constexpr uint8_t kLegacySprmSDyaHdrBottom = 0x9D;
+inline constexpr uint8_t kLegacySprmSLBetween = 0x9E;
+inline constexpr uint8_t kLegacySprmSVjc = 0x9F;
+inline constexpr uint8_t kLegacySprmSLnnMin = 0xA0;
+inline constexpr uint8_t kLegacySprmSPgnStart = 0xA1;
+inline constexpr uint8_t kLegacySprmSBOrientation = 0xA2;
+inline constexpr uint8_t kLegacySprmSXaPage = 0xA4;
+inline constexpr uint8_t kLegacySprmSYaPage = 0xA5;
+inline constexpr uint8_t kLegacySprmSDxaLeft = 0xA6;
+inline constexpr uint8_t kLegacySprmSDxaRight = 0xA7;
+inline constexpr uint8_t kLegacySprmSDyaTop = 0xA8;
+inline constexpr uint8_t kLegacySprmSDyaBottom = 0xA9;
+inline constexpr uint8_t kLegacySprmSDzaGutter = 0xAA;
 inline constexpr uint8_t kLegacySprmCFBold = 0x55;
 inline constexpr uint8_t kLegacySprmCFItalic = 0x56;
 inline constexpr uint8_t kLegacySprmCFStrike = 0x57;
