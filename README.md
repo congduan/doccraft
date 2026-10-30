@@ -24,6 +24,70 @@ build/src/cli/doccraft convert protected.doc --password secret -o output.docx
 build/src/cli/doccraft inspect input.doc
 ```
 
+## Platform support
+
+The conversion core (`src/base`, `src/cfb`, `src/doc`, `src/model`, `src/docx`)
+is standard C++23 plus vendored miniz and pugixml, and calls no operating
+system service. Only two places are platform-specific: `src/cli` (files and
+stdio) and the ANSI code-page decoder in `src/base/charset.cc`. Targets without
+a command line use the C API in [`src/api/doccraft_api.h`](src/api/doccraft_api.h):
+one `.doc` buffer in, one `.docx` buffer out.
+
+| Target | Artifact | ANSI code pages | Verified |
+|---|---|---|---|
+| Linux | CLI + libraries | iconv (glibc) | built and tested in CI |
+| macOS | CLI + libraries | iconv (libSystem) | built and tested in CI |
+| Windows | CLI + libraries | `MultiByteToWideChar` | built and tested in CI (MSVC, warnings-as-errors off) |
+| Android (NDK) | libraries + C API | iconv (bionic), else CP1252 only | CMake options in place, toolchain not run here |
+| iOS | libraries + C API | iconv (libSystem), else CP1252 only | CMake options in place, toolchain not run here |
+| WebAssembly | libraries + C API | CP1252 only | library-only build verified on Linux, emsdk not run here |
+
+Build the library and C API only (the shape the embedded targets use):
+
+```bash
+cmake -B build-lib -DCMAKE_BUILD_TYPE=Release \
+      -DDOCCRAFT_BUILD_CLI=OFF -DDOCCRAFT_BUILD_TESTS=OFF
+cmake --build build-lib -j
+```
+
+WebAssembly, Android and iOS cross builds use the same two options with the
+toolchain on the command line:
+
+```bash
+# WebAssembly (needs emsdk on PATH)
+emcmake cmake -B build-wasm -DDOCCRAFT_BUILD_CLI=OFF -DDOCCRAFT_BUILD_TESTS=OFF
+cmake --build build-wasm -j
+
+# Android (the NDK ships its own toolchain file)
+cmake -B build-android -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+      -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-21 \
+      -DDOCCRAFT_BUILD_CLI=OFF -DDOCCRAFT_BUILD_TESTS=OFF
+cmake --build build-android -j
+
+# iOS (community toolchain, e.g. ios-cmake 4.x)
+cmake -B build-ios -G Xcode \
+      -DCMAKE_TOOLCHAIN_FILE=ios.toolchain.cmake -DPLATFORM=OS64 \
+      -DDOCCRAFT_BUILD_CLI=OFF -DDOCCRAFT_BUILD_TESTS=OFF
+cmake --build build-ios --config Release
+```
+
+Boundaries that matter on those targets:
+
+- **WebAssembly has no file system**, so no CLI is built there; the C API is the
+  only entry point. With neither iconv nor `MultiByteToWideChar`, only CP1252
+  decodes correctly - `doccraft_supports_codepage()` reports false for the other
+  ANSI pages and the converter degrades their text to a CP1252 approximation.
+- **Windows**: `permissions()` there only carries the read-only attribute, so
+  input validation also probes with an open; diagnostics are written in binary
+  mode so they stay byte-identical to the POSIX builds. The CLI takes narrow
+  (ANSI code page) paths because that is what `argv` holds - pass UTF-8 paths on
+  Windows through the C API instead.
+- **iOS and Android** ship no command line either. Only the library and C API
+  boundary is provided; a JNI wrapper and a Swift package are separate work.
+- **CP1255 (Hebrew) and CP1258 (Vietnamese)** decode one character behind on
+  glibc, because its tables are stateful and the decoder is per-character; see
+  [known simplifications](docs/KNOWN-SIMPLIFICATIONS.md).
+
 ## What it handles
 
 - Text and formatting: ANSI and UTF-16 pieces; character, paragraph, and

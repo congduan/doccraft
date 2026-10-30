@@ -30,6 +30,12 @@ MS-DOC 都是小端格式、文本面都是 UTF-16LE，字节序解码与 UTF-8 
 一次，`base` 不包含任何上层头文件。读取原语本身不做边界检查，调用方先用
 `subspan` 或范围校验切出视图（有状态校验游标见 KNOWN-SIMPLIFICATIONS M3）。
 
+`src/api/` 同样不是数据流的一层，而是四层的第二个入口：`doccraft_convert_buffer`
+把整份 .doc 作为内存缓冲读入、把 .docx 作为缓冲写出，供 WebAssembly、Android
+（NDK）与 iOS 这类没有文件系统和命令行的目标使用；它只依赖四层与 `base`，不做
+任何文件 IO。CLI（`src/cli/`）是带文件 IO 的第一个入口。两者的流程一致，产物
+逐字节相同（`tests/api_cli_parity.py` 断言）。
+
 ### 1.1 layer1: CFB/OLE 容器层 (`src/cfb/`)
 
 Compound File Binary Format（[MS-CFB]），自研实现：
@@ -116,9 +122,23 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
   - XML 生成：**pugixml**（M3 起，样式表生成与转义）
   - 加密原语（M6 RC4/MD5/SHA-1）：按 RFC 6229、RFC 1321、FIPS 180-4
     实现并以标准向量验证；不引入破坏单二进制零运行时依赖的库
-  - 字符集解码：**iconv**（libc 设施：glibc 内置，macOS/Linux 走 libiconv；
-    不新增传递依赖，未找到时编译期退化到内置 CP1252 表）。见
+  - 字符集解码：**不引入第三方库**，按编译目标选后端——POSIX（Linux/macOS，
+    以及带 libSystem 的 iOS 与提供 iconv 的 Android NDK 目标）用 **iconv**
+    （glibc/libSystem 内置；只有 GNU libiconv 等独立库存在时才链接），Windows 用
+    系统 API `MultiByteToWideChar` + UTF-16→UTF-8，两者都没有的目标（WebAssembly）
+    退化到内置 CP1252 表。CP1252 在任何平台都走内置表，保证默认代码页的输出逐字节
+    一致；`base::SupportsCodepage()` 如实反映当前后端，调用方据此降级。见
     `src/base/charset.cc`。
+- **平台设施**（同样不算依赖，都是标准库或系统 API）：
+  - 文件系统探测：`std::filesystem`（C++23 标准库，六个目标一致），不再用
+    `stat(2)`/`access(2)`；文件 IO 只存在于 `src/cli/`。
+  - 诊断输出：Windows 上把 stdout/stderr 切到二进制模式，避免 CRT 把 `\n`
+    改写成 `\r\n`，保证诊断逐字节跨平台一致。
+  - 线程：`std::thread` 与 `thread_local`（字符解码描述符缓存），无平台分支。
+- 构建开关：`DOCCRAFT_BUILD_CLI`（默认 ON；嵌入式目标关掉）、
+  `DOCCRAFT_BUILD_TESTS`（默认 ON，需网络拉 googletest，且要求 CLI）、
+  `DOCCRAFT_WARNINGS_AS_ERRORS`（默认 ON；MSVC 警告集不同，CI 的 Windows job
+  暂时 downgrade 为 OFF）。
   - 测试：googletest、libFuzzer
   - **仅测试期**的 OOXML schema 校验：`src/ooxml/` 用
     `tools/schema-gen` 离线导出的元素粒子表，在 `ctest` 中检查 writer 产出的

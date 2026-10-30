@@ -21,14 +21,18 @@ src/doc/    layer2  [MS-DOC] parser (FIB, piece table, FKP, sprm, styles, lists,
 src/model/  layer3  format-neutral IR (Document/Paragraph/Run/Table/Style/Section), twips
 src/docx/   layer4  ECMA-376 transitional writer (miniz for zip, pugixml for XML)
 src/cli/            CLI wiring (convert / inspect)
+src/api/            embedding C API (buffer in, docx buffer out; no file IO)
 src/base/           shared leaf: byte reads (`Bytes`, `U16`, `U32`, `U64`, `S16`), `AppendUtf8`, ANSI code page decoding (`charset.h`)
 ```
 
 Dependency direction must hold: `cli -> {cfb, doc, docx}`, `docx -> model`,
-`doc -> model`, `{cfb, doc} -> base`. `src/doc/` must not include `docx/` or `cfb/`
-headers; `src/docx/` must not include `doc/` headers; `src/base/` includes nothing
-from `cfb/`, `doc/`, `model/` or `docx/`. Byte-order decoding lives only in
-`src/base/binary.h` — do not add another `U16`/`U32` copy in a layer.
+`doc -> model`, `{cfb, doc} -> base`, `api -> {cfb, doc, docx}`. `src/doc/` must
+not include `docx/` or `cfb/` headers; `src/docx/` must not include `doc/`
+headers; `src/base/` includes nothing from `cfb/`, `doc/`, `model/` or `docx/`.
+Byte-order decoding lives only in `src/base/binary.h` — do not add another
+`U16`/`U32` copy in a layer. `src/api/` is the only layer allowed to orchestrate
+a whole conversion besides `src/cli/`; keep the two pipelines in step
+(`tests/api_cli_parity.py` fails if they diverge).
 
 ## 2. Build and test
 
@@ -41,6 +45,11 @@ ctest --test-dir build --output-on-failure
 - Toolchain: C++23 (`CMAKE_CXX_STANDARD 23`) with `-Wall -Wextra -Wpedantic -Werror`.
   The README's "C++20 / GCC 12+" line is stale; CMake is authoritative.
 - Binary: `build/src/cli/doccraft`.
+- Build switches (all default ON): `DOCCRAFT_BUILD_CLI` (OFF builds libraries +
+  `src/api` only, the WebAssembly/Android/iOS shape), `DOCCRAFT_BUILD_TESTS`
+  (requires the CLI; skip it to avoid the googletest download),
+  `DOCCRAFT_WARNINGS_AS_ERRORS` (MSVC warning sets differ; CI's Windows job
+  builds with it OFF).
 - Test filter: `ctest --test-dir build -R m3_batch7 --output-on-failure`.
 - Two ctest entries are Python scripts and need `python3` on PATH:
   `docx_zip_validate` (zip structure) and `corpus_text_consistency` (text agreement).
