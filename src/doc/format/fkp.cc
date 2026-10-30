@@ -297,6 +297,8 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
     // this today: Word 6/95 stores one LID for both the default and the East
     // Asian language, so the operand is written twice.
     uint16_t modern_east_asia = 0;
+    bool mask_low_byte = false;
+    uint8_t masked_low_byte[2] = {};
     bool mapped = true;
     switch (code) {
       case kLegacySprmPJc:
@@ -418,6 +420,43 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = kSprmPFNoAutoHyph;
         size = 1;
         break;
+      // Word 6/95 table properties. The scalar layout matches their Word 97+
+      // namesakes, so the operands pass through unchanged; sprmTJc is the
+      // exception (see below). Evidence: LibreOffice ww8scan.cxx
+      // GetWW6SprmSearcher lists `tap.dxaGapHalf`, `tap.rgdxaCenter [0]`,
+      // `tap.fCantSplit`, `tap.fTableHeader` and `tap.dyaRowHeight` with the
+      // same widths, and [MS-DOC] 2.9.144/2.9.145/2.9.169 give the modern
+      // handlers those operands.
+      case kLegacySprmTDxaLeft:
+        modern = kSprmTDxaLeft;
+        size = 2;
+        break;
+      case kLegacySprmTDxaGapHalf:
+        modern = kSprmTDxaGapHalf;
+        size = 2;
+        break;
+      case kLegacySprmTFCantSplit:
+        modern = kSprmTFCantSplit;
+        size = 1;
+        break;
+      case kLegacySprmTTableHeader:
+        modern = kSprmTTableHeader;
+        size = 1;
+        break;
+      case kLegacySprmTDyaRowHeight:
+        modern = kSprmTDyaRowHeight;
+        size = 2;
+        break;
+      case kLegacySprmTJc:
+        // Only the low byte of the legacy sprmTJc word is significant
+        // (LibreOffice: "tap.jc jc (low order byte is significant)"). The
+        // modern handler reads the full word and rejects values above 2, so a
+        // stray high byte would surface as an invalid TAPX operand and reject
+        // the whole document instead of a table property.
+        modern = kSprmTJc;
+        size = 2;
+        mask_low_byte = true;
+        break;
       case kLegacySprmCFBold:
         modern = kSprmCFBold;
         size = 1;
@@ -495,7 +534,12 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
     }
     if (size > raw.size() - p)
       return LegacySprmScan::kStopped;
-    const Bytes operand = raw.subspan(p, size);
+    Bytes operand = raw.subspan(p, size);
+    if (mask_low_byte) {
+      // Rebuild the operand as low byte + zero high byte (sprmTJc only).
+      masked_low_byte[0] = operand[0];
+      operand = masked_low_byte;
+    }
     if (modern)
       AppendLegacySprm(out, modern, operand);
     if (modern_east_asia)

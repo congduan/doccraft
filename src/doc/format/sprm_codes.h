@@ -86,6 +86,18 @@ inline constexpr uint8_t kLegacySprmSDxaRight = 0xA7;
 inline constexpr uint8_t kLegacySprmSDyaTop = 0xA8;
 inline constexpr uint8_t kLegacySprmSDyaBottom = 0xA9;
 inline constexpr uint8_t kLegacySprmSDzaGutter = 0xAA;
+// Word 6/95 table properties. LibreOffice's GetWW6SprmSearcher lists 0xB6,
+// 0xB7, 0xB8 and 0xBD as two-byte and 0xB9/0xBA as one-byte operands
+// (`tap.jc jc (low order byte is significant)`, `tap.fCantSplit 1 or 0 byte`,
+// `tap.fTableHeader 1 or 0 byte`, `tap.dyaRowHeight dya word`). The opcodes
+// share the operand layout of their Word 97+ namesakes ([MS-DOC] 2.9.144
+// sprmTDxaLeft, 2.9.145 sprmTDxaGapHalf, 2.9.169 sprmTDyaRowHeight).
+inline constexpr uint8_t kLegacySprmTJc = 0xB6;
+inline constexpr uint8_t kLegacySprmTDxaLeft = 0xB7;
+inline constexpr uint8_t kLegacySprmTDxaGapHalf = 0xB8;
+inline constexpr uint8_t kLegacySprmTFCantSplit = 0xB9;
+inline constexpr uint8_t kLegacySprmTTableHeader = 0xBA;
+inline constexpr uint8_t kLegacySprmTDyaRowHeight = 0xBD;
 inline constexpr uint8_t kLegacySprmCFBold = 0x55;
 inline constexpr uint8_t kLegacySprmCFItalic = 0x56;
 inline constexpr uint8_t kLegacySprmCFStrike = 0x57;
