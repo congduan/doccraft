@@ -315,13 +315,31 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = kSprmPFPageBreakBefore;
         size = 1;
         break;
-      case kLegacySprmPChgTabsPapx: {
+      case kLegacySprmPChgTabsPapx:
+      case kLegacySprmPChgTabs: {
         // The cb byte selects between a flat length and the ChgTabsOperand
-        // counts; both must resolve inside the buffer.
+        // counts; both must resolve inside the buffer. The two opcodes keep
+        // their Word 97+ split: the Papx form (0x0F) deletes 2-byte XAS
+        // positions, the plain form (0x17) 32-bit ones ([MS-DOC] 2.9.180 and
+        // 2.9.183), which is exactly how sprmPChgTabsPapx/sprmPChgTabs read
+        // the operand, so the bytes pass through unchanged. Word 95 samples
+        // use the 2-byte form: 080_080742.doc carries
+        // `0F 07 01 0000 01 30FD 00`, one deleted position in two bytes.
         const std::optional<size_t> operand = ChgTabsOperandSize(raw, p);
         if (!operand)
           return LegacySprmScan::kStopped;
         size = *operand;
+        if (raw[p] == kChgTabsExtendedCb) {
+          // cb=0xFF is outside both Word 97+ operand definitions (PChgTabs
+          // documents it as "MAY be ignored", PChgTabsPapx caps cb at 255),
+          // and the counts behind it select 4-byte deleted entries even for
+          // the Papx form. Consume the resolved width and drop the modifier
+          // rather than hand a misaligned operand to the modern reader.
+          partial = true;
+        } else {
+          modern = code == kLegacySprmPChgTabsPapx ? kSprmPChgTabsPapx
+                                                   : kSprmPChgTabs;
+        }
         break;
       }
       case kLegacySprmPDxaRight:
@@ -428,14 +446,7 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         case LegacySprmWidth::kVar:
           if (p >= raw.size())
             return LegacySprmScan::kStopped;
-          if (code == kLegacySprmPChgTabs) {
-            const std::optional<size_t> operand = ChgTabsOperandSize(raw, p);
-            if (!operand)
-              return LegacySprmScan::kStopped;
-            size = *operand;
-          } else {
-            size = static_cast<size_t>(raw[p]) + 1 + spec->size;
-          }
+          size = static_cast<size_t>(raw[p]) + 1 + spec->size;
           break;
         case LegacySprmWidth::kVar2:
           if (raw.size() - p < 2)
