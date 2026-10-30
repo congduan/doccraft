@@ -430,7 +430,10 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0xB9` | sprmTFCantSplit | sprmTFCantSplit (0x3466) | 1B Bool8；r32 |
 | `0xBA` | sprmTTableHeader | sprmTTableHeader (0x3404) | 1B Bool8；r32 |
 | `0xBD` | sprmTDyaRowHeight | sprmTDyaRowHeight (0x9407) | 2B 有符号 YAS，负值映射为 `w:hRule="exact"`；r32；`LegacyWord.Word6TablePropertiesReachDocx`（正值 300 atLeast 与负值 -340 exact 各一例） |
-| `0xBB`/`0xBC`/`0xBE`/`0xBF`/`0xC0`–`0xC8` | sprmTTableBorders/TDefTable10/TDefTable/TDefTableShd 与编辑类 | —（按宽度跳过） | 0xBB 12B TypeBrc、0xBC/0xBE 16 位计数网格、0xBF spra=6 底纹、0xC0–0xC8 编辑操作；字节布局与现代不同，r32 不映射 |
+| `0xBB` | sprmTTableBorders | sprmTTableBorders (0xD613) | 12B = 6×2B BRC6（top/left/bottom/right/insideH/insideV）；重建 cb=0x30 + 6×8B Brc，ico 经 `Ico()` 转 COLORREF，全 1 字为 undefined、六边框全零则丢弃；r33；`LegacyWord.LegacyScanMapsLegacyTableBorders`（合成） |
+| `0xBC`/`0xBE` | sprmTDefTable10/sprmTDefTable | sprmTDefTable (0xD608) / sprmTDefTableObsolete (0xD606) | 2B cb + itcMac + (itcMac+1) XAS + itcMac×10B TC6；TC 完整时重建 20B TC80（TCGRF 复制、wWidth 0 由网格回填），短 TC 按 wvWare 早退只保留网格；r33；`LegacyWord.LegacyScanMapsLegacyTableDefinition`、`LegacyWord.LegacyScanKeepsGridWhenLegacyCellsAreShort`（合成） |
+| `0xBF` | sprmTDefTableShd | sprmTDefTableShd80 (0xD609) | cb + n×2B SHD（icoFore/icoBack/ipat，与 SHD80 同布局）原样转发，r31 的 cb 宽度语义不变；r33；`LegacyWord.LegacyScanConsumesTableShadingWithoutExtraFixedByte`、`LegacyWord.Word6TableBordersGridAndShadingReachDocx`（合成） |
+| `0xC0`–`0xC8` | sprmTTlp/TSetBrc/TInsert/TDelete/TDxaCol/TMerge/TSplit/TSetBrc10/TSetShd 等 | —（按宽度跳过） | 编辑类，字节布局与现代不同；r33 不映射 |
 | `0x85`/`0x92`/`0x94`/`0x95`/`0xA3`/`0xAB` | sprmSOlstAnm/SFAutoPgn/SDyaPgn/SDxaPgn/SBCustomize/SDMPaperReq | —（按宽度跳过） | 0x85 变长、0x94/0x95/0xAB 2B、0x92 1B、0xA3 0B；r28 未映射 |
 | `0x99` | sprmSGprfIhdt | —（故事选择专用） | 1B；页眉读取消费，不施加为节属性 |
 
