@@ -663,24 +663,14 @@ TEST(LegacyWord, LegacyScanResolvesChgTabsExtendedLength) {
   // GetSprmTailLen, case 23). One deleted tab occupies 4 bytes, one inserted
   // tab 3, so the operand ends after 3 + 4 + 3 bytes and italic still applies.
   std::vector<uint8_t> out;
-  std::vector<uint8_t> raw = {0x17, 0xFF, 0x01, 0x00, 0x00, 0x00, 0x00,
-                              0x01, 0x00, 0x00, 0x00, 0x56, 0x01};
+  const std::vector<uint8_t> raw = {0x17, 0xFF, 0x01, 0x00, 0x00, 0x00, 0x00,
+                                    0x01, 0x00, 0x00, 0x00, 0x56, 0x01};
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
             doccraft::doc::detail::LegacySprmScan::kPartial);
   ASSERT_EQ(out.size(), 3u);
   EXPECT_EQ(out[0], 0x36);
   EXPECT_EQ(out[1], 0x08);  // little-endian sprmCFItalic (0x0836).
   EXPECT_EQ(out[2], 0x01);
-  // sprmPChgTabsPapx (0x0F) shares the width rule, and its cb=0xFF form is
-  // still consumed without being translated: the 4-byte deleted entries of the
-  // resolved width do not fit the 2-byte PChgTabsPapxOperand. Like the 0x17
-  // form it now reports the dropped modifier as a skip.
-  out.clear();
-  raw[0] = 0x0F;
-  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
-            doccraft::doc::detail::LegacySprmScan::kPartial);
-  ASSERT_EQ(out.size(), 3u);
-  EXPECT_EQ(out[0], 0x36);
   // Empty counts leave a three-byte operand: 0xFF, nDel=0, nIns=0.
   out.clear();
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
@@ -698,11 +688,40 @@ TEST(LegacyWord, LegacyScanResolvesChgTabsExtendedLength) {
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
                 std::vector<uint8_t>{0x17, 0xFF, 0x00, 0x03, 0x00, 0x00}, out),
             doccraft::doc::detail::LegacySprmScan::kStopped);
-  // The Papx form uses the same count guard for its extended width.
-  out.clear();
+}
+
+TEST(LegacyWord, LegacyScanStopsOnPapxChgTabsExtendedCb) {
+  // PChgTabsPapxOperand defines cb in 2..254 ([MS-DOC] 2.9.180), so cb=0xFF
+  // has no width for sprmPChgTabsPapx (0x0F). The ChgTabsOperand counts belong
+  // to sprmPChgTabs (0x17) only: measuring the 0x0F operand with them would
+  // guess at a 4-byte deleted-entry layout the Papx form never carries. Stop
+  // the scan instead, so the FKP reader reports the unsupported sprm.
+  std::vector<uint8_t> out;
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
-                std::vector<uint8_t>{0x0F, 0xFF, 0x04, 0x00, 0x00}, out),
+                std::vector<uint8_t>{0x0F, 0xFF, 0x00, 0x00}, out),
             doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_TRUE(out.empty());
+  // A preceding modifier survives, but the sprmPJc behind the extended operand
+  // is never reached: its operand bytes would otherwise be read as opcodes.
+  out.clear();
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(
+          std::vector<uint8_t>{0x55, 1, 0x0F, 0xFF, 0x00, 0x00, 0x05, 2}, out),
+      doccraft::doc::detail::LegacySprmScan::kStopped);
+  ASSERT_EQ(out.size(), 3u);
+  EXPECT_EQ(out[0], 0x35);
+  EXPECT_EQ(out[1], 0x08);  // little-endian sprmCFBold (0x0835).
+  EXPECT_EQ(out[2], 0x01);
+  // The FKP path turns the stop into its unsupported-sprm warning, and the
+  // paragraph keeps no tab stops.
+  auto document = ParseWord6(Word6PapxDocument({0x0F, 0xFF, 0x00, 0x00}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].tabs.empty());
+  bool warned = false;
+  for (const auto& warning : document->warnings)
+    warned = warned || warning == "Word 6/95 FKP contains unsupported sprms";
+  EXPECT_TRUE(warned);
 }
 
 TEST(LegacyWord, Word6BadPictureReferenceIsSkippedWithWarning) {
