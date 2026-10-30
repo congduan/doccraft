@@ -724,6 +724,62 @@ TEST(LegacyWord, LegacyScanStopsOnPapxChgTabsExtendedCb) {
   EXPECT_TRUE(warned);
 }
 
+TEST(LegacyWord, LegacyScanMapsEastAsianParagraphFlags) {
+  // [MS-DOC] 2.9.215 lists the one-byte isprm space shared with Word 6/95:
+  // 0x35..0x3A are sprmPFKinsoku, sprmPFWordWrap, sprmPFOverflowPunct,
+  // sprmPFTopLinePunct, sprmPFAutoSpaceDE and sprmPFAutoSpaceDN, each with a
+  // one-byte Bool8 operand. Bug51944.doc's '內文' style ends with
+  // `37 00 3A 00 39 00`, so these flags must translate instead of stopping.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {0x35, 0, 0x36, 0, 0x37, 0,
+                                    0x38, 0, 0x39, 0, 0x3A, 0};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> expected = {
+      0x33, 0x24, 0,   // sprmPFKinsoku (0x2433)
+      0x34, 0x24, 0,   // sprmPFWordWrap (0x2434)
+      0x35, 0x24, 0,   // sprmPFOverflowPunct (0x2435)
+      0x36, 0x24, 0,   // sprmPFTopLinePunct (0x2436)
+      0x37, 0x24, 0,   // sprmPFAutoSpaceDE (0x2437)
+      0x38, 0x24, 0};  // sprmPFAutoSpaceDN (0x2438)
+  EXPECT_EQ(out, expected);
+  // A modifier behind the flags still reaches the IR.
+  auto document = ParseWord6(
+      Word6PapxDocumentWithRoom({0x37, 0, 0x3A, 0, 0x39, 0, 0x05, 2}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].align, 2);
+  const auto& paragraph = document->paragraphs[0];
+  EXPECT_TRUE(paragraph.overflow_punct_set);
+  EXPECT_FALSE(paragraph.overflow_punct);
+  EXPECT_TRUE(paragraph.auto_space_de_set);
+  EXPECT_FALSE(paragraph.auto_space_de);
+  EXPECT_TRUE(paragraph.auto_space_dn_set);
+  EXPECT_FALSE(paragraph.auto_space_dn);
+}
+
+TEST(LegacyWord, LegacyScanConsumesTableShadingWithoutExtraFixedByte) {
+  // sprmTDefTableShd (0xBF) is a spra=6 operand ([MS-DOC] 2.2.5.1): the first
+  // byte counts the rest of the operand. Bug50955.doc ends a PAPX grpprl with
+  // `BF 04 01 05 01 05` (cb = 4 and four shading bytes); adding the one fixed
+  // byte LibreOffice lists for L_VAR overruns the grpprl by one byte and stops
+  // the scan.
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0xBF, 0x04, 0x01, 0x05, 0x01, 0x05}, out),
+            doccraft::doc::detail::LegacySprmScan::kPartial);
+  EXPECT_TRUE(out.empty());
+  // The paragraph modifier behind the skipped operand still applies, and no
+  // unsupported-sprm warning is raised.
+  auto document = ParseWord6(Word6PapxDocumentWithWideGrpprl(
+      {0xBF, 0x04, 0x01, 0x05, 0x01, 0x05, 0x05, 0x02}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].align, 2);
+  for (const auto& warning : document->warnings)
+    EXPECT_NE(warning, "Word 6/95 FKP contains unsupported sprms");
+}
+
 TEST(LegacyWord, Word6BadPictureReferenceIsSkippedWithWarning) {
   std::vector<uint8_t> word(2560);
   Put16(word, 0, 0xA5DC);
