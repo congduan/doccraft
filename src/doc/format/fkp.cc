@@ -330,11 +330,16 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
           return LegacySprmScan::kStopped;
         size = *operand;
         if (raw[p] == kChgTabsExtendedCb) {
-          // cb=0xFF is outside both Word 97+ operand definitions (PChgTabs
-          // documents it as "MAY be ignored", PChgTabsPapx caps cb at 255),
-          // and the counts behind it select 4-byte deleted entries even for
-          // the Papx form. Consume the resolved width and drop the modifier
-          // rather than hand a misaligned operand to the modern reader.
+          // Only sprmPChgTabs documents the count-based ChgTabsOperand;
+          // PChgTabsPapxOperand caps cb at 254 ([MS-DOC] 2.9.180, 2.9.183).
+          // For the Papx form the width is therefore unknowable: stop instead
+          // of measuring its operand with counts that select 4-byte deleted
+          // entries, which would let the FKP reader slice later bytes as
+          // opcodes. The stop raises the existing unsupported-sprm warning.
+          if (code == kLegacySprmPChgTabsPapx)
+            return LegacySprmScan::kStopped;
+          // Consume the resolved width and drop the modifier rather than hand
+          // a misaligned operand to the modern reader.
           partial = true;
         } else {
           modern = code == kLegacySprmPChgTabsPapx ? kSprmPChgTabsPapx
