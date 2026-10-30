@@ -27,6 +27,9 @@ with tempfile.TemporaryDirectory() as directory:
     unreadable.chmod(0)
     for path, message in (
         (root / "missing.doc", "input path does not exist"),
+        # A missing parent maps to ENOTDIR/ERROR_PATH_NOT_FOUND, which must
+        # read as "does not exist" rather than "stat failed".
+        (root / "missing-dir" / "missing.doc", "input path does not exist"),
         (root, "input path is not a regular file"),
         (unreadable, "input file is not readable"),
     ):

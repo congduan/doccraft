@@ -12,26 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <sys/stat.h>
-#include <unistd.h>
-
-#include <cerrno>
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #ifdef __linux__
 #include <sys/resource.h>
+#endif
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
 #endif
 
 #include "base/charset.h"
@@ -45,21 +48,40 @@
 #include "model/document.h"
 
 namespace {
+// Portability note: this used to be stat(2) + S_ISREG + access(2), which only
+// exists on POSIX. std::filesystem gives the same three answers on all six
+// target platforms, with two caveats that the tests pin down:
+//   * a missing path reports file_type::not_found with a cleared error_code
+//     on libstdc++/libc++, and ERROR_PATH_NOT_FOUND maps to
+//     std::errc::no_such_file_or_directory on Windows, so both spellings of
+//     "does not exist" are handled below;
+//   * Windows carries no POSIX mode bits. permissions() only reflects the
+//     read-only attribute there, so the open probe is what actually proves
+//     readability on that platform (an ACL denial still fails to open).
 std::expected<void, doccraft::doc::Error> ValidateInput(const char* path) {
-  struct stat info {};
-  if (stat(path, &info) != 0) {
-    if (errno == ENOENT || errno == ENOTDIR)
+  std::error_code ec;
+  const std::filesystem::file_status status = std::filesystem::status(path, ec);
+  if (ec) {
+    if (ec == std::errc::no_such_file_or_directory ||
+        ec == std::errc::not_a_directory)
       return std::unexpected(doccraft::doc::Error{"input path does not exist"});
-    if (errno == EACCES)
+    if (ec == std::errc::permission_denied)
       return std::unexpected(
           doccraft::doc::Error{"input file is not readable"});
     return std::unexpected(doccraft::doc::Error{"input path stat failed"});
   }
-  if (!S_ISREG(info.st_mode))
+  if (status.type() == std::filesystem::file_type::not_found)
+    return std::unexpected(doccraft::doc::Error{"input path does not exist"});
+  if (!std::filesystem::is_regular_file(status))
     return std::unexpected(
         doccraft::doc::Error{"input path is not a regular file"});
-  if ((info.st_mode & (S_IRUSR | S_IRGRP | S_IROTH)) == 0 ||
-      access(path, R_OK) != 0)
+  constexpr std::filesystem::perms kReadBits =
+      std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+      std::filesystem::perms::others_read;
+  if ((status.permissions() & kReadBits) == std::filesystem::perms::none)
+    return std::unexpected(doccraft::doc::Error{"input file is not readable"});
+  std::ifstream probe(path, std::ios::binary);
+  if (!probe)
     return std::unexpected(doccraft::doc::Error{"input file is not readable"});
   return {};
 }
@@ -92,6 +114,14 @@ std::vector<uint8_t> ReadInput(std::ifstream& file) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+  // The C runtime opens the standard streams in text mode, which rewrites
+  // every "\n" as "\r\n". Diagnostics are compared byte for byte by the test
+  // suite and by callers that parse them, so keep them identical to the
+  // POSIX builds instead.
+  _setmode(_fileno(stdout), _O_BINARY);
+  _setmode(_fileno(stderr), _O_BINARY);
+#endif
   if (argc < 2) {
     std::fprintf(
         stderr,
