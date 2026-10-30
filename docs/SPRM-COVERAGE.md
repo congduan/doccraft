@@ -125,7 +125,7 @@
 | ✅ | `0x260A` | sprmPIlvl | An unsigned 8-bit integer that specifies the list level of the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0x460B` | sprmPIlfo | A 16-bit signed integer value that is used to determine which list contains the paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0x240C` | sprmPFNoLineNumb | A Bool8 value that specifies whether this paragraph is ignored when the application counts or displays line numbers. | 段落 PAP §2.6.2；M3Batch6.ParagraphLayoutFlags |
-| ✅ | `0xC60D` | sprmPChgTabsPapx | A PChgTabsPapxOperand value that specifies custom tab stops to be added or ignored. | 段落 PAP §2.6.2 |
+| ✅ | `0xC60D` | sprmPChgTabsPapx | A PChgTabsPapxOperand value that specifies custom tab stops to be added or ignored. | 段落 PAP §2.6.2；删除项（PChgTabsDel 的 2 字节 XAS 数组）与新增项按操作数顺序进入 `Paragraph::tabs`，分别输出 `w:tab w:val="clear"` 与对齐/leader 项；计数越界整条丢弃；`M3Batch2.ChgTabsDeletedStopsBecomeClear`、`M3Batch2.ChgTabsTruncatedDeleteListAddsNoStops` |
 | ✅ | `0x840E` | sprmPDxaRight80 | An XAS value that specifies the physical right indent of the paragraph, in twips. | 段落 PAP §2.6.2 |
 | ✅ | `0x840F` | sprmPDxaLeft80 | An XAS value that specifies the physical left indent of the paragraph, in twips. | 段落 PAP §2.6.2 |
 | ✅ | `0x4610` | sprmPNest80 | An XAS value that is added to sprmPDxaLeft80 to specify the final indent of a paragraph. | 段落 PAP §2.6.2；累加到 w:ind/@w:left；M3Batch7.ParagraphNestAndListLevelIncrement |
@@ -133,7 +133,7 @@
 | ✅ | `0x6412` | sprmPDyaLine | An LSPD value that specifies the spacing between lines in this paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xA413` | sprmPDyaBefore | A two-byte unsigned integer value that specifies the size, in twips, of the spacing before this paragraph. | 段落 PAP §2.6.2 |
 | ✅ | `0xA414` | sprmPDyaAfter | A two-byte unsigned integer value that specifies the size, in twips, of the spacing after this paragraph. | 段落 PAP §2.6.2 |
-| ✅ | `0xC615` | sprmPChgTabs | A PChgTabsOperand value that specifies custom tab stops that are added or ignored. | 段落 PAP §2.6.2 |
+| ✅ | `0xC615` | sprmPChgTabs | A PChgTabsOperand value that specifies custom tab stops that are added or ignored. | 段落 PAP §2.6.2；删除段为 rgdxaDel 位置数组 + rgdxaClose 半径数组（[MS-DOC] 2.9.181，位置连续存放），半径折叠为位置上的单点 `w:tab w:val="clear"`；`M3Batch2.ChgTabsCloseFormKeepsContiguousPositionArray`、`M3Batch2.ChgTabsCloseFormDeletedStopUsesXasOnly` |
 | ✅ | `0x2416` | sprmPFInTable | A Bool8 value that specifies whether this paragraph is in a table.；M3Batch3.TDefTableCellWidthBorderAndMerge | 段落 PAP §2.6.2 |
 | ✅ | `0x2417` | sprmPFTtp | A Bool8 that, when set to 1, specifies that the cell mark it is applied to is a Table Terminating Paragraph (TTP) mark.；M3Batch3.TDefTableCellWidthBorderAndMerge | 段落 PAP §2.6.2 |
 | ✅ | `0x8418` | sprmPDxaAbs | Horizontal absolute position of the paragraph frame relative to its anchor. | 段落 PAP §2.6.2；w:framePr/@w:x；M3Batch7.ParagraphFrameGeometry |
@@ -387,18 +387,18 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > 但未映射的 opcode 按宽度整项跳过，后续修饰继续解析；表外 opcode 或操作数
 > 截断仍停止该组并警告（无法确定宽度时不能把操作数误当 opcode）。
 > ChgTabs 家族（`0x0F`/`0x17`）的 cb 为 `0xFF` 时：`0x17` 不按 256 字节消费，
-> 而是按操作数自带的删除项数（4B/项）与插入项数（3B/项）重算长度，只消费不
+> 而是按操作数自带的删除项数（4B/项：位置数组与 rgdxaClose 半径数组并列）与插入项数（3B/项）重算长度，只消费不
 > 翻译，计数越界同样停止；`0x0F` 则直接停止扫描并警告（PChgTabsPapxOperand
 > 定义 cb<255，扩展形态无依据，按 0x17 的计数测宽会把操作数误当 opcode）。
 > r30 起两个 opcode 的平铺 cb 形态翻译为现代 0xC60D/0xC615 进入
-> `Paragraph::tabs`。
+> `Paragraph::tabs`；r36 起删除项经同一 `ApplyPara` 输出 `w:tab w:val="clear"`。
 
 | 旧版 opcode | sprm | 现代去向 | 备注 |
 |---|---|---|---|
 | `0x05` | sprmPJc | sprmPJc80 | 1B |
 | `0x07`/`0x08`/`0x09` | sprmPFKeep/KeepFollow/PageBreakBefore | 同名 | 1B |
-| `0x0F` | sprmPChgTabsPapx | sprmPChgTabsPapx (0xC60D) | 变长，按 cb 消费避免错位；删除项 2B/项（`080_080742.doc` 实测）；cb=0xFF 时停止扫描并警告（PChgTabsPapxOperand 定义 cb<255，扩展形态无依据）；`LegacyWord.Word6ChgTabsPapxReachesDocx`、`LegacyWord.LegacyScanStopsOnPapxChgTabsExtendedCb` |
-| `0x17` | sprmPChgTabs | sprmPChgTabs (0xC615) | 同上，删除项 4B/项；cb=0xFF 只消费不翻译；`LegacyWord.Word6ChgTabsFlatFormReachesDocx`、`LegacyWord.LegacyScanResolvesChgTabsExtendedLength` |
+| `0x0F` | sprmPChgTabsPapx | sprmPChgTabsPapx (0xC60D) | 变长，按 cb 消费避免错位；删除项 2B/项（`080_080742.doc` 实测），删除位置输出 `w:tab w:val="clear"`；cb=0xFF 时停止扫描并警告（PChgTabsPapxOperand 定义 cb<255，扩展形态无依据）；`LegacyWord.Word6ChgTabsPapxReachesDocx`、`LegacyWord.Word6ChgTabsClearOnlyReachesDocx`、`LegacyWord.LegacyScanStopsOnPapxChgTabsExtendedCb` |
+| `0x17` | sprmPChgTabs | sprmPChgTabs (0xC615) | 同上，删除段 4B/项（位置数组 + rgdxaClose 半径数组），半径折叠为单点 clear；cb=0xFF 只消费不翻译；`LegacyWord.Word6ChgTabsFlatFormReachesDocx`、`LegacyWord.LegacyScanResolvesChgTabsExtendedLength` |
 | `0x10`/`0x11`/`0x13` | sprmPDxaRight/Left/Left1 | sprmPDxa*80 | 2B |
 | `0x14` | sprmPDyaLine | 同名 | 4B |
 | `0x15`/`0x16` | sprmPDyaBefore/After | 同名 | 2B |
