@@ -22,6 +22,10 @@
 #include "doc/format/sprm_codes.h"
 
 namespace doccraft::doc::detail {
+// Word's fixed 16-entry palette. 0 means "auto" and yields -1; the legacy
+// table-border and shading readers share this mapping with the modern ones.
+int Ico(unsigned index);
+
 // Every PRL is parsed by its spra. Unknown modifiers retain their length so
 // later modifiers in the same grpprl remain reachable.
 template <class F>

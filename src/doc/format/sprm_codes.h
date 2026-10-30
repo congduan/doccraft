@@ -98,6 +98,16 @@ inline constexpr uint8_t kLegacySprmTDxaGapHalf = 0xB8;
 inline constexpr uint8_t kLegacySprmTFCantSplit = 0xB9;
 inline constexpr uint8_t kLegacySprmTTableHeader = 0xBA;
 inline constexpr uint8_t kLegacySprmTDyaRowHeight = 0xBD;
+// The compound Word 6/95 table operands. LibreOffice GetWW6SprmSearcher gives
+// 0xBB {12, L_FIX}, 0xBC/0xBE {0, L_VAR2} and 0xBF {1, L_VAR}; wvWare
+// wvApplysprmTTableBorders reads 0xBB as six two-byte BRC6 values and
+// wvApplysprmTDefTable reads 0xBC/0xBE as a two-byte cb, one-byte itcMac,
+// itcMac+1 XAS centres and itcMac ten-byte TC6 cells. 0xBF is a one-byte cb
+// followed by two-byte SHD palette pairs, the same pairs as SHD80.
+inline constexpr uint8_t kLegacySprmTTableBorders = 0xBB;
+inline constexpr uint8_t kLegacySprmTDefTable10 = 0xBC;
+inline constexpr uint8_t kLegacySprmTDefTable = 0xBE;
+inline constexpr uint8_t kLegacySprmTDefTableShd = 0xBF;
 inline constexpr uint8_t kLegacySprmCFBold = 0x55;
 inline constexpr uint8_t kLegacySprmCFItalic = 0x56;
 inline constexpr uint8_t kLegacySprmCFStrike = 0x57;
@@ -297,6 +307,11 @@ inline constexpr LegacySprmSpec kLegacySprmSpecs[] = {
     {0xB8, 2, LegacySprmWidth::kFix},   // sprmTDxaGapHalf
     {0xB9, 1, LegacySprmWidth::kFix},   // sprmTFCantSplit
     {0xBA, 1, LegacySprmWidth::kFix},   // sprmTTableHeader
+    // Complex table operands. The widths stay the same now that the mapper
+    // consumes them: 0xBB is six two-byte BRC6 borders, 0xBC/0xBE are a
+    // two-byte cb + itcMac + XAS centres + ten-byte TC6 cells, and 0xBF is a
+    // cb + two-byte SHD pairs. See ScanLegacySprms for the row/runtime
+    // reconstruction into the modern operands.
     {0xBB, 12, LegacySprmWidth::kFix},  // sprmTTableBorders
     {0xBC, 0, LegacySprmWidth::kVar2},  // sprmTDefTable10
     {0xBD, 2, LegacySprmWidth::kFix},   // sprmTDyaRowHeight
@@ -305,7 +320,8 @@ inline constexpr LegacySprmSpec kLegacySprmSpecs[] = {
     // follow it, so the operand is cb + 1 bytes and there is no extra fixed
     // byte. Bug50955.doc ends a PAPX grpprl with `BF 04 01 05 01 05` (cb = 4
     // plus four shading bytes), which LibreOffice's extra `1` (L_VAR nLen)
-    // would overrun by one byte.
+    // would overrun by one byte. The SHD pairs are already the SHD80 layout,
+    // so the operand is forwarded to sprmTDefTableShd80 unchanged.
     {0xBF, 0, LegacySprmWidth::kVar},  // sprmTDefTableShd
     {0xC0, 4, LegacySprmWidth::kFix},  // sprmTTlp
     {0xC1, 5, LegacySprmWidth::kFix},  // sprmTSetBrc

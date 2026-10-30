@@ -278,6 +278,104 @@ std::optional<size_t> ChgTabsOperandSize(Bytes raw, size_t p) {
   return kChgTabsCountBytes + kChgTabsDelEntrySize * del +
          kChgTabsInsEntrySize * ins + 1;
 }
+
+// Word 6/95 table operands, from wvWare's sprm.c and LibreOffice's
+// GetWW6SprmSearcher (these layouts predate [MS-DOC] section 2.9):
+// sprmTTableBorders is six two-byte BRC6 borders, sprmTDefTable(10) is a
+// two-byte cb, itcMac, itcMac+1 XAS centres and itcMac ten-byte TC6 cells, and
+// sprmTDefTableShd is a cb followed by two-byte SHD palette pairs.
+constexpr size_t kLegacyTableBordersSize = 12;
+constexpr size_t kLegacyBrc6Size = 2;
+constexpr size_t kLegacyTc6Size = 10;
+constexpr size_t kLegacyTc6BorderCount = 4;
+
+void PutU16(std::vector<uint8_t>& out, uint16_t v) {
+  out.push_back(static_cast<uint8_t>(v));
+  out.push_back(static_cast<uint8_t>(v >> 8));
+}
+
+void PutU16At(std::vector<uint8_t>& out, size_t p, uint16_t v) {
+  out[p] = static_cast<uint8_t>(v);
+  out[p + 1] = static_cast<uint8_t>(v >> 8);
+}
+
+void PutU32(std::vector<uint8_t>& out, uint32_t v) {
+  PutU16(out, static_cast<uint16_t>(v));
+  PutU16(out, static_cast<uint16_t>(v >> 16));
+}
+
+// BRC6: width(3), type(2), shadow(1), ico(5), space(5) (wvGetBRC_internal6).
+// The modern Brc is COLORREF(4), width, type, flags, reserved. The all-ones
+// word is treated as the two-byte analogue of the BRC80 undefined sentinel.
+void AppendBrc6(std::vector<uint8_t>& out, uint16_t v) {
+  if (v == kUndefinedU16) {
+    out.insert(out.end(), kBrcSize, 0xFF);
+    return;
+  }
+  PutU32(out, static_cast<uint32_t>(Ico((v >> 6) & 0x1F)));
+  out.push_back(static_cast<uint8_t>(v & 0x07));
+  out.push_back(static_cast<uint8_t>((v >> 3) & 0x03));
+  uint8_t flags = static_cast<uint8_t>((v >> 11) & kBrcSpaceMask);
+  if ((v >> 5) & 1)
+    flags |= kBrcShadow;
+  out.push_back(flags);
+  out.push_back(0);
+}
+
+// TC6: two-byte TCGRF, then four two-byte BRC10 borders. TCGRF has the same
+// merge and text-flow layout as TC80, so it is copied; the width is left zero
+// because the column grid supplies it. The BRC10 borders are not converted:
+// the corpus carries no one-to-one case (the only non-zero word is 0x03CA, a
+// two-line hairline) and wvWare's own mapping is marked uncertain.
+void AppendTc80FromTc6(std::vector<uint8_t>& out, Bytes tc6) {
+  PutU16(out, U16(tc6, 0));
+  PutU16(out, 0);
+  for (size_t i = 0; i < kLegacyTc6BorderCount; i++)
+    PutU32(out, 0);
+}
+
+bool LegacyTableBordersAllZero(Bytes v) {
+  for (size_t i = 0; i < kTableBorderCount; i++)
+    if (U16(v, i * kLegacyBrc6Size))
+      return false;
+  return true;
+}
+
+void RebuildLegacyTableBorders(Bytes v, std::vector<uint8_t>& out) {
+  out.clear();
+  out.push_back(static_cast<uint8_t>(kTableBorderCount * kBrcSize));
+  for (size_t i = 0; i < kTableBorderCount; i++)
+    AppendBrc6(out, U16(v, i * kLegacyBrc6Size));
+}
+
+// Rebuilds a Word 6/95 sprmTDefTable operand as a modern sprmTDefTable
+// (20-byte TC80 cells) when the TC6 array is complete, or as the grid-only
+// sprmTDefTableObsolete when it is short (wvApplysprmTDefTable keeps the grid
+// and returns before the cells in that case).
+bool RebuildLegacyTableDefinition(Bytes v, std::vector<uint8_t>& out,
+                                  uint16_t& modern) {
+  if (v.size() < kTDefHeaderSize)
+    return false;
+  const size_t count = v[kTDefCountOffset];
+  const size_t header = kTDefHeaderSize + kTableRangeSize * (count + 1);
+  if (count > kMaxTableCells || v.size() < header)
+    return false;
+  const size_t cells = v.size() - header;
+  out.assign(2, 0);
+  out.insert(out.end(), v.begin() + 2, v.begin() + header);
+  if (cells >= count * kLegacyTc6Size) {
+    for (size_t i = 0; i < count; i++)
+      AppendTc80FromTc6(out,
+                        v.subspan(header + i * kLegacyTc6Size, kLegacyTc6Size));
+    modern = kSprmTDefTable;
+  } else {
+    modern = kSprmTDefTableObsolete;
+  }
+  PutU16At(out, 0, static_cast<uint16_t>(out.size() - 1));
+  return true;
+}
+
+enum class LegacyTableTransform { kNone, kBorders, kDefinition };
 }  // namespace
 
 // Word 6/95 grpprls use one-byte opcodes. Translate the scalar properties
@@ -300,6 +398,7 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
     bool mask_low_byte = false;
     uint8_t masked_low_byte[2] = {};
     bool mapped = true;
+    LegacyTableTransform transform = LegacyTableTransform::kNone;
     switch (code) {
       case kLegacySprmPJc:
         modern = kSprmPJc80;
@@ -427,6 +526,39 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
       // `tap.fCantSplit`, `tap.fTableHeader` and `tap.dyaRowHeight` with the
       // same widths, and [MS-DOC] 2.9.144/2.9.145/2.9.169 give the modern
       // handlers those operands.
+      case kLegacySprmTTableBorders:
+        modern = kSprmTTableBorders;
+        size = kLegacyTableBordersSize;
+        transform = LegacyTableTransform::kBorders;
+        break;
+      case kLegacySprmTDefTable10:
+      case kLegacySprmTDefTable:
+        modern = kSprmTDefTable;
+        if (raw.size() - p < 2)
+          return LegacySprmScan::kStopped;
+        {
+          const size_t count = U16(raw, p);
+          if (!count)
+            return LegacySprmScan::kStopped;
+          size = count + 1;  // Two-byte count, then count - 1 bytes.
+        }
+        transform = LegacyTableTransform::kDefinition;
+        break;
+      case kLegacySprmTDefTableShd:
+        // One cb byte then 2-byte SHD pairs, exactly the DefTableShd80Operand
+        // the modern handler reads ([MS-DOC] 2.9.52). An odd cb cannot be a
+        // whole number of cells, so consume the modifier and drop it instead
+        // of handing the modern reader an operand it would reject.
+        if (p >= raw.size())
+          return LegacySprmScan::kStopped;
+        size = static_cast<size_t>(raw[p]) + 1;
+        if (raw[p] % kShd80Size) {
+          modern = 0;
+          partial = true;
+        } else {
+          modern = kSprmTDefTableShd80;
+        }
+        break;
       case kLegacySprmTDxaLeft:
         modern = kSprmTDxaLeft;
         size = 2;
@@ -535,6 +667,29 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
     if (size > raw.size() - p)
       return LegacySprmScan::kStopped;
     Bytes operand = raw.subspan(p, size);
+    // Rebuild the legacy table operands into the modern byte layout before
+    // they reach the shared handlers. `rebuilt` outlives the append below.
+    std::vector<uint8_t> rebuilt;
+    if (transform == LegacyTableTransform::kBorders) {
+      // An all-zero operand is the Word 6/95 default (no borders); drop it
+      // instead of materialising six explicit nil borders.
+      if (LegacyTableBordersAllZero(operand)) {
+        modern = 0;
+      } else {
+        RebuildLegacyTableBorders(operand, rebuilt);
+        operand = rebuilt;
+      }
+    } else if (transform == LegacyTableTransform::kDefinition) {
+      if (RebuildLegacyTableDefinition(operand, rebuilt, modern)) {
+        operand = rebuilt;
+      } else {
+        // The width is known even when the payload is not a valid grid, so
+        // step over it and drop the modifier instead of stranding later
+        // properties in the same grpprl.
+        modern = 0;
+        partial = true;
+      }
+    }
     if (mask_low_byte) {
       // Rebuild the operand as low byte + zero high byte (sprmTJc only).
       masked_low_byte[0] = operand[0];
