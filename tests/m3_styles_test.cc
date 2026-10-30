@@ -370,3 +370,214 @@ TEST(M3Styles, FontTableDecoding) {
                   doc::Fib::Range{0, static_cast<uint32_t>(truncated.size())})
                   .empty());
 }
+
+// ---------------------------------------------------------------------------
+// r37: paragraph tab-stop inheritance. [MS-DOC] 2.9.180/2.9.183 defines the
+// ChgTabs operand as deleted positions followed by added ones; a style's own
+// tabs therefore act on the set inherited through based-on instead of
+// replacing it.
+namespace {
+struct TabAdd {
+  int position;
+  int align;
+  int leader;
+};
+
+std::vector<uint8_t> ChgTabs(const std::vector<int>& deleted,
+                             const std::vector<TabAdd>& added) {
+  std::vector<uint8_t> out{0, static_cast<uint8_t>(deleted.size())};
+  for (int pos : deleted) {
+    out.push_back(static_cast<uint8_t>(pos & 0xFF));
+    out.push_back(static_cast<uint8_t>((pos >> 8) & 0xFF));
+  }
+  out.push_back(static_cast<uint8_t>(added.size()));
+  // PChgTabsPapxOperand keeps all added positions together, followed by their
+  // one-byte tbd kind/leader flags.
+  for (const auto& tab : added) {
+    out.push_back(static_cast<uint8_t>(tab.position & 0xFF));
+    out.push_back(static_cast<uint8_t>((tab.position >> 8) & 0xFF));
+  }
+  for (const auto& tab : added)
+    out.push_back(static_cast<uint8_t>(tab.align | (tab.leader << 3)));
+  out[0] = static_cast<uint8_t>(out.size() - 1);
+  return out;
+}
+
+// One paragraph style whose PAPX carries the given tab change.
+Std TabStyle(const std::string& name, int base, const std::vector<int>& deleted,
+             const std::vector<TabAdd>& added) {
+  Std style;
+  style.name = name;
+  style.base = base;
+  style.blocks.push_back(Prl(0xC60D, ChgTabs(deleted, added)));
+  style.blocks.back().insert(style.blocks.back().begin(), {0, 0});
+  return style;
+}
+
+bool HasStop(const std::vector<model::TabStop>& tabs, int position) {
+  return std::any_of(tabs.begin(), tabs.end(), [&](const auto& tab) {
+    return tab.position == position;
+  });
+}
+
+std::string StyleBlock(const std::string& xml, const std::string& style_id) {
+  const std::string open =
+      "<w:style w:type=\"paragraph\" w:styleId=\"" + style_id + "\">";
+  size_t start = xml.find(open);
+  if (start == std::string::npos)
+    return {};
+  size_t end = xml.find("</w:style>", start);
+  return xml.substr(start, end - start);
+}
+}  // namespace
+
+TEST(M3Styles, TabsMergeWithBaseInsteadOfReplacing) {
+  // Derived adds 2in centered and clears the inherited 2in right stop, then
+  // adds 3in left. The 1in left stop from the base must survive.
+  auto styles = Read(
+      BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}, {2880, 2, 0}}),
+                 TabStyle("Child", 0, {2880}, {{2880, 1, 0}, {4320, 0, 0}})}));
+  ASSERT_EQ(styles.size(), 2u);
+  const auto& tabs = styles[1].resolved_paragraph.tabs;
+  ASSERT_EQ(tabs.size(), 3u);
+  EXPECT_EQ(tabs[0].position, 1440);
+  EXPECT_EQ(tabs[0].align, 0);
+  EXPECT_EQ(tabs[1].position, 2880);
+  EXPECT_EQ(tabs[1].align, 1);
+  EXPECT_EQ(tabs[2].position, 4320);
+  for (const auto& tab : tabs)
+    EXPECT_FALSE(tab.clear);
+}
+
+TEST(M3Styles, TabsClearRemovesInheritedStop) {
+  auto styles =
+      Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}, {2880, 2, 0}}),
+                      TabStyle("Child", 0, {1440}, {{2160, 0, 0}})}));
+  ASSERT_EQ(styles.size(), 2u);
+  const auto& tabs = styles[1].resolved_paragraph.tabs;
+  ASSERT_EQ(tabs.size(), 2u);
+  EXPECT_TRUE(HasStop(tabs, 2160));
+  EXPECT_TRUE(HasStop(tabs, 2880));
+  EXPECT_FALSE(HasStop(tabs, 1440));
+}
+
+TEST(M3Styles, StyleOutputUsesResolvedTabsAndClearsDeletedBaseStop) {
+  // LibreOffice writes the resolved set into the derived style and keeps a
+  // w:val="clear" entry for every based-on stop the derived style removes.
+  model::Document d;
+  d.styles =
+      Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}, {2880, 2, 0}}),
+                      TabStyle("Child", 0, {2880}, {{2160, 0, 0}})}));
+  ASSERT_EQ(d.styles.size(), 2u);
+  const std::string xml = Part(d, "word/styles.xml");
+  const std::string child = StyleBlock(xml, "Heading1");
+  ASSERT_FALSE(child.empty());
+  const size_t tabs = child.find("<w:tabs>");
+  ASSERT_NE(tabs, std::string::npos);
+  const std::string block = child.substr(tabs, child.find("</w:tabs>") - tabs);
+  EXPECT_NE(block.find("<w:tab w:val=\"clear\" w:pos=\"2880\"/>"),
+            std::string::npos);
+  EXPECT_NE(block.find("<w:tab w:val=\"left\" w:pos=\"1440\"/>"),
+            std::string::npos);
+  EXPECT_NE(block.find("<w:tab w:val=\"left\" w:pos=\"2160\"/>"),
+            std::string::npos);
+  EXPECT_EQ(block.find("w:val=\"right\" w:pos=\"2880\""), std::string::npos);
+}
+
+TEST(M3Styles, StyleWithoutOwnTabsLeavesInheritanceToBasedOn) {
+  model::Document d;
+  d.styles = Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}}),
+                             TabStyle("Child", 0, {}, {})}));
+  ASSERT_EQ(d.styles.size(), 2u);
+  const std::string xml = Part(d, "word/styles.xml");
+  const std::string child = StyleBlock(xml, "Heading1");
+  ASSERT_FALSE(child.empty());
+  EXPECT_EQ(child.find("<w:tabs>"), std::string::npos);
+  EXPECT_NE(child.find("<w:basedOn w:val=\"Normal\"/>"), std::string::npos);
+}
+
+TEST(M3Styles, ParagraphTabAddOverridesStyleStop) {
+  model::Document d;
+  d.styles =
+      Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}, {2880, 1, 0}})}));
+  d.paragraphs.resize(1);
+  d.paragraphs[0].style = 0;
+  d.paragraphs[0].tabs.push_back({2880, 2, 0, false});
+  const std::string xml = Part(d, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tab w:val=\"right\" w:pos=\"2880\"/>"),
+            std::string::npos);
+  EXPECT_EQ(xml.find("w:val=\"center\" w:pos=\"2880\""), std::string::npos);
+  EXPECT_EQ(xml.find("w:val=\"clear\""), std::string::npos);
+}
+
+TEST(M3Styles, ParagraphTabClearEmitsClearForStyleStop) {
+  model::Document d;
+  d.styles =
+      Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}, {2880, 1, 0}})}));
+  d.paragraphs.resize(1);
+  d.paragraphs[0].style = 0;
+  d.paragraphs[0].tabs.push_back({1440, 0, 0, true});
+  const std::string xml = Part(d, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tab w:val=\"clear\" w:pos=\"1440\"/>"),
+            std::string::npos);
+  // The untouched inherited stop is left to the style, as LibreOffice does.
+  EXPECT_EQ(xml.find("w:pos=\"2880\""), std::string::npos);
+}
+
+TEST(M3Styles, ParagraphTabClearWithoutStyleStopIsDropped) {
+  model::Document d;
+  d.styles = Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}})}));
+  d.paragraphs.resize(1);
+  d.paragraphs[0].style = 0;
+  d.paragraphs[0].tabs.push_back({3600, 0, 0, true});
+  const std::string xml = Part(d, "word/document.xml");
+  EXPECT_EQ(xml.find("<w:tabs>"), std::string::npos);
+}
+
+TEST(M3Styles, ParagraphTabClearThenAddAtSamePositionKeepsAddOnly) {
+  model::Document d;
+  d.styles = Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}})}));
+  d.paragraphs.resize(1);
+  d.paragraphs[0].style = 0;
+  d.paragraphs[0].tabs.push_back({1440, 0, 0, true});
+  d.paragraphs[0].tabs.push_back({1440, 2, 0, false});
+  const std::string xml = Part(d, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tab w:val=\"right\" w:pos=\"1440\"/>"),
+            std::string::npos);
+  EXPECT_EQ(xml.find("w:val=\"clear\""), std::string::npos);
+}
+
+TEST(M3Styles, ParagraphTabAddsAreSortedByPosition) {
+  model::Document d;
+  d.styles = Read(BuildStsh({TabStyle("Base", -1, {}, {{1440, 0, 0}})}));
+  d.paragraphs.resize(1);
+  d.paragraphs[0].style = 0;
+  d.paragraphs[0].tabs.push_back({3600, 0, 0, false});
+  d.paragraphs[0].tabs.push_back({720, 2, 0, false});
+  const std::string xml = Part(d, "word/document.xml");
+  size_t first = xml.find("<w:tab w:val=\"right\" w:pos=\"720\"/>");
+  size_t second = xml.find("<w:tab w:val=\"left\" w:pos=\"3600\"/>");
+  ASSERT_NE(first, std::string::npos);
+  ASSERT_NE(second, std::string::npos);
+  EXPECT_LT(first, second);
+}
+
+TEST(M3Styles, UnstyledParagraphKeepsDirectTabsVerbatim) {
+  // Without a style sheet there is no inherited set to check, so the operand
+  // order (deletes first) and every clear entry are preserved as before r37.
+  model::Document d;
+  d.paragraphs.resize(1);
+  d.paragraphs[0].style = 0;
+  d.paragraphs[0].tabs.push_back({-31681, 0, 0, true});
+  d.paragraphs[0].tabs.push_back({720, 0, 0, true});
+  d.paragraphs[0].tabs.push_back({3600, 2, 0, false});
+  const std::string xml = Part(d, "word/document.xml");
+  size_t first = xml.find("<w:tab w:val=\"clear\" w:pos=\"-31681\"/>");
+  size_t second = xml.find("<w:tab w:val=\"clear\" w:pos=\"720\"/>");
+  size_t add = xml.find("<w:tab w:val=\"right\" w:pos=\"3600\"/>");
+  ASSERT_NE(first, std::string::npos);
+  ASSERT_NE(second, std::string::npos);
+  ASSERT_NE(add, std::string::npos);
+  EXPECT_LT(first, second);
+  EXPECT_LT(second, add);
+}

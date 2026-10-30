@@ -127,6 +127,39 @@ void WriteStyleTablePr(pugi::xml_node sn, const model::Style& style) {
   }
 }
 
+// Tabs to write into a style's w:pPr. The resolved set already contains the
+// based-on stops; LibreOffice writes that full set into the derived style. If
+// the style keeps its w:basedOn link, stops removed from the base also need a
+// w:val="clear" entry so the link does not re-introduce them.
+std::vector<model::TabStop> WrittenStyleTabs(const model::Document& document,
+                                             const model::Style& style,
+                                             bool based_on) {
+  // A style with no tab change of its own inherits the based-on set through
+  // w:basedOn; re-emitting it would duplicate the link's work.
+  if (style.paragraph.tabs.empty()) {
+    return {};
+  }
+  std::vector<model::TabStop> tabs = style.resolved_paragraph.tabs;
+  SortTabsByPosition(&tabs);
+  if (!based_on) {
+    return tabs;
+  }
+  const std::vector<model::TabStop>& base =
+      document.styles[style.base].resolved_paragraph.tabs;
+  std::vector<model::TabStop> clears;
+  for (const auto& stop : base) {
+    if (!HasTabAt(tabs, stop.position)) {
+      model::TabStop clear;
+      clear.position = stop.position;
+      clear.clear = true;
+      clears.push_back(clear);
+    }
+  }
+  SortTabsByPosition(&clears);
+  clears.insert(clears.end(), tabs.begin(), tabs.end());
+  return clears;
+}
+
 void WriteStyle(pugi::xml_node styles, const model::Document& document,
                 size_t index, const model::Style& style) {
   const char* types[] = {"", "paragraph", "character", "table", "numbering"};
@@ -137,9 +170,11 @@ void WriteStyle(pugi::xml_node styles, const model::Document& document,
     Attr(sn, "w:default", "1");
   }
   Attr(sn.append_child("w:name"), "w:val", style.name);
-  if (style.base >= 0 &&
+  const bool based_on =
+      style.base >= 0 &&
       static_cast<size_t>(style.base) < document.styles.size() &&
-      !document.styles[style.base].name.empty()) {
+      !document.styles[style.base].name.empty();
+  if (based_on) {
     Attr(sn.append_child("w:basedOn"), "w:val", Id(style.base));
   }
   if (style.next >= 0 &&
@@ -149,7 +184,9 @@ void WriteStyle(pugi::xml_node styles, const model::Document& document,
     Attr(sn.append_child("w:next"), "w:val", Id(style.next));
   }
   if (style.type == 1 || style.type == 3 || style.type == 4) {
-    ParaPr(sn, style.paragraph, true);
+    std::vector<model::TabStop> tabs =
+        WrittenStyleTabs(document, style, based_on);
+    ParaPr(sn, style.paragraph, true, &tabs);
   }
   RunPr(sn, style.run, &document);
   // CT_Style places w:tblPr after w:pPr/w:rPr.

@@ -184,19 +184,95 @@ void WriteParagraphTrailingPr(pugi::xml_node pr, const model::Paragraph& p) {
   }
 }
 
-void WriteParagraphTabs(pugi::xml_node pr, const model::Paragraph& p) {
-  if (p.tabs.empty()) {
+bool HasTabAt(const std::vector<model::TabStop>& tabs, int position) {
+  return std::any_of(tabs.begin(), tabs.end(), [&](const auto& tab) {
+    return tab.position == position;
+  });
+}
+
+void SortTabsByPosition(std::vector<model::TabStop>* tabs) {
+  std::stable_sort(tabs->begin(), tabs->end(),
+                   [](const auto& a, const auto& b) {
+                     return a.position < b.position;
+                   });
+}
+
+// Tabs to write for a paragraph. OOXML still inherits the style's stops
+// through w:pStyle, so only the paragraph's own changes are emitted: an add
+// overrides the inherited stop, and a clear is kept only when the inherited
+// set really has that position. An unmatched clear is dropped because it would
+// name a stop no consumer can hold (LibreOffice does the same). Without a
+// resolvable paragraph style there is nothing to compare against, so the
+// operand is written verbatim.
+std::vector<model::TabStop> WrittenParagraphTabs(
+    const model::Paragraph& p, const model::Document* document) {
+  if (p.tabs.empty() || !document || p.style < 0 ||
+      static_cast<size_t>(p.style) >= document->styles.size()) {
+    return p.tabs;
+  }
+  const model::Style& style = document->styles[p.style];
+  if (style.type != 1) {
+    return p.tabs;
+  }
+  const std::vector<model::TabStop>& inherited = style.resolved_paragraph.tabs;
+  std::vector<model::TabStop> effective = inherited;
+  std::vector<int> added;
+  for (const auto& tab : p.tabs) {
+    auto it = std::find_if(effective.begin(), effective.end(),
+                           [&](const auto& stop) {
+                             return stop.position == tab.position;
+                           });
+    if (tab.clear) {
+      if (it != effective.end())
+        effective.erase(it);
+      added.erase(std::remove(added.begin(), added.end(), tab.position),
+                  added.end());
+    } else {
+      if (it != effective.end())
+        *it = tab;
+      else
+        effective.push_back(tab);
+      if (std::find(added.begin(), added.end(), tab.position) == added.end())
+        added.push_back(tab.position);
+    }
+  }
+  std::vector<model::TabStop> clears;
+  for (const auto& stop : inherited) {
+    if (!HasTabAt(effective, stop.position) &&
+        !HasTabAt(clears, stop.position)) {
+      model::TabStop clear;
+      clear.position = stop.position;
+      clear.clear = true;
+      clears.push_back(clear);
+    }
+  }
+  std::vector<model::TabStop> additions;
+  for (const auto& stop : effective) {
+    if (std::find(added.begin(), added.end(), stop.position) != added.end())
+      additions.push_back(stop);
+  }
+  SortTabsByPosition(&clears);
+  SortTabsByPosition(&additions);
+  clears.insert(clears.end(), additions.begin(), additions.end());
+  return clears;
+}
+
+void WriteParagraphTabs(pugi::xml_node pr,
+                        const std::vector<model::TabStop>& tabs_in) {
+  if (tabs_in.empty()) {
     return;
   }
   auto tabs = pr.append_child("w:tabs");
   const char* aligns[] = {"left", "center", "right", "decimal", "bar", "num"};
   const char* leaders[] = {"none",       "dot",   "hyphen",
                            "underscore", "heavy", "middleDot"};
-  for (const auto& tab : p.tabs) {
+  for (const auto& tab : tabs_in) {
     auto stop = tabs.append_child("w:tab");
     // A deleted stop removes a style-inherited one; Word writes no leader for
-    // it. The IR keeps the operand order (deletes first), so a later add at
-    // the same position wins exactly as it does in Word.
+    // it. Unstyled paragraphs keep the operand order (deletes first), so a
+    // later add at the same position wins exactly as it does in Word; styled
+    // paragraphs have already been merged into clear/add groups by
+    // WrittenParagraphTabs().
     if (tab.clear) {
       Attr(stop, "w:val", "clear");
     } else {
@@ -230,7 +306,8 @@ void WriteParagraphBorders(pugi::xml_node pr, const model::Paragraph& p) {
 }
 
 void ParaPr(pugi::xml_node parent, const model::Paragraph& p,
-            bool style_props = false) {
+            bool style_props = false,
+            const std::vector<model::TabStop>* tabs = nullptr) {
   auto pr = parent.append_child("w:pPr");
   if (!style_props && p.style >= 0) {
     Attr(pr.append_child("w:pStyle"), "w:val", Id(p.style));
@@ -246,7 +323,7 @@ void ParaPr(pugi::xml_node parent, const model::Paragraph& p,
   SpecBool(pr, "w:suppressLineNumbers", p.no_line_number, p.no_line_number_set);
   WriteParagraphBorders(pr, p);
   ShadePr(pr, p.shade, p.shade_fore, p.shade_pattern);
-  WriteParagraphTabs(pr, p);
+  WriteParagraphTabs(pr, tabs ? *tabs : p.tabs);
   WriteParagraphEastAsianFlags(pr, p);
   WriteParagraphSpacing(pr, p);
   WriteParagraphIndent(pr, p);

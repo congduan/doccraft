@@ -356,7 +356,8 @@ std::expected<void, Error> WriteParagraph(pugi::xml_node parent,
                                           const model::Section* break_section,
                                           WriteContext& ctx) {
   auto pn = parent.append_child("w:p");
-  ParaPr(pn, p);
+  std::vector<model::TabStop> tabs = WrittenParagraphTabs(p, ctx.document);
+  ParaPr(pn, p, false, &tabs);
   if (break_section) {
     auto result = SectionPr(pn.child("w:pPr").append_child("w:sectPr"),
                             *break_section, &ctx);

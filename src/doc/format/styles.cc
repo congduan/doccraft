@@ -175,8 +175,24 @@ void OverlayParagraph(model::Paragraph& dst, const model::Paragraph& src) {
   }
   if (src.list_level_inc)
     dst.list_level_inc = src.list_level_inc;
-  if (!src.tabs.empty())
-    dst.tabs = src.tabs;
+  // ChgTabs applies to the inherited tab set ([MS-DOC] 2.9.183): a deleted
+  // position removes the inherited stop, an added one replaces the stop at the
+  // same position or appends a new one. A derived style must not drop the base
+  // style's stops wholesale.
+  for (const auto& tab : src.tabs) {
+    auto it = std::find_if(dst.tabs.begin(), dst.tabs.end(),
+                           [&](const model::TabStop& stop) {
+                             return stop.position == tab.position;
+                           });
+    if (tab.clear) {
+      if (it != dst.tabs.end())
+        dst.tabs.erase(it);
+    } else if (it != dst.tabs.end()) {
+      *it = tab;
+    } else {
+      dst.tabs.push_back(tab);
+    }
+  }
   for (size_t k = 0; k < 4; k++)
     if (src.borders[k].set)
       dst.borders[k] = src.borders[k];
