@@ -778,21 +778,25 @@ TEST(M15StoryPlc, BadEndnoteTextKeepsFootnote) {
   EXPECT_TRUE(Part(*zip, "word/endnotes.xml").empty());
 }
 
-TEST(M15StoryPlc, OutOfRangeFootnoteTextCpSkipsStoryWithoutClamp) {
-  // Word 97+ has no legacy text-PLC guard: a note range past ccpFtn still
-  // skips the story PLC with a warning instead of clamping to the story.
-  Synthetic s = Build("Body\r", "Foot\r\r", "", "", "");
-  s.fib.fnd_ref = PutNoteRefPlc(s, 1);
+TEST(M15StoryPlc, FootnoteTailCpWithinGuardClampsStory) {
+  // Word 97+ allows the text PLC tail to sit up to two CPs past ccpFtn (the
+  // final story's paragraph marks); the note is clamped to the story and
+  // still reaches footnotes.xml. See m3_note_text_guard_test.cc for the
+  // whole guard matrix.
+  Synthetic s = Build("Body\x02\r", "Foot\r\r", "", "", "");
+  s.fib.fnd_ref = PutNoteRefPlc(s, 4);
   s.fib.fnd_txt = PutTextCpPlc(s, s.fib.ccp_ftn + 1);
   auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
-  ASSERT_EQ(parsed->warnings.size(), 1u);
-  EXPECT_EQ(parsed->warnings[0],
-            "skipped footnote story PLC: invalid note text PLC CP range");
-  EXPECT_TRUE(parsed->notes.empty());
+  EXPECT_TRUE(parsed->warnings.empty());
+  ASSERT_EQ(parsed->notes.size(), 1u);
+  ASSERT_FALSE(parsed->notes[0].paragraphs.empty());
+  EXPECT_EQ(parsed->notes[0].paragraphs[0].runs[0].text, "Foot");
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip);
-  EXPECT_TRUE(Part(*zip, "word/footnotes.xml").empty());
+  const std::string footnotes = Part(*zip, "word/footnotes.xml");
+  ASSERT_FALSE(footnotes.empty());
+  EXPECT_NE(footnotes.find(">Foot</w:t>"), std::string::npos);
   EXPECT_NE(Part(*zip, "word/document.xml").find("Body"), std::string::npos);
 }
 
