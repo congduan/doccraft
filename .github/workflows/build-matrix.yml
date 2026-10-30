@@ -1,0 +1,87 @@
+name: build-matrix
+
+# Three hosted platforms must build and pass ctest. The conversion itself is
+# pure C++23, so a failure here means a platform layer (src/base, src/cli) or a
+# vendored file regressed - not the format logic.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            warnings_as_errors: "ON"
+            # Empty: every test runs.
+            ctest_exclude: ""
+          - name: macos-clang
+            os: macos-latest
+            warnings_as_errors: "ON"
+            ctest_exclude: ""
+          - name: windows-msvc
+            os: windows-latest
+            # MSVC's warning set differs from GCC/Clang, so the matrix starts
+            # with warnings as errors off on that target and turns them on
+            # once the build is clean. The charset Win32 backend is still
+            # compiled and exercised here.
+            warnings_as_errors: "OFF"
+            # cli_input_path asserts POSIX mode bits: it chmods a file to 0 and
+            # requires "input file is not readable". Windows has no such bits
+            # (chmod only toggles the read-only attribute), so the case cannot
+            # be expressed there. It still runs on Linux and macOS.
+            ctest_exclude: "cli_input_path"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DDOCCRAFT_WARNINGS_AS_ERRORS=${{ matrix.warnings_as_errors }}
+
+      # --config Release is required by multi-config generators (Visual
+      # Studio) and ignored by single-config ones (Makefiles, Ninja).
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        if: matrix.ctest_exclude == ''
+        run: ctest --test-dir build --config Release --output-on-failure --timeout 300
+
+      - name: Test (POSIX-only cases excluded)
+        if: matrix.ctest_exclude != ''
+        run: >
+          ctest --test-dir build --config Release --output-on-failure
+          --timeout 300 -E "${{ matrix.ctest_exclude }}"
+
+  # The shape WebAssembly, Android and iOS consume: libraries only, no CLI, no
+  # googletest (so this job needs no network beyond the checkout). It fails the
+  # build if anything in the library path starts depending on stdio, files or
+  # the test-only schema validator.
+  library-only:
+    name: linux-library-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-lib
+          -DCMAKE_BUILD_TYPE=Release
+          -DDOCCRAFT_BUILD_CLI=OFF
+          -DDOCCRAFT_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build-lib --parallel
