@@ -809,12 +809,15 @@ TEST(LegacyWord, LegacyScanConsumesTableShadingWithoutExtraFixedByte) {
   // bytes. This synthetic grpprl is built from the `BF 04 01 05 01 05` byte
   // sequence (cb = 4 and four shading bytes) observed at the end of a
   // Bug50955.doc PAPX grpprl; adding the one fixed byte LibreOffice lists for
-  // L_VAR overruns the grpprl by one byte and stops the scan.
+  // L_VAR overruns the grpprl by one byte and stops the scan. The six bytes
+  // map unchanged to sprmTDefTableShd80 (0xD609), whose DefTableShd80Operand
+  // is the same cb + 2-byte palette-index pairs ([MS-DOC] 2.9.52).
   std::vector<uint8_t> out;
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
                 std::vector<uint8_t>{0xBF, 0x04, 0x01, 0x05, 0x01, 0x05}, out),
-            doccraft::doc::detail::LegacySprmScan::kPartial);
-  EXPECT_TRUE(out.empty());
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  EXPECT_EQ(out,
+            (std::vector<uint8_t>{0x09, 0xD6, 0x04, 0x01, 0x05, 0x01, 0x05}));
   // The paragraph modifier behind the skipped operand still applies, and no
   // unsupported-sprm warning is raised.
   auto document = ParseWord6(Word6PapxDocumentWithWideGrpprl(
@@ -933,6 +936,160 @@ TEST(LegacyWord, Word6TablePropertiesReachDocx) {
   EXPECT_NE(exact_xml.find("<w:trHeight w:val=\"340\" w:hRule=\"exact\"/>"),
             std::string::npos)
       << exact_xml;
+}
+
+TEST(LegacyWord, LegacyScanMapsLegacyTableBorders) {
+  // Word 6/95 sprmTTableBorders (0xBB) is a fixed 12-byte operand made of six
+  // two-byte BRC6 values in rgbrcTable order: top, left, bottom, right,
+  // insideH, insideV. LibreOffice ww8scan.cxx GetWW6SprmSearcher lists it as
+  // {12, L_FIX} ("tap.rgbrcTable complex 12 bytes") and wvWare reads it with
+  // wvApplysprmTTableBorders as six cb6BRC values (sprm.c). BRC6 packs
+  // width(3), type(2), shadow(1), ico(5) and space(5) (wvGetBRC_internal6).
+  // A 4x3-byte layout is contradicted by both sources and by the fixed
+  // width: six borders of two bytes fit exactly.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {
+      0xBB, 0x4C, 0x08,  // top: width 4, single, ico 1 (black), space 1.
+      0x00, 0x00,        // left: no border.
+      0x8A, 0x00,  // bottom: width 2, single, ico 2 (blue in Word's COLORREF
+                   // palette).
+      0x00, 0x00,  // right: no border.
+      0x09, 0x00,  // insideH: width 1, single, ico 0 (auto).
+      0x00, 0x00,  // insideV: no border.
+  };
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> expected = {
+      0x13, 0xD6, 0x30,  // sprmTTableBorders, cb = 0x30 (six 8-byte Brc).
+      0x00, 0x00, 0x00, 0x00, 0x04, 0x01, 0x01, 0x00,  // top.
+      0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,  // left, none.
+      0x00, 0x00, 0xFF, 0x00, 0x02, 0x01, 0x00, 0x00,  // bottom.
+      0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,  // right, none.
+      0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x01, 0x00, 0x00,  // insideH.
+      0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,  // insideV, none.
+  };
+  EXPECT_EQ(out, expected);
+  // An all-ones BRC6 word is the 2-byte analogue of the BRC80 undefined
+  // sentinel; it becomes a fully undefined modern Brc, which TableBorder
+  // resets instead of turning into a width-7 double border.
+  out.clear();
+  const std::vector<uint8_t> undefined = {0xBB, 0xFF, 0xFF, 0, 0, 0, 0,
+                                          0,    0,    0,    0, 0, 0};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(undefined, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  ASSERT_EQ(out.size(), 3u + 6u * 8u);
+  for (size_t i = 0; i < 8; i++)
+    EXPECT_EQ(out[3 + i], 0xFF) << i;
+}
+
+TEST(LegacyWord, LegacyScanMapsLegacyTableDefinition) {
+  // sprmTDefTable (0xBE) and sprmTDefTable10 (0xBC) share the Word 6/95
+  // operand: a two-byte cb (bytes after cb, plus one), one-byte itcMac,
+  // itcMac+1 XAS centres, then itcMac ten-byte TC6 cells. wvWare documents
+  // the header in wvApplysprmTDefTable and the TC6 size as cb6TC=10
+  // (wvGetTC_internal); TC6 is a two-byte TCGRF followed by four two-byte
+  // BRC10 borders. The modern sprmTDefTable needs 20-byte TC80 cells, so the
+  // scan rebuilds the operand with zero cell widths (the column grid supplies
+  // the width) and zero borders when no BRC10 is set.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {
+      0xBE, 0x1C, 0x00,                       // cb = 27 bytes after cb + 1.
+      0x02,                                   // itcMac = 2.
+      0x00, 0x00,                             // 0.
+      0xD0, 0x02,                             // 720 twips.
+      0xA0, 0x05,                             // 1440 twips.
+      0x03, 0x00, 0,    0, 0, 0, 0, 0, 0, 0,  // TC6 1: horzMerge first.
+      0x00, 0x00, 0,    0, 0, 0, 0, 0, 0, 0,  // TC6 2: no merge.
+  };
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  std::vector<uint8_t> expected = {
+      0x08, 0xD6, 0x30, 0x00, 0x02, 0x00, 0x00, 0xD0,
+      0x02, 0xA0, 0x05, 0x03, 0x00, 0x00, 0x00,  // TC80 1: tcgrf, wWidth 0.
+  };
+  expected.insert(expected.end(), 16, 0);  // Four zero BRC80s.
+  expected.insert(expected.end(), 20, 0);  // TC80 2, all defaults.
+  EXPECT_EQ(out, expected);
+}
+
+TEST(LegacyWord, LegacyScanKeepsGridWhenLegacyCellsAreShort) {
+  // Bug49933.doc carries 0xBE operands whose cb covers only part of the TC6
+  // array (53 of the 108 corpus operands). wvApplysprmTDefTable keeps the
+  // column grid and stops before the cells when the remaining bytes cannot
+  // hold cb6TC*itcMac, so the scan rebuilds a grid-only operand.
+  const std::vector<uint8_t> raw = {
+      0xBE, 0x0B, 0x00,              // cb = 10 bytes after cb + 1.
+      0x01,                          // itcMac = 1.
+      0x00, 0x00, 0xD0, 0x02,        // 0, 720 twips.
+      0x01, 0x00, 0x00, 0x00, 0x00,  // Five bytes of a ten-byte TC6.
+  };
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  // sprmTDefTableObsolete only carries the grid; its cb covers the one-byte
+  // itcMac plus the two XAS centres, plus one.
+  const std::vector<uint8_t> expected = {0x06, 0xD6, 0x06, 0x00, 0x01,
+                                         0x00, 0x00, 0xD0, 0x02};
+  EXPECT_EQ(out, expected);
+}
+
+TEST(LegacyWord, LegacyTableOperandsStopWhenTruncated) {
+  // Fixed 12-byte borders, a two-byte count, and a one-byte cb are all
+  // measured before any byte is trusted: a truncated operand stops the scan.
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0xBB, 0x01, 0x02}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0xBE, 0x20, 0x00, 0x01, 0x00}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0xBF, 0x05, 0x01, 0x02}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0xBC, 0x05, 0x00, 0x01}, out),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+}
+
+TEST(LegacyWord, Word6TableBordersGridAndShadingReachDocx) {
+  // One row, two cells. The row grpprl carries the three legacy table sprms in
+  // document order: 0xBB borders, 0xBE the two-column grid and 0xBF shading.
+  // The trailing 0x00 is PAPX word alignment. The 0xBB bytes are the ones from
+  // LegacyScanMapsLegacyTableBorders; the grid is 720+720 twips; SHD 0x0500 is
+  // white/solid and SHD 0x0041 is blue with a black foreground.
+  const std::vector<uint8_t> row = {
+      0xBB, 0x4C, 0x08, 0x00, 0x00, 0x8A, 0x00, 0x00, 0x00, 0x09, 0x00,
+      0x00, 0x00, 0xBE, 0x1C, 0x00, 0x02, 0x00, 0x00, 0xD0, 0x02, 0xA0,
+      0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xBF,
+      0x04, 0x00, 0x05, 0x41, 0x00, 0x19, 0x01,  // sprmPFTtp.
+      0x18, 0x01,                                // sprmPFInTable.
+      0x00,                                      // PAPX word alignment.
+  };
+  auto document = ParseWord6(Word6TableDocument({0x18, 1}, row));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  EXPECT_EQ(table.columns, (std::vector<int>{720, 720}));
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 2u);
+  EXPECT_EQ(table.row_properties[0].cells[0].shade, 0xFFFFFF);
+  EXPECT_EQ(table.row_properties[0].cells[0].shade_fore, -1);
+  EXPECT_EQ(table.row_properties[0].cells[0].shade_pattern, 1);
+  EXPECT_EQ(table.row_properties[0].cells[1].shade, 0xFF0000);
+  EXPECT_EQ(table.row_properties[0].cells[1].shade_fore, 0);
+  EXPECT_EQ(table.row_properties[0].cells[1].shade_pattern, 0);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  for (const char* fragment :
+       {"<w:tblBorders>", "<w:gridCol w:w=\"720\"/>",
+        "<w:shd w:val=\"solid\" w:fill=\"FFFFFF\" w:color=\"auto\"/>",
+        "<w:shd w:val=\"clear\" w:fill=\"0000FF\" w:color=\"000000\"/>"})
+    EXPECT_NE(xml.find(fragment), std::string::npos) << fragment << "\n" << xml;
 }
 
 TEST(LegacyWord, LegacyScanStopsAfterTablePropertiesOnUnknownOpcode) {
