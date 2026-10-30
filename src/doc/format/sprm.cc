@@ -528,9 +528,17 @@ OpResult ApplyCellLayout(model::RowProperties& row, uint16_t op, Bytes v) {
     if (op == kSprmTCellPaddingDefault &&
         (v[1] != kCssaFixedItcFirst || v[2] != kCssaFixedItcLim))
       return OpResult::kError;
+    // sprmTCellPadding carries a half-open range. Real Word 97 documents
+    // contain empty ranges, and LibreOffice's WW8TabBandDesc::
+    // ProcessSpecificSpacing returns silently for start >= end and ignores
+    // cell indices past the row. Mirror that instead of rejecting the whole
+    // document: clamp the limit to the row, leaving an empty range a no-op.
+    // Other TAPX handlers keep the strict TableRange contract.
     size_t first = 0, limit = cells.size();
-    if (op == kSprmTCellPadding && !TableRange(row, v, 1, first, limit))
-      return OpResult::kError;
+    if (op == kSprmTCellPadding) {
+      first = v[1];
+      limit = std::min<size_t>(v[2], cells.size());
+    }
     int width =
         v[kCssaWidthTypeOffset] == kFtsDxa ? U16(v, kCssaWidthOffset) : 0;
     if (width > kMaxTwips)
