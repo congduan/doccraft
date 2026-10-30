@@ -203,7 +203,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 - ✅ 对齐（左/中/右/两端/分散）/缩进（左右/首行/悬挂，twips 与字符单位）/行距/段距（twips 与行单位）
 - ✅ 段落边框与底纹/项目符号与多级列表（LSTF/LVL/override）
 - ✅ `sprmPIncLvl` 的样式级别增量：istd 1–9 增量并夹紧，轮廓级别为最终 istd−1；其他样式未显式指定轮廓级别时沿最终样式的 based-on 链求值，再应用轮廓级别增量；无该增量的段落保留样式继承表达
-- ✅ 制表位（自定义/toc 风格）/keepNext/keepLines/pageBreakBefore/东亚排版开关；ChgTabs 的删除项自 r36 起输出 `w:tab w:val="clear"` 并按操作数顺序（删除项在前）与新增项并列，不做排序/去重/样式继承求值
+- ✅ 制表位（自定义/toc 风格）/keepNext/keepLines/pageBreakBefore/东亚排版开关；ChgTabs 的删除项自 r36 起输出 `w:tab w:val="clear"`；r37 起样式 based-on 链与段落直接 PAPX 的 tabs 按 ChgTabs 语义合并（派生/段落 add 覆盖同位置、匹配的 clear 删除继承项、未匹配的 clear 丢弃），段落 clear 仅在样式确有该位置时输出，输出按 position 升序且 clear 在前；无样式可查的段落保持操作数原序
 - ✅ 大纲级别/段落阴影/首字下沉（`w:framePr` dropCap）/纵向文字流
 
 ### 6.4 节与页面（SEP）
@@ -227,7 +227,7 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
 ### 6.7 样式系统
 - ✅ STSH 全量解析（基于样式继承链展开；Word 6/95 旧版 STSH 自 M13 起接入同一链路：名称/基于/下一样式与 UPX 的段落、字符修饰经归一化后同规则叠加；M14 对 STSHI 默认字体和损坏记录给出有界处理与警告，旧版默认字号尚未还原）
 - ✅ 样式映射到 docx styles.xml（段落/字符/表格/编号样式，含表样式条件格式 `w:tblStylePr`）
-- ◐ 直接格式 vs 样式格式的优先级正确叠加（表样式条件格式已按 [MS-DOC] 2.4.6.6 的条带、列、行、角顺序输出；段落/字符/编号链仍未完整按规范求值）
+- ◐ 直接格式 vs 样式格式的优先级正确叠加（表样式条件格式已按 [MS-DOC] 2.4.6.6 的条带、列、行、角顺序输出；r37 起段落制表位在样式 based-on 链与直接 PAPX 之间按 [MS-DOC] 2.9.183 求值，`M3Styles.TabsMergeWithBaseInsteadOfReplacing`、`M3Styles.StyleOutputUsesResolvedTabsAndClearsDeletedBaseStop`、`M3Styles.ParagraphTab*`；其余段落/字符/编号属性仍未完整按规范求值）
 
 ### 6.8 加密
 - ◐ XOR obfuscation 解密（`--password`）：ASCII 1–15 字节口令的合成 `.doc`
