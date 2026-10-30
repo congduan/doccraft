@@ -424,6 +424,13 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0xA1` | sprmSPgnStart | sprmSPgnStart97 | 2B；r28 |
 | `0xA2` | sprmSBOrientation | 同名 | 1B（宽度表如此，非 2B）；r28 |
 | `0xA4`–`0xAA` | sprmSXaPage/SYaPage/SDxaLeft/SDxaRight/SDyaTop/SDyaBottom/SDzaGutter | 同名 | 2B；r28；`LegacyWord.Word6SepxSectionPropertiesReachDocx`、`LegacyWord.Word6PerSectionSepxPropertiesFollowSection` |
+| `0xB6` | sprmTJc | sprmTJc (0x548A) | 2B，仅低字节有效；高字节清零后传递（现代 handler 拒绝 >2 的值）；r32 |
+| `0xB7` | sprmTDxaLeft | sprmTDxaLeft (0x9601) | 2B 原样传递；r32 |
+| `0xB8` | sprmTDxaGapHalf | sprmTDxaGapHalf (0x9602) | 2B 原样传递；r32 |
+| `0xB9` | sprmTFCantSplit | sprmTFCantSplit (0x3466) | 1B Bool8；r32 |
+| `0xBA` | sprmTTableHeader | sprmTTableHeader (0x3404) | 1B Bool8；r32 |
+| `0xBD` | sprmTDyaRowHeight | sprmTDyaRowHeight (0x9407) | 2B 有符号 YAS，负值映射为 `w:hRule="exact"`；r32 |
+| `0xBB`/`0xBC`/`0xBE`/`0xBF`/`0xC0`–`0xC8` | sprmTTableBorders/TDefTable10/TDefTable/TDefTableShd 与编辑类 | —（按宽度跳过） | 0xBB 12B TypeBrc、0xBC/0xBE 16 位计数网格、0xBF spra=6 底纹、0xC0–0xC8 编辑操作；字节布局与现代不同，r32 不映射 |
 | `0x85`/`0x92`/`0x94`/`0x95`/`0xA3`/`0xAB` | sprmSOlstAnm/SFAutoPgn/SDyaPgn/SDxaPgn/SBCustomize/SDMPaperReq | —（按宽度跳过） | 0x85 变长、0x94/0x95/0xAB 2B、0x92 1B、0xA3 0B；r28 未映射 |
 | `0x99` | sprmSGprfIhdt | —（故事选择专用） | 1B；页眉读取消费，不施加为节属性 |
 
@@ -433,6 +440,17 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > 操作数共 cb+1 字节、无额外定长字节」，`BF 04 01 05 01 05` 恰好消费到组尾，不再截断。两份样本的 unsupported-sprms
 > 警告均已消除（`Bug50955.doc` 仍保留 PICF 越界图片警告）。`0x25` 与 `0x61`
 > 自 r19 起已映射（见上表），不再走跳过路径。
+>
+> r32 表格标量：`0xB6`–`0xBA`/`0xBD` 六个旧版表格 opcode 直译到现代同名
+> sprm（`sprmTJc` 仅低字节有效，高字节清零），经 `FinishTableRow` 的 spra=5
+> 分派落到表格/行属性并输出 `w:jc`/`w:tblInd`/`w:cantSplit`/`w:tblHeader`/
+> `w:trHeight`。`LegacyWord.LegacyScanMapsTableProperties`、
+> `LegacyWord.Word6TablePropertiesReachDocx`、
+> `LegacyWord.LegacyScanStopsAfterTablePropertiesOnUnknownOpcode` 断言映射、
+> IR/XML 输出与表外 opcode 的停止语义。宽度与语义证据：LO
+> `GetWW6SprmSearcher` 的 2B/2B/2B/1B/1B/2B 宽度 + [MS-DOC] 2.9.144/2.9.145/
+> 2.9.169；语料对照 215 份（poi 159 + wvWare 56）成功 160 / 警告 29 /
+> 拒绝 26 前后不变，3 份输出新增表属性（见 KNOWN-SIMPLIFICATIONS）。
 
 ## 规范外旧账别名（不计入 314）
 
