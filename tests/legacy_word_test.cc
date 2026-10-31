@@ -1416,6 +1416,20 @@ TEST(LegacyWord, LegacyScanMapsLegacyTableSetBrc10) {
       0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
   };
   EXPECT_EQ(out, zero_expected);
+  // An illegal (line1, gap, line2) triple stays type 0 instead of rejecting
+  // the document. line1=3 with no gap or line 2 is not in the mapping table,
+  // so the Brc keeps width 3 but gets type 0 (no line) and no error.
+  out.clear();
+  const std::vector<uint8_t> illegal = {0xC7, 0x00, 0x01, 0x01, 0xC0, 0x00};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(illegal, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> illegal_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x01, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x03, 0x00, 0x00, 0x00,
+  };
+  EXPECT_EQ(out, illegal_expected);
+  ASSERT_EQ(out.size(), 14u);
+  EXPECT_EQ(out[11], 0);  // Type byte of the rebuilt Brc.
 }
 
 TEST(LegacyWord, LegacyScanMapsLegacyTableSetShd) {
@@ -1619,6 +1633,67 @@ TEST(LegacyWord, Word6TableCellBorderShadingReachDocx) {
         "w:color=\"000000\" w:space=\"1\"/></w:tcBorders>",
         "<w:shd w:val=\"solid\" w:fill=\"FFFFFF\" w:color=\"000000\"/>"})
     EXPECT_NE(xml.find(fragment), std::string::npos) << fragment << "\n" << xml;
+}
+
+TEST(LegacyWord, Word6TableCellBrc10ReachesDocx) {
+  // sprmTSetBrc10 (0xC7) is the BRC10 counterpart of 0xC1 and carries no
+  // colour: the scan always writes -1, so the writer emits w:color="auto".
+  // BRC10 0x0240 is line1=1, gap=0, line2=0 (single) with space 1 and no
+  // shadow; the line-1 width doubles as the modern width.
+  auto document = ParseWord6TableEdits({
+      0xC7, 0x00, 0x02, 0x01, 0x40, 0x02,  // Top [0,2), BRC10 0x0240.
+  });
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 2u);
+  for (const auto& cell : table.row_properties[0].cells) {
+    EXPECT_TRUE(cell.borders[0].set);
+    EXPECT_EQ(cell.borders[0].type, 1);    // single.
+    EXPECT_EQ(cell.borders[0].width, 1);   // dxpLine1Width.
+    EXPECT_EQ(cell.borders[0].color, -1);  // BRC10 has no ico.
+    EXPECT_EQ(cell.borders[0].space, 1);
+    EXPECT_FALSE(cell.borders[1].set);
+    EXPECT_FALSE(cell.borders[2].set);
+  }
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  // The writer lifts widths below 2 to 2, so the single hop from width 1 is
+  // w:sz="2"; the missing colour becomes the automatic colour.
+  EXPECT_NE(xml.find("<w:tcBorders><w:top w:val=\"single\" w:sz=\"2\" "
+                     "w:color=\"auto\" w:space=\"1\"/></w:tcBorders>"),
+            std::string::npos)
+      << xml;
+}
+
+TEST(LegacyWord, Word6TableCellBordersRejectInvalidSidesAndRanges) {
+  // The r43 translation hands the rebuilt 12-byte sprmTSetBrc operand to the
+  // shared ApplyCellBorders, whose TableRange and sides-mask checks reject the
+  // whole document. These operands used to be consumed by width and silently
+  // dropped, so pin both rejections for 0xC1 and 0xC7.
+  const std::string expected = "invalid TAPX operand 54831";  // 0xD62F.
+  // 0xC1 with sides 0xC0 (bits outside the 0x3F side mask).
+  auto bad_sides = ParseWord6TableEdits({0xC1, 0x00, 0x02, 0xC0, 0x4C, 0x08});
+  ASSERT_FALSE(bad_sides);
+  EXPECT_NE(bad_sides.error().message.find(expected), std::string::npos)
+      << bad_sides.error().message;
+  // 0xC1 with itcLim 5 on a two-cell row.
+  auto bad_range = ParseWord6TableEdits({0xC1, 0x00, 0x05, 0x01, 0x4C, 0x08});
+  ASSERT_FALSE(bad_range);
+  EXPECT_NE(bad_range.error().message.find(expected), std::string::npos)
+      << bad_range.error().message;
+  // 0xC7 with sides 0x40 (outside the 0x3F side mask).
+  auto bad_sides10 = ParseWord6TableEdits({0xC7, 0x00, 0x02, 0x40, 0x40, 0x02});
+  ASSERT_FALSE(bad_sides10);
+  EXPECT_NE(bad_sides10.error().message.find(expected), std::string::npos)
+      << bad_sides10.error().message;
+  // 0xC7 with itcLim 5 on a two-cell row.
+  auto bad_range10 = ParseWord6TableEdits({0xC7, 0x00, 0x05, 0x01, 0x40, 0x02});
+  ASSERT_FALSE(bad_range10);
+  EXPECT_NE(bad_range10.error().message.find(expected), std::string::npos)
+      << bad_range10.error().message;
 }
 
 TEST(LegacyWord, Word6BadPictureReferenceIsSkippedWithWarning) {
