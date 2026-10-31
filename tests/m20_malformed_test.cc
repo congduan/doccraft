@@ -453,15 +453,78 @@ TEST(M20Malformed, UnreadableHugePapxKeepsTableRow) {
   EXPECT_TRUE(warned);
 }
 
+// A TAPX that becomes unreadable halfway must not keep the sprms applied
+// before the bad pointer: the row falls back to defaults as one unit.
+TEST(M20Malformed, UnreadableHugePapxDoesNotKeepPartialTableProperties) {
+  doccraft::model::Table table;
+  table.columns = {1000};
+  std::vector<doccraft::model::Cell> row(1);
+  doccraft::model::Paragraph para;
+  doccraft::doc::detail::FormatRange pap;
+  pap.first = 0;
+  pap.last = 10;
+  // TDefTable: cb 26, one 4000-twip column and one zeroed TC80 cell.
+  std::vector<uint8_t> def(27, 0);
+  def[0] = 26;
+  def[2] = 1;
+  def[5] = 0xA0;
+  def[6] = 0x0F;
+  pap.sprms = Prl(0xD608, def);
+  const auto huge = Prl(0x6646, {0, 0, 0, 0});
+  pap.sprms.insert(pap.sprms.end(), huge.begin(), huge.end());
+  const std::vector<uint8_t> data{0xFF, 0xFF};  // huge PAPX has no payload
+  std::vector<std::string> warnings;
+  auto done = doccraft::doc::FinishTableRow(
+      table, row, para, &pap, doccraft::doc::detail::Bytes(data), &warnings);
+  ASSERT_TRUE(done) << done.error().message;
+  EXPECT_EQ(table.columns, std::vector<int>({1000}));
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  EXPECT_EQ(table.row_properties[0].columns, std::vector<int>({1000}));
+}
+
+// An invalid TAPX operand keeps its rejection priority even when a later
+// sprmPHugePapx pointer is unreadable. Hoping the row "defaults to usable"
+// would silently accept a malformed operand.
+TEST(M20Malformed, InvalidTapxOperandOutranksUnreadableHugePapx) {
+  doccraft::model::Table table;
+  std::vector<doccraft::model::Cell> row(1);
+  doccraft::model::Paragraph para;
+  doccraft::doc::detail::FormatRange pap;
+  pap.first = 0;
+  pap.last = 10;
+  // TDefTable claims 255 cells but the operand cannot hold them.
+  std::vector<uint8_t> bad(10, 0);
+  bad[0] = 9;
+  bad[2] = 255;
+  pap.sprms = Prl(0xD608, bad);
+  const auto huge = Prl(0x6646, {0, 0, 0, 0});
+  pap.sprms.insert(pap.sprms.end(), huge.begin(), huge.end());
+  const std::vector<uint8_t> data{0xFF, 0xFF};
+  std::vector<std::string> warnings;
+  auto done = doccraft::doc::FinishTableRow(
+      table, row, para, &pap, doccraft::doc::detail::Bytes(data), &warnings);
+  ASSERT_FALSE(done);
+  EXPECT_NE(done.error().message.find("invalid TAPX operand"),
+            std::string::npos)
+      << done.error().message;
+}
+
 TEST(M20Malformed, CellWidthRangeOutsideRowIsIgnored) {
   doccraft::model::Table table;
   doccraft::model::RowProperties row;
   row.cells.resize(6);
   // ofz19065: itcFirst 65, itcLim 3, fts 0, dxa 0.
   const std::vector<uint8_t> v{5, 0x41, 3, 0, 0, 0};
+  std::vector<std::string> warnings;
   EXPECT_TRUE(doccraft::doc::detail::ApplyTable(
-      table, row, 0xD635, doccraft::doc::detail::Bytes(v)));
+      table, row, 0xD635, doccraft::doc::detail::Bytes(v), &warnings));
   EXPECT_EQ(row.cells[0].width_type, 3);
+  bool warned = false;
+  for (const auto& warning : warnings) {
+    warned |= warning.find("sprmTCellWidth") != std::string::npos &&
+              warning.find("65..3") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
 }
 
 TEST(M20Malformed, BteRangePastWordDocumentIsDropped) {

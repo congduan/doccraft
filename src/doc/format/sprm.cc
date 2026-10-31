@@ -445,20 +445,27 @@ OpResult ApplyTableStructure(model::Table& table, model::RowProperties& row,
   return OpResult::kUnmatched;
 }
 
-OpResult ApplyCellWidthAndMerge(model::RowProperties& row, uint16_t op,
-                                Bytes v) {
+OpResult ApplyCellWidthAndMerge(model::RowProperties& row, uint16_t op, Bytes v,
+                                std::vector<std::string>* warnings) {
   auto& cells = row.cells;
   if (op == kSprmTCellWidth) {
-    size_t first, limit;
+    size_t first = 0, limit = 0;
     if (v.size() != kCellWidthSize || v[0] != kCellWidthCb)
       return OpResult::kError;
     // A row whose cells were never defined (the TDefTable sits in another
     // PAPX), or whose itc range is out of bounds, has nothing this operand can
     // resize. LibreOffice sw/qa ofz19065 carries such widths in its huge PAPX
     // (itcFirst 65, itcLim 3 on a six-cell row); ignoring the operand keeps the
-    // row instead of rejecting the document.
-    if (!TableRange(row, v, 1, first, limit))
+    // row instead of rejecting the document. Every drop is still reported.
+    if (!TableRange(row, v, 1, first, limit)) {
+      if (warnings != nullptr) {
+        warnings->push_back("sprmTCellWidth ignored: cell range " +
+                            std::to_string(first) + ".." +
+                            std::to_string(limit) + " outside the row's " +
+                            std::to_string(cells.size()) + " cells");
+      }
       return OpResult::kOk;
+    }
     // Same Fts rule as sprmTTableWidth: unknown types MUST be ignored.
     if (v[kCellWidthTypeOffset] != kFtsNil &&
         v[kCellWidthTypeOffset] != kFtsAuto &&
@@ -657,7 +664,8 @@ OpResult ApplyCellBorders(model::RowProperties& row, uint16_t op, Bytes v) {
 }
 
 OpResult ApplyTableOp(model::Table& table, model::RowProperties& row,
-                      uint16_t op, Bytes v) {
+                      uint16_t op, Bytes v,
+                      std::vector<std::string>* warnings = nullptr) {
   OpResult result = ApplyTableDefinition(table, row, op, v);
   if (result != OpResult::kUnmatched) {
     return result;
@@ -682,7 +690,7 @@ OpResult ApplyTableOp(model::Table& table, model::RowProperties& row,
   if (result != OpResult::kUnmatched) {
     return result;
   }
-  result = ApplyCellWidthAndMerge(row, op, v);
+  result = ApplyCellWidthAndMerge(row, op, v, warnings);
   if (result != OpResult::kUnmatched) {
     return result;
   }
@@ -702,8 +710,8 @@ OpResult ApplyTableOp(model::Table& table, model::RowProperties& row,
 }
 
 bool ApplyTable(model::Table& table, model::RowProperties& row, uint16_t op,
-                Bytes v) {
-  return ApplyTableOp(table, row, op, v) != OpResult::kError;
+                Bytes v, std::vector<std::string>* warnings) {
+  return ApplyTableOp(table, row, op, v, warnings) != OpResult::kError;
 }
 
 void ApplyRun(model::Run& r, uint16_t op, Bytes v,

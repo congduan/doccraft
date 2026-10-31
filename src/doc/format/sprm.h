@@ -146,7 +146,7 @@ bool ApplyConditional(model::Style& style, uint16_t op, Bytes v,
                       const std::vector<std::string>& fonts);
 
 bool ApplyTable(model::Table& table, model::RowProperties& row, uint16_t op,
-                Bytes v);
+                Bytes v, std::vector<std::string>* warnings = nullptr);
 
 void ApplyRun(model::Run& r, uint16_t op, Bytes v,
               const std::vector<std::string>& fonts);

@@ -239,21 +239,44 @@ std::expected<void, Error> FinishTableRow(model::Table& table,
                                           model::Paragraph& para,
                                           const FormatRange* pap, Bytes data,
                                           std::vector<std::string>* warnings) {
-  model::RowProperties properties;
+  // Collect first, apply second: a TAPX whose nested sprmPHugePapx pointer is
+  // unreadable must not leave the table half-formatted. Operands are only
+  // borrowed views into `data`, which outlives both passes.
+  std::vector<std::pair<uint16_t, Bytes>> operands;
   bool walked = true;
-  bool valid = true;
-  uint16_t invalid_op = 0;
   if (pap) {
     walked = WalkParagraph(pap->sprms, data, [&](uint16_t op, Bytes v) {
-      if (valid && (op == kSprmTDefTable || op == kSprmTDefTableObsolete ||
-                    (op >> 10 & 7) == 5)) {
-        if (!(valid = ApplyTable(table, properties, op, v))) {
-          invalid_op = op;
-        }
+      if (op == kSprmTDefTable || op == kSprmTDefTableObsolete ||
+          (op >> 10 & 7) == 5) {
+        operands.emplace_back(op, v);
       }
     });
   }
+  model::RowProperties properties;
+  bool valid = true;
+  uint16_t invalid_op = 0;
+  const auto apply = [&](model::Table& target, model::RowProperties& props) {
+    for (const auto& [op, v] : operands) {
+      if (!ApplyTable(target, props, op, v, warnings)) {
+        valid = false;
+        invalid_op = op;
+        return;
+      }
+    }
+  };
   if (!walked) {
+    // Confirm the operands that were reachable before the pointer damage. An
+    // invalid one keeps its rejection priority over the "defaults used"
+    // fallback; valid ones are applied to a scratch copy and discarded.
+    if (!operands.empty()) {
+      model::Table scratch = table;
+      model::RowProperties scratch_properties = properties;
+      apply(scratch, scratch_properties);
+      if (!valid) {
+        return std::unexpected(
+            Error{"invalid TAPX operand " + std::to_string(invalid_op)});
+      }
+    }
     // A nested sprmPHugePapx pointer outside the Data stream makes the row
     // properties unreadable; the cells themselves come from the text and stay
     // usable (LibreOffice sw/qa ofz18414-1).
@@ -262,9 +285,12 @@ std::expected<void, Error> FinishTableRow(model::Table& table,
           "table row properties unreadable (sprm stream outside its backing "
           "stream); defaults used");
     }
-  } else if (!valid) {
-    return std::unexpected(
-        Error{"invalid TAPX operand " + std::to_string(invalid_op)});
+  } else {
+    apply(table, properties);
+    if (!valid) {
+      return std::unexpected(
+          Error{"invalid TAPX operand " + std::to_string(invalid_op)});
+    }
   }
   if (properties.cells.empty()) {
     properties.cells.resize(row.size());
