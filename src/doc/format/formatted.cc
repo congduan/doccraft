@@ -540,11 +540,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       continue;
     }
     if (!fields.empty() && fields.back().in_instruction) {
-      // Field instructions carry Word's 0x01 field-code delimiter and, in
-      // damaged files, other C0 controls. XML 1.0 cannot represent them,
-      // including as numeric references. Every 0x01 observed in the corpus
-      // sits at a token boundary, so dropping it never joins tokens; header
-      // stories already read instructions without reporting these.
+      // Field instructions carry C0 controls (0x01 dominates the corpus
+      // sample; all observed instances sit at token boundaries). XML 1.0
+      // cannot represent them, including as numeric references, so dropping
+      // them never joins tokens. Their normative identity is unverified (no
+      // CHPX check: U+0001 with sprmCFSpec + sprmCPicLocation would be an
+      // inline picture, and the field separator is U+0014). Header stories
+      // already read instructions without reporting these.
       if (control && static_cast<unsigned char>(control) < 32 &&
           control != '\t' && control != '\n' && control != '\r') {
         continue;

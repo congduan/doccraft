@@ -268,9 +268,12 @@ TEST(M3Fields, FieldWithoutSeparatorStillCloses) {
 }
 
 TEST(M3Fields, FieldCodeDelimiterIsDroppedWithoutWarning) {
-  // Word writes a 0x01 field-code delimiter between the last instruction
-  // token and the 0x14 separator. XML 1.0 cannot represent it, but the field
-  // is still complete, so the drop must not add a document warning.
+  // The instruction carries a 0x01 before the 0x14 separator. XML 1.0 cannot
+  // represent it, but the field is still complete, so the drop must not add a
+  // document warning. The test name keeps the colloquial "field-code
+  // delimiter" label; the assertion only covers the drop, not the character's
+  // normative identity (the field separator is U+0014, and U+0001 has not
+  // been checked against CHPX).
   auto doc =
       Synthetic("\x13 HYPERLINK \"https://example.com\" \x01\x14site\x15");
   ASSERT_TRUE(doc) << doc.error().message;
@@ -281,7 +284,7 @@ TEST(M3Fields, FieldCodeDelimiterIsDroppedWithoutWarning) {
 }
 
 TEST(M3Fields, FieldCodeDelimiterKeepsFollowingSwitches) {
-  // The delimiter may sit between switches: "REF _Ref1 \h \x01 \*
+  // The control may sit between switches: "REF _Ref1 \h \x01 \*
   // MERGEFORMAT". Dropping it must not join tokens or truncate the switch.
   auto doc = Synthetic("\x13 REF _Ref1 \\h \x01 \\* MERGEFORMAT \x14 1\x15");
   ASSERT_TRUE(doc) << doc.error().message;
