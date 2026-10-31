@@ -310,6 +310,16 @@ std::expected<std::vector<Char>, Error> ReadChars(
       j += step;
     }
   }
+  if (out.empty() && warnings != nullptr && begin == 0 &&
+      limit == fib.ccp_text && fib.ccp_text > 0 && fib.fc_mac != fib.fc_min) {
+    // fcMac == fcMin is a legitimately empty body. Everything else that
+    // yields no character while ccpText claims text lost its pieces to the
+    // degradation above; say so instead of returning a silent empty document.
+    warnings->push_back("no text extracted for a non-empty body (ccpText = " +
+                        std::to_string(fib.ccp_text) +
+                        "); the degraded piece table covered no readable "
+                        "text");
+  }
   return out;
 }
 

@@ -92,6 +92,14 @@ def main() -> int:
                 failures.append(f"{name}: conversion failed")
                 print(f"FAIL {name}: {short(result.stderr.strip())!r}")
                 continue
+            warning_file = edge / (name + ".expected-warning")
+            if warning_file.exists():
+                keyword = warning_file.read_text(encoding="utf-8").strip()
+                if keyword not in result.stderr:
+                    failures.append(f"{name}: missing warning")
+                    print(f"FAIL {name}: expected warning '{keyword}' in "
+                          f"{short(result.stderr.strip())!r}")
+                    continue
             expected = normalize(text_file.read_text(encoding="utf-8"))
             got = normalize(docx_text(out))
             if got != expected:

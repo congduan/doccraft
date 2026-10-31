@@ -314,6 +314,26 @@ TEST(M20Malformed, ClxDropsOutOfRangePieceAndKeepsTheRest) {
             std::string::npos);
 }
 
+TEST(M20Malformed, ClxAllPiecesOutsideWordDocumentWarnsAboutEmptyText) {
+  // The degraded piece table drops every piece, but ccpText still claims a
+  // non-empty body. Returning an empty document silently would hide the loss.
+  DocSpec spec;
+  spec.text = {'A', '\r'};
+  spec.pieces = {{0, 2, 0x30000, true, 0}};
+  const DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("no text extracted for a non-empty body") !=
+                  std::string::npos &&
+              warning.find("ccpText = 2") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
 TEST(M20Malformed, ClxMissingPcdtFallsBackToContiguousText) {
   DocStreams s = doccraft::test::BuildDocStreams(TextSpec());
   s.table[ClxOffset(s)] = 0;
