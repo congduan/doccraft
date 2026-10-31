@@ -74,6 +74,7 @@ TEST(CfbLenientHeader, ToleratesInvalidByteOrderMark) {
   Put16(bytes, 28, 0xFF20);
   auto reader = CfbReader::Open(bytes);
   ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
   EXPECT_TRUE(HasWarning(*reader, "byte order"));
   auto stream = reader->ReadStream("s");
   ASSERT_TRUE(stream.has_value()) << stream.error().message;
@@ -85,6 +86,7 @@ TEST(CfbLenientHeader, ToleratesInvalidMiniStreamCutoff) {
   Put32(bytes, 56, 0x0010);
   auto reader = CfbReader::Open(bytes);
   ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
   EXPECT_TRUE(HasWarning(*reader, "mini stream cutoff"));
   auto stream = reader->ReadStream("s");
   ASSERT_TRUE(stream.has_value()) << stream.error().message;
@@ -96,6 +98,7 @@ TEST(CfbLenientHeader, ToleratesV3DirectorySectorCount) {
   Put32(bytes, 40, 3);
   auto reader = CfbReader::Open(bytes);
   ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
   EXPECT_TRUE(HasWarning(*reader, "directory sector count"));
   auto stream = reader->ReadStream("s");
   ASSERT_TRUE(stream.has_value()) << stream.error().message;
@@ -114,6 +117,45 @@ TEST(CfbLenientHeader, ToleratesDirectoryChainOneSectorPastEnd) {
   auto stream = reader->ReadStream("s");
   ASSERT_TRUE(stream.has_value()) << stream.error().message;
   EXPECT_EQ(*stream, MakePayload(100, 7));
+}
+
+// A directory FAT chain may end at the sector just past the last complete one
+// when the file ends with a physically present partial sector (r34 drops the
+// fragment before sector reads). The fragment's sector index equals
+// total_sectors, so the last link resolves to it; Open must keep the sectors
+// already read and report exactly one warning that names the partial sector.
+TEST(CfbLenientHeader, ToleratesDirectoryChainIntoTailingPartialSector) {
+  constexpr size_t kExtraSizes[] = {1, 100, 511};
+  for (uint32_t sector_size : {512u, 4096u}) {
+    auto base = sector_size == 512 ? ValidContainer()
+                                   : CfbBuilder()
+                                         .SetSectorSize(4096)
+                                         .AddStream("s", MakePayload(100, 7))
+                                         .Build();
+    const uint32_t total = static_cast<uint32_t>(base.size() / sector_size - 1);
+    const uint32_t dir_start = U32(base, 48);
+    for (size_t extra : kExtraSizes) {
+      if (extra >= sector_size)
+        continue;
+      auto bytes = base;
+      bytes.insert(bytes.end(), extra, 0x00);
+      // Appending fewer than sector_size bytes leaves total_sectors unchanged
+      // and gives the fragment the index total_sectors.
+      ASSERT_EQ(static_cast<uint32_t>(bytes.size() / sector_size - 1), total);
+      Put32(bytes, FatEntryOffset(bytes, dir_start), total);
+      auto reader = CfbReader::Open(bytes);
+      ASSERT_TRUE(reader.has_value())
+          << "sector=" << sector_size << " extra=" << extra << ": "
+          << reader.error().message;
+      ASSERT_EQ(reader->warnings().size(), 1u)
+          << "sector=" << sector_size << " extra=" << extra;
+      EXPECT_TRUE(HasWarning(*reader, "partial"))
+          << "sector=" << sector_size << " extra=" << extra;
+      auto stream = reader->ReadStream("s");
+      ASSERT_TRUE(stream.has_value()) << stream.error().message;
+      EXPECT_EQ(*stream, MakePayload(100, 7));
+    }
+  }
 }
 
 TEST(CfbLenientHeader, RejectsCyclicDirectoryChain) {
