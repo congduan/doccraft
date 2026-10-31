@@ -329,12 +329,13 @@ std::expected<DirEntry, Error> ParseDirEntry(
   return entry;
 }
 
-// Walks the FAT directory chain and decodes every entry. `partial_bytes` is
-// the number of physically present bytes in the trailing fragment that
-// UsableSize dropped (0 when the file ends on a sector boundary).
+// Walks the FAT directory chain and decodes every entry. `tail` is the
+// trailing fragment that UsableSize dropped (empty when the file ends on a
+// sector boundary); the directory chain may name it, in which case its
+// complete 128-byte records are real directory entries.
 std::expected<std::vector<DirEntry>, Error> LoadDirectory(
     std::span<const uint8_t> bytes, const Header& header,
-    const std::vector<uint32_t>& fat, size_t partial_bytes,
+    const std::vector<uint32_t>& fat, std::span<const uint8_t> tail,
     std::vector<std::string>* warnings) {
   std::vector<uint8_t> directory;
   std::vector<uint8_t> seen(header.total_sectors, 0);
@@ -347,10 +348,14 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
     // sectors before it are intact, so stop there instead of rejecting the
     // container; deeper overruns still fail below.
     if (at == header.total_sectors && directory.size() >= header.sector_size) {
-      if (partial_bytes != 0) {
-        Warn(warnings,
-             "directory chain names the trailing partial sector; "
-             "using the sectors read");
+      if (!tail.empty()) {
+        // The fragment is not FAT-addressable, but its complete records are
+        // ordinary directory entries: LibreOffice sw/qa ofz18414-1 and
+        // ofz57592-1 keep their last streams only there.
+        directory.insert(directory.end(), tail.begin(), tail.end());
+        Warn(warnings, "directory chain names the trailing partial sector; " +
+                           std::to_string(tail.size() / kDirEntrySize) +
+                           " complete entries read from it");
       } else {
         Warn(warnings,
              "directory chain ends one sector past end of file; "
@@ -390,6 +395,37 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
     entries.push_back(std::move(*entry));
   }
   return entries;
+}
+
+// A directory link naming a slot at or past the end of the entry table cannot
+// reach any record. The tree walk drops such links (equivalent to ENDOFCHAIN)
+// and Open() reports the first one.
+struct DanglingLinks {
+  uint32_t count = 0;
+  uint32_t first_slot = 0;
+  uint32_t first_target = 0;
+};
+
+DanglingLinks FindDanglingLinks(const std::vector<DirEntry>& entries) {
+  DanglingLinks out;
+  for (size_t i = 0; i < entries.size(); ++i) {
+    const DirEntry& entry = entries[i];
+    if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage &&
+        entry.type != EntryType::kStream) {
+      continue;
+    }
+    const uint32_t links[] = {entry.left, entry.right, entry.child};
+    for (uint32_t link : links) {
+      if (link == DirEntry::kNoFollow || link < entries.size())
+        continue;
+      if (out.count == 0) {
+        out.first_slot = static_cast<uint32_t>(i);
+        out.first_target = link;
+      }
+      ++out.count;
+    }
+  }
+  return out;
 }
 }  // namespace
 
@@ -481,17 +517,16 @@ std::expected<CfbReader, Error> CfbReader::Open(
   // Drop any trailing partial sector before sector, FAT or directory reads.
   // The unchecked byte helpers (U16/U32) would otherwise be able to run past
   // the real end of the buffer when the last sector is only partially present.
-  // Remember how many fragment bytes were dropped so the directory chain can
-  // tell "names the trailing partial sector" from "one full sector past end".
+  // Keep the dropped fragment separate so the directory chain can tell
+  // "names the trailing partial sector" from "one full sector past end".
   const size_t usable = UsableSize(bytes.size(), header->sector_size);
-  const size_t partial_bytes = bytes.size() - usable;
+  const std::span<const uint8_t> tail = bytes.subspan(usable);
   bytes = bytes.first(usable);
   auto tables = LoadFatTables(bytes, *header);
   if (!tables) {
     return std::unexpected(tables.error());
   }
-  auto entries =
-      LoadDirectory(bytes, *header, tables->fat, partial_bytes, &warnings);
+  auto entries = LoadDirectory(bytes, *header, tables->fat, tail, &warnings);
   if (!entries) {
     return std::unexpected(entries.error());
   }
@@ -514,6 +549,18 @@ std::expected<CfbReader, Error> CfbReader::Open(
       out.entries_[0].right != DirEntry::kNoFollow) {
     return std::unexpected(
         Fail(ErrorCode::kCorruptDirectory, "root has sibling"));
+  }
+  const DanglingLinks dangling = FindDanglingLinks(out.entries_);
+  if (dangling.count != 0) {
+    out.directory_tree_incomplete_ = true;
+    Warn(&out.warnings_,
+         "directory link from slot " + std::to_string(dangling.first_slot) +
+             " ('" + out.entries_[dangling.first_slot].name + "') to slot " +
+             std::to_string(dangling.first_target) +
+             " points past the entry table; link ignored");
+    Warn(&out.warnings_,
+         "directory tree is incomplete; unreachable entries are matched by "
+         "name only");
   }
   auto visited = out.Visit([](const DirEntry&, std::string_view, bool) {
     return true;
@@ -575,9 +622,27 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadStream(
   });
   if (!visited)
     return std::unexpected(visited.error());
-  if (!best)
-    return std::unexpected(
-        Fail(ErrorCode::kStreamNotFound, "stream not found"));
+  if (!best) {
+    if (!directory_tree_incomplete_) {
+      return std::unexpected(
+          Fail(ErrorCode::kStreamNotFound, "stream not found"));
+    }
+    // A dangling link left at least one record unreachable through the tree.
+    // The tree cannot prove the stream absent, so scan the entry table for a
+    // name match (still ASCII case-insensitive). Salvaged entries are matched
+    // by their own name; their storage path is unknown.
+    for (const DirEntry& entry : entries_) {
+      if (entry.type == EntryType::kStream && !entry.name.empty() &&
+          AsciiEqualsNoCase(entry.name, name)) {
+        best = &entry;
+        break;
+      }
+    }
+    if (!best) {
+      return std::unexpected(
+          Fail(ErrorCode::kStreamNotFound, "stream not found"));
+    }
+  }
   return ReadChain(best->start_sector, best->size, best->size < 4096);
 }
 }  // namespace doccraft::cfb

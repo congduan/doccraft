@@ -121,6 +121,10 @@ class CfbReader {
   std::vector<DirEntry> entries_;
   std::vector<uint8_t> mini_stream_;
   std::vector<std::string> warnings_;
+  // Set by Open() when a directory link named an entry slot past the table.
+  // The tree walk ignores such links; a name lookup then falls back to a
+  // linear scan of `entries_` so physically present streams stay readable.
+  bool directory_tree_incomplete_ = false;
 };
 
 template <typename F>
@@ -149,8 +153,11 @@ std::expected<void, Error> CfbReader::Visit(F&& visitor) const {
     if (task.index == DirEntry::kNoFollow)
       continue;
     if (task.index >= entries_.size()) {
-      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
-                                   "directory link is invalid or cyclic"});
+      // [MS-CFB] §2.6.4 links name slot indices in the directory. A link past
+      // the table cannot reach any entry, so it is equivalent to ENDOFCHAIN:
+      // drop it. Open() reports the damage and enables the name-lookup
+      // salvage, keeping this walk a pure enumeration.
+      continue;
     }
     if (task.depth > kMaxDepth) {
       return std::unexpected(Error{ErrorCode::kCorruptDirectory,
