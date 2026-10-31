@@ -217,7 +217,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     });
   };
   ReadLists(doc, table, fib);
-  auto sections_result = ReadSections(word, table, fib);
+  auto sections_result = ReadSections(word, table, fib, &doc.warnings);
   if (!sections_result)
     return std::unexpected(sections_result.error());
   std::vector<std::pair<uint32_t, model::Section>> sections =
@@ -239,10 +239,15 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (fib.fields_main.size) {
     auto status =
         detail::ReadStoryFieldStatus(table, fib.fields_main, 0, fib.ccp_text);
-    if (!status)
-      return std::unexpected(
-          Error{"invalid main field PLC: " + status.error().message});
-    field_status = std::move(*status);
+    if (status) {
+      field_status = std::move(*status);
+    } else {
+      // A corrupt PlcfFldMom only loses the lock/dirty flags: the field
+      // hierarchy still comes from the \x13/\x14/\x15 characters, so warn and
+      // keep the body (same policy as the non-main story PLCs).
+      doc.warnings.push_back("skipped main field PLC: " +
+                             status.error().message);
+    }
   }
   // CP -> comment id (index + 1), matching w:commentReference/@w:id.
   std::map<uint32_t, int> comment_index;
@@ -682,7 +687,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         }
         close_cell(false);
         auto finished = FinishTableRow(frames.back().table, frames.back().row,
-                                       para, pap, data);
+                                       para, pap, data, &doc.warnings);
         if (!finished) {
           return std::unexpected(finished.error());
         }

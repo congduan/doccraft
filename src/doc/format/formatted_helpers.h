@@ -42,7 +42,8 @@ struct FieldFrame {
 };
 
 std::expected<std::vector<std::pair<uint32_t, model::Section>>, Error>
-ReadSections(detail::Bytes word, detail::Bytes table, const Fib& fib);
+ReadSections(detail::Bytes word, detail::Bytes table, const Fib& fib,
+             std::vector<std::string>* warnings = nullptr);
 void ApplyFieldInstruction(const std::string& instruction,
                            std::string* hyperlink, bool* page_field);
 void ApplyParagraphSprms(model::Paragraph& para, const detail::FormatRange* pap,
@@ -51,7 +52,8 @@ std::expected<void, Error> FinishTableRow(model::Table& table,
                                           std::vector<model::Cell>& row,
                                           model::Paragraph& para,
                                           const detail::FormatRange* pap,
-                                          detail::Bytes data);
+                                          detail::Bytes data,
+                                          std::vector<std::string>* warnings);
 
 }  // namespace doccraft::doc
 

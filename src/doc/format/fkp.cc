@@ -104,8 +104,66 @@ std::expected<std::vector<Char>, Error> ReadChars(
     modern.lcb_clx = static_cast<uint32_t>(normalized.size());
     return ReadChars(word, normalized, modern, limit, begin, prcs, warnings);
   }
+  // [MS-DOC] §2.5.1: when the CLX carries no usable Pcdt (missing tag, CLX
+  // outside the table stream), the text still starts at FibBase.fcMin and ends
+  // at fcMac. Read that range as one implicit piece instead of rejecting the
+  // document, and let FibBase.fExtChar select the 16-bit form.
+  const auto contiguous =
+      [&](const char* reason) -> std::expected<std::vector<Char>, Error> {
+    if (prcs)
+      prcs->clear();
+    const bool compressed = !fib.ext_char;
+    uint64_t start = fib.fc_min;
+    uint64_t end = fib.fc_mac;
+    if (end < start) {
+      if (warnings)
+        warnings->push_back(std::string("CLX has no usable Pcdt (") + reason +
+                            "); fcMac precedes fcMin; no text is read");
+      return std::vector<Char>{};
+    }
+    if (start > word.size())
+      start = word.size();
+    if (end > word.size()) {
+      if (warnings)
+        warnings->push_back(
+            "contiguous text range fcMin..fcMac exceeds WordDocument; "
+            "clamped to the readable prefix");
+      end = word.size();
+    }
+    const uint32_t width = compressed ? 1 : 2;
+    const uint32_t cp_count = static_cast<uint32_t>((end - start) / width);
+    if (warnings) {
+      warnings->push_back(std::string("CLX has no usable Pcdt (") + reason +
+                          "); reading WordDocument as one contiguous " +
+                          (compressed ? "8-bit" : "16-bit") +
+                          " piece from fcMin to fcMac (" +
+                          std::to_string(cp_count) + " CP)");
+    }
+    if (cp_count == 0)
+      return std::vector<Char>{};
+    const uint64_t raw = compressed ? kFcCompressed | (start * 2) : start;
+    if ((compressed ? start * 2 : start) > kFcMask)
+      return std::unexpected(Error{"contiguous text range FC overflow"});
+    // Assemble the same Pcdt shape the CLX would hold and reuse the piece
+    // decoder, so the fallback shares one character path with normal text.
+    std::vector<uint8_t> normalized(5 + 16, 0);
+    auto put32 = [&](size_t at, uint32_t value) {
+      for (size_t j = 0; j < 4; ++j)
+        normalized[at + j] = static_cast<uint8_t>(value >> (8 * j));
+    };
+    normalized[0] = 2;
+    put32(1, 16);
+    put32(5, 0);
+    put32(9, cp_count);
+    put32(15, static_cast<uint32_t>(raw));
+    Fib modern = fib;
+    modern.legacy = false;
+    modern.fc_clx = 0;
+    modern.lcb_clx = static_cast<uint32_t>(normalized.size());
+    return ReadChars(word, normalized, modern, limit, begin, prcs, warnings);
+  };
   if (!Valid(table, {fib.fc_clx, fib.lcb_clx}))
-    return std::unexpected(Error{"CLX outside table stream"});
+    return contiguous("CLX outside table stream");
   Bytes b = table.subspan(fib.fc_clx, fib.lcb_clx);
   if (prcs)
     prcs->clear();
@@ -128,7 +186,7 @@ std::expected<std::vector<Char>, Error> ReadChars(
     p += 3 + n;
   }
   if (p + 5 > b.size() || b[p] != 2)
-    return std::unexpected(Error{"missing CLX Pcdt"});
+    return contiguous("missing CLX Pcdt");
   size_t nbytes = U32(b, p + 1);
   p += 5;
   // The Pcdt is the last element of the CLX, so it must end the slice exactly.
@@ -159,16 +217,29 @@ std::expected<std::vector<Char>, Error> ReadChars(
     size_t length = end - cp;
     if (length > word.size() - emitted)
       return std::unexpected(Error{"piece table over-covers WordDocument"});
-    emitted += length;
     uint32_t raw = U32(b, desc + 8 * i + 2);
-    uint16_t prm = U16(b, desc + 8 * i + 6);
-    if ((prm & 1) && (prm >> 1) >= prc_count)
-      return std::unexpected(Error{"CLX Prm1 index outside Prc array"});
     bool compressed = raw & kFcCompressed;
     uint64_t start = compressed ? (raw & kFcMask) / 2 : raw & kFcMask;
     uint64_t bytes = static_cast<uint64_t>(length) * (compressed ? 1 : 2);
-    if (start > word.size() || bytes > word.size() - start)
-      return std::unexpected(Error{"piece outside WordDocument"});
+    if (start > word.size() || bytes > word.size() - start) {
+      // A piece that names bytes outside WordDocument carries no usable text.
+      // Drop that piece only and keep the others: LibreOffice sw/qa
+      // ofz18534-1 has four sound pieces around one garbage descriptor
+      // (fc=985856), and the CP hole it leaves is acceptable.
+      if (warnings) {
+        warnings->push_back(
+            "piece " + std::to_string(i) + " (CP " + std::to_string(cp) + ".." +
+            std::to_string(end) + " at fc " + std::to_string(start) +
+            ") lies "
+            "outside WordDocument (" +
+            std::to_string(word.size()) + " bytes); piece skipped");
+      }
+      continue;
+    }
+    emitted += length;
+    uint16_t prm = U16(b, desc + 8 * i + 6);
+    if ((prm & 1) && (prm >> 1) >= prc_count)
+      return std::unexpected(Error{"CLX Prm1 index outside Prc array"});
     if (end <= begin)
       continue;
     for (uint32_t j = begin > cp ? begin - cp : 0; j < length;) {
@@ -1017,8 +1088,17 @@ std::expected<std::vector<FormatRange>, Error> ReadFkps(
       if (para) {
         const uint32_t first = U32(plc, 4 * k);
         const uint32_t last = U32(plc, 4 * (k + 1));
-        if (last <= first)
-          return std::unexpected(Error{"invalid PAPX BTE FC order"});
+        if (last <= first || last > word.size()) {
+          // The BTE range itself is unusable; the page it names is already
+          // skipped, so drop the damaged range too and keep the other pages.
+          // A range past WordDocument (ofz18534-1 carries fc 13700188) would
+          // otherwise overlap every sound range in the final sort.
+          warnings->push_back(
+              std::string("skipped ") + (para ? "PAPX" : "CHPX") +
+              " BTE range " + std::to_string(k) +
+              ": FC range outside WordDocument; formatting range dropped");
+          continue;
+        }
         FormatRange damaged{first, last, {}};
         damaged.damaged = true;
         out.push_back(std::move(damaged));

@@ -90,6 +90,7 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
       return std::unexpected(Error{"encrypted Word 6/95 unsupported"});
     f.fc_min = U32(word, 24);
     const uint32_t fc_max = U32(word, 28);
+    f.fc_mac = fc_max;
     f.ccp_text = U32(word, 52);
     f.ccp_ftn = U32(word, 56);
     f.ccp_hdd = U32(word, 60);
@@ -198,6 +199,9 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.complex = flags & 0x0004;
   f.encrypted = flags & 0x0100;
   f.which_table = flags & 0x0200;
+  // FibBase.fExtChar: 16-bit text. Word 97+ pieces carry their own encoding
+  // bit; this value only drives the r50 contiguous fallback.
+  f.ext_char = (flags & 0x1000) != 0;
   if (f.encrypted)
     return std::unexpected(Error{flags & 0x8000
                                      ? "XOR-obfuscated document must be "
@@ -218,6 +222,11 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.ccp_edn = U32(word, lw + 32);
   f.ccp_txbx = U32(word, lw + 36);
   f.ccp_hdr_txbx = U32(word, lw + 40);
+  // [MS-DOC] §2.5.1: FibBase.fcMin/fcMac delimit the text in WordDocument.
+  // The modern reader normally addresses text through the CLX; these values
+  // are the fallback shape when the CLX has no usable Pcdt (r50).
+  f.fc_min = U32(word, 24);
+  f.fc_mac = U32(word, 28);
   const size_t pair_count_pos = lw + static_cast<size_t>(cslw) * 4;
   if (pair_count_pos + 2 > word.size())
     return std::unexpected(Error{"truncated FIB pairs"});

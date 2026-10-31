@@ -450,9 +450,15 @@ OpResult ApplyCellWidthAndMerge(model::RowProperties& row, uint16_t op,
   auto& cells = row.cells;
   if (op == kSprmTCellWidth) {
     size_t first, limit;
-    if (v.size() != kCellWidthSize || v[0] != kCellWidthCb ||
-        !TableRange(row, v, 1, first, limit))
+    if (v.size() != kCellWidthSize || v[0] != kCellWidthCb)
       return OpResult::kError;
+    // A row whose cells were never defined (the TDefTable sits in another
+    // PAPX), or whose itc range is out of bounds, has nothing this operand can
+    // resize. LibreOffice sw/qa ofz19065 carries such widths in its huge PAPX
+    // (itcFirst 65, itcLim 3 on a six-cell row); ignoring the operand keeps the
+    // row instead of rejecting the document.
+    if (!TableRange(row, v, 1, first, limit))
+      return OpResult::kOk;
     // Same Fts rule as sprmTTableWidth: unknown types MUST be ignored.
     if (v[kCellWidthTypeOffset] != kFtsNil &&
         v[kCellWidthTypeOffset] != kFtsAuto &&

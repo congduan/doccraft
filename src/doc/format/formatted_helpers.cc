@@ -95,7 +95,8 @@ bool ApplyLegacySectionSprm(model::Section& section, uint8_t code, Bytes v) {
 
 // Reads the section descriptor PLC (SED) and the SEPX of each section.
 std::expected<std::vector<std::pair<uint32_t, model::Section>>, Error>
-ReadSections(Bytes word, Bytes table, const Fib& fib) {
+ReadSections(Bytes word, Bytes table, const Fib& fib,
+             std::vector<std::string>* warnings) {
   std::vector<std::pair<uint32_t, model::Section>> sections;
   if (fib.sed.size) {
     // Word 6/95 keeps Plcfsed in WordDocument; Word 97+ uses the table stream.
@@ -138,11 +139,31 @@ ReadSections(Bytes word, Bytes table, const Fib& fib) {
       uint32_t fc = U32(b, pos + 2);
       model::Section section;
       if (fc != kUndefinedU32) {
-        if (fc > word.size() || word.size() - fc < 2)
-          return std::unexpected(Error{"SEPX outside WordDocument"});
+        if (fc > word.size() || word.size() - fc < 2) {
+          // The SEPX lives past the readable WordDocument (common when the
+          // stream itself was truncated, as in ofz18414-1). The section still
+          // exists; only its properties are unknown.
+          if (warnings) {
+            warnings->push_back("SEPX for section " + std::to_string(i) +
+                                " at fc " + std::to_string(fc) +
+                                " lies outside WordDocument (" +
+                                std::to_string(word.size()) +
+                                " bytes); default section properties used");
+          }
+          sections.emplace_back(end, model::Section{});
+          continue;
+        }
         size_t len = U16(word, fc);
-        if (len > word.size() - fc - 2)
-          return std::unexpected(Error{"truncated SEPX"});
+        if (len > word.size() - fc - 2) {
+          if (warnings) {
+            warnings->push_back("SEPX for section " + std::to_string(i) +
+                                " at fc " + std::to_string(fc) +
+                                " is truncated; default section "
+                                "properties used");
+          }
+          sections.emplace_back(end, model::Section{});
+          continue;
+        }
         bool valid = true;
         if (!Walk(word.subspan(fc + 2, len),
                   [&](uint16_t op, Bytes v) {
@@ -216,25 +237,32 @@ void ApplyParagraphSprms(model::Paragraph& para, const FormatRange* pap,
 std::expected<void, Error> FinishTableRow(model::Table& table,
                                           std::vector<model::Cell>& row,
                                           model::Paragraph& para,
-                                          const FormatRange* pap, Bytes data) {
+                                          const FormatRange* pap, Bytes data,
+                                          std::vector<std::string>* warnings) {
   model::RowProperties properties;
+  bool walked = true;
   bool valid = true;
   uint16_t invalid_op = 0;
   if (pap) {
-    valid =
-        WalkParagraph(pap->sprms, data,
-                      [&](uint16_t op, Bytes v) {
-                        if (valid && (op == kSprmTDefTable ||
-                                      op == kSprmTDefTableObsolete ||
-                                      (op >> 10 & 7) == 5)) {
-                          if (!(valid = ApplyTable(table, properties, op, v))) {
-                            invalid_op = op;
-                          }
-                        }
-                      }) &&
-        valid;
+    walked = WalkParagraph(pap->sprms, data, [&](uint16_t op, Bytes v) {
+      if (valid && (op == kSprmTDefTable || op == kSprmTDefTableObsolete ||
+                    (op >> 10 & 7) == 5)) {
+        if (!(valid = ApplyTable(table, properties, op, v))) {
+          invalid_op = op;
+        }
+      }
+    });
   }
-  if (!valid) {
+  if (!walked) {
+    // A nested sprmPHugePapx pointer outside the Data stream makes the row
+    // properties unreadable; the cells themselves come from the text and stay
+    // usable (LibreOffice sw/qa ofz18414-1).
+    if (warnings) {
+      warnings->push_back(
+          "table row properties unreadable (sprm stream outside its backing "
+          "stream); defaults used");
+    }
+  } else if (!valid) {
     return std::unexpected(
         Error{"invalid TAPX operand " + std::to_string(invalid_op)});
   }

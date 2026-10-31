@@ -33,6 +33,10 @@ struct Fib {
   uint16_t n_fib = 0;
   bool legacy = false;
   uint32_t fc_min = 0;
+  // FibBase.fcMac: one past the last text byte in WordDocument. Together with
+  // fcMin it describes the contiguous text range used when the CLX cannot
+  // provide a usable Pcdt (r50).
+  uint32_t fc_mac = 0;
   // FibBase.lid selects the ANSI code page of compressed ("8-bit") pieces.
   uint16_t lid = 0;
   uint32_t codepage = 1252;
