@@ -145,11 +145,12 @@ bool TableRange(model::RowProperties& row, Bytes v, size_t offset,
     return false;
   first = v[offset];
   limit = v[offset + 1];
-  // [MS-DOC] 2.9.123 ItcFirstLim: itcLim MUST be greater than or equal to
-  // itcFirst and no greater than the row's cell count; equality is the
-  // explicitly defined empty range (zero cells), which every caller treats
-  // as a no-op rather than a malformed operand.
-  return first <= limit && limit <= row.cells.size();
+  // [MS-DOC] 2.9.123 ItcFirstLim: itcFirst MUST be less than the row's cell
+  // count, and itcLim MUST be in [itcFirst, cell count]. The empty range is
+  // therefore itcFirst == itcLim with itcFirst < cell count; [count, count) is
+  // a malformed operand, not a no-op, and every caller rejects it as such.
+  return first <= limit && first < row.cells.size() &&
+         limit <= row.cells.size();
 }
 // Table SPRMs are dispatch-heavy ([MS-DOC] §2.6.3). Each handler owns one
 // property family and reports kUnmatched when the opcode is out of scope.
@@ -417,7 +418,8 @@ OpResult ApplyTableStructure(model::Table& table, model::RowProperties& row,
     size_t first, limit;
     if (!TableRange(row, v, 0, first, limit))
       return OpResult::kError;
-    // ItcFirstLim permits first == limit: a zero-cell range deletes nothing.
+    // A legal empty range (first == limit below the cell count) deletes
+    // nothing; TableRange has already rejected first == limit == cell count.
     if (first == limit)
       return OpResult::kOk;
     if (limit - first == cells.size())

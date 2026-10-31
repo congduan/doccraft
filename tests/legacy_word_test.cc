@@ -1177,8 +1177,9 @@ TEST(LegacyWord, Word6TableEmptyRangesAreNoOps) {
 
 TEST(LegacyWord, Word6TableEditErrorsRejectDocument) {
   // Invalid table edits keep the existing whole-document error path: zero
-  // inserted cells, an out-of-bounds ItcFirstLim and an insert beyond the
-  // 63-cell cap all surface as the modern opcode rejected by FinishTableRow.
+  // inserted cells, out-of-bounds or impossible ItcFirstLim ranges (including
+  // an empty range at the cell count) and an insert beyond the 63-cell cap all
+  // surface as the modern opcode rejected by FinishTableRow.
   auto zero_insert = ParseWord6TableEdits({
       0xC2, 0x01, 0x00, 0x20, 0x03,  // sprmTInsert: ctc = 0.
   });
@@ -1194,6 +1195,28 @@ TEST(LegacyWord, Word6TableEditErrorsRejectDocument) {
   EXPECT_NE(out_of_range.error().message.find("invalid TAPX operand 22050"),
             std::string::npos)
       << out_of_range.error().message;
+
+  // [MS-DOC] 2.9.123 ItcFirstLim: itcFirst MUST be less than the row's cell
+  // count, so [2,2) is malformed even though itcLim may equal itcFirst. Only
+  // an empty range below the cell count is a no-op; this whole-row operand
+  // must still take the whole-document error path.
+  auto empty_whole_row_delete = ParseWord6TableEdits({
+      0xC3, 0x02, 0x02,  // sprmTDelete: itcFirst == itcLim == 2.
+  });
+  ASSERT_FALSE(empty_whole_row_delete);
+  EXPECT_NE(
+      empty_whole_row_delete.error().message.find("invalid TAPX operand 22050"),
+      std::string::npos)
+      << empty_whole_row_delete.error().message;
+
+  auto empty_whole_row_merge = ParseWord6TableEdits({
+      0xC5, 0x02, 0x02,  // sprmTMerge: itcFirst == itcLim == 2.
+  });
+  ASSERT_FALSE(empty_whole_row_merge);
+  EXPECT_NE(
+      empty_whole_row_merge.error().message.find("invalid TAPX operand 22052"),
+      std::string::npos)
+      << empty_whole_row_merge.error().message;
 
   // Grow the two-cell definition to the 63-cell cap, then insert one more.
   std::vector<uint8_t> edits;
