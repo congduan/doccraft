@@ -12,7 +12,9 @@
 >
 > M19 语料回归：引入 Apache POI test-data 159 个真实 Word `.doc`（/home/ubuntu/doccraft-corpus/poi-test-data），首轮冒烟 87 成功/26 警告/46 拒绝/0 崩溃。修复 sprmTTableWidth/sprmTCellWidth 的 fts 处理（d5383fc）后为 102 成功/32 警告/25 拒绝。剩余 25 个拒绝逐项核验均为正确行为：6 个 clusterfuzz 变异样本与 1 个截断文件（partial sector）、3 个加密文档（需 --password）、3 个畸形图片尺寸、2 个缺流、2 个非法目录名、其余为 CFB 结构损坏。fuzz 样本拒绝不是缺陷。
 >
-> M19 更新：原第 2、3 项已解决（a93c95e）——Header 偏移 40 目录扇区数已按 [MS-CFB] §2.2 核验（v3 必须为 0，v4 必须等于目录链实际长度）；`ReadStream` 的 `/` 歧义改为确定性优先级（完整路径 > 相对路径 > entry 名）；`ReadChain` 容忍声明尺寸之后一个正确以 `ENDOFCHAIN` 收尾的多余链尾扇区。各附回归测试（`CfbReaderTest.RejectsV3HeaderWithDirectorySectorCount` 等 4 项）。
+> M19 更新：原第 2、3 项已解决（a93c95e）——Header 偏移 40 目录扇区数已按 [MS-CFB] §2.2 核验（v3 必须为 0，v4 必须等于目录链实际长度）；`ReadStream` 的 `/` 歧义改为确定性优先级（完整路径 > 相对路径 > entry 名）；`ReadChain` 容忍声明尺寸之后一个正确以 `ENDOFCHAIN` 收尾的多余链尾扇区。各附回归测试（v3 目录扇区数一项在 r41 放宽为警告，现名 `CfbReaderTest.ToleratesV3HeaderWithDirectorySectorCount`；另 3 项保留）。
+>
+> r41 CFB 头部容错（对齐 LibreOffice 的读取宽松度）：偏移 28 字节序标记非 `0xFFFE`、偏移 56 mini stream cutoff 非 4096、v3 偏移 40 目录扇区数非 0，均不再整篇拒绝；解析继续，CLI 各输出一条 `warning:`。前两个字段在本读取器中不参与寻址（小于 4096 字节的流固定从 mini stream 读取），cutoff 按 4096 处理；v3 目录扇区数也不参与寻址，目录始终走 first-dir-sector 的 FAT 链，v4 的「必须等于链长」校验保持不变。`LoadDirectory` 另容忍目录链恰好指向 `total_sectors`（越界 1 扇区）且已读到至少一个目录扇区的情形：停止跟随并以已读内容继续，同样警告。实测 12 份 LibreOffice sw/qa 回归样本：`ofz18414-1`/`ofz18534-1`/`ofz19065` 的目录链属于「越界 1 扇区」形态；`ofz18554-1` 的链以 `FREESECT` 收尾（仍拒绝，未纳入本次容忍）；其余样本越过头部检查后止于 `impossible sector count`（偏移 44/72 的 FAT/DIFAT 计数同为 fuzz 损坏值）或更深的目录树链接损坏，仍按整篇拒绝。环、链中途越界、FAT 索引出界和更深越界仍拒绝。回归：`CfbLenientHeader.*`（6 项）。
 
 ## M2
 
