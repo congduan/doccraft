@@ -329,23 +329,33 @@ std::expected<DirEntry, Error> ParseDirEntry(
   return entry;
 }
 
-// Walks the FAT directory chain and decodes every entry.
+// Walks the FAT directory chain and decodes every entry. `partial_bytes` is
+// the number of physically present bytes in the trailing fragment that
+// UsableSize dropped (0 when the file ends on a sector boundary).
 std::expected<std::vector<DirEntry>, Error> LoadDirectory(
     std::span<const uint8_t> bytes, const Header& header,
-    const std::vector<uint32_t>& fat, std::vector<std::string>* warnings) {
+    const std::vector<uint32_t>& fat, size_t partial_bytes,
+    std::vector<std::string>* warnings) {
   std::vector<uint8_t> directory;
   std::vector<uint8_t> seen(header.total_sectors, 0);
   uint32_t at = header.first_dir_sector;
   while (at != kEnd) {
-    // Some LibreOffice fuzz regressions have a directory FAT chain that runs
-    // exactly one sector past the end of the file (the last link names the
-    // first sector that does not exist). The sectors before it are intact,
-    // so stop there instead of rejecting the container; deeper overruns
-    // still fail below.
+    // A directory FAT chain may name `total_sectors`, the sector just past the
+    // last complete one. When the file ends with a physically present partial
+    // fragment, that index is the fragment itself (r34 drops it before sector
+    // reads); otherwise it is one full sector past the end. In both shapes the
+    // sectors before it are intact, so stop there instead of rejecting the
+    // container; deeper overruns still fail below.
     if (at == header.total_sectors && directory.size() >= header.sector_size) {
-      Warn(warnings,
-           "directory chain ends one sector past end of file; "
-           "using the sectors read");
+      if (partial_bytes != 0) {
+        Warn(warnings,
+             "directory chain names the trailing partial sector; "
+             "using the sectors read");
+      } else {
+        Warn(warnings,
+             "directory chain ends one sector past end of file; "
+             "using the sectors read");
+      }
       break;
     }
     if (at >= header.total_sectors || at >= fat.size() || seen[at]) {
@@ -471,12 +481,17 @@ std::expected<CfbReader, Error> CfbReader::Open(
   // Drop any trailing partial sector before sector, FAT or directory reads.
   // The unchecked byte helpers (U16/U32) would otherwise be able to run past
   // the real end of the buffer when the last sector is only partially present.
-  bytes = bytes.first(UsableSize(bytes.size(), header->sector_size));
+  // Remember how many fragment bytes were dropped so the directory chain can
+  // tell "names the trailing partial sector" from "one full sector past end".
+  const size_t usable = UsableSize(bytes.size(), header->sector_size);
+  const size_t partial_bytes = bytes.size() - usable;
+  bytes = bytes.first(usable);
   auto tables = LoadFatTables(bytes, *header);
   if (!tables) {
     return std::unexpected(tables.error());
   }
-  auto entries = LoadDirectory(bytes, *header, tables->fat, &warnings);
+  auto entries =
+      LoadDirectory(bytes, *header, tables->fat, partial_bytes, &warnings);
   if (!entries) {
     return std::unexpected(entries.error());
   }
