@@ -145,7 +145,11 @@ bool TableRange(model::RowProperties& row, Bytes v, size_t offset,
     return false;
   first = v[offset];
   limit = v[offset + 1];
-  return first < limit && limit <= row.cells.size();
+  // [MS-DOC] 2.9.123 ItcFirstLim: itcLim MUST be greater than or equal to
+  // itcFirst and no greater than the row's cell count; equality is the
+  // explicitly defined empty range (zero cells), which every caller treats
+  // as a no-op rather than a malformed operand.
+  return first <= limit && limit <= row.cells.size();
 }
 // Table SPRMs are dispatch-heavy ([MS-DOC] §2.6.3). Each handler owns one
 // property family and reports kUnmatched when the opcode is out of scope.
@@ -411,7 +415,12 @@ OpResult ApplyTableStructure(model::Table& table, model::RowProperties& row,
   }
   if (op == kSprmTDelete) {
     size_t first, limit;
-    if (!TableRange(row, v, 0, first, limit) || limit - first == cells.size())
+    if (!TableRange(row, v, 0, first, limit))
+      return OpResult::kError;
+    // ItcFirstLim permits first == limit: a zero-cell range deletes nothing.
+    if (first == limit)
+      return OpResult::kOk;
+    if (limit - first == cells.size())
       return OpResult::kError;
     cells.erase(cells.begin() + first, cells.begin() + limit);
     if (limit <= table.columns.size())

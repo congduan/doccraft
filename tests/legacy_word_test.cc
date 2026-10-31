@@ -54,6 +54,24 @@ std::string Part(const std::vector<uint8_t>& bytes, const char* name) {
   return result;
 }
 
+// Returns each <w:tc> element intact so a test can assert per-cell properties
+// and cell text instead of only the table grid.
+std::vector<std::string> TableCells(const std::string& xml) {
+  constexpr const char* kOpen = "<w:tc>";
+  constexpr const char* kClose = "</w:tc>";
+  std::vector<std::string> cells;
+  size_t p = 0;
+  while ((p = xml.find(kOpen, p)) != std::string::npos) {
+    const size_t end = xml.find(kClose, p);
+    if (end == std::string::npos)
+      break;
+    const size_t after = end + std::string(kClose).size();
+    cells.push_back(xml.substr(p, after - p));
+    p = after;
+  }
+  return cells;
+}
+
 // Builds a Word 6/95 document whose only CHPX range references a 66-byte PICF
 // at `pic` declaring `payload` bytes of MFPF anisotropic metafile behind it.
 std::vector<uint8_t> Word6PictureDocument(size_t size, size_t pic,
@@ -353,47 +371,62 @@ std::vector<uint8_t> Word6PapxDocumentWithWideGrpprl(
   return word;
 }
 
-// Builds a Word 6/95 document holding one one-row, two-cell table. The cell
-// paragraph "A" and its cell mark carry `cell_sprms`; the second cell "B" and
-// the row-end mark (0x07 with sprmPFTtp) carry `row_sprms`, and the final CR
-// is a body paragraph outside the table with default properties. Both
-// grpprls must be an even number of bytes so the BX length covers exactly the
-// two style bytes plus the modifiers.
+// Builds a Word 6/95 document holding one one-row table with `cell_count`
+// physical cells (default two). Each non-final cell paragraph and its cell
+// mark carry `cell_sprms`; the final cell paragraph and the row-end mark (0x07
+// with sprmPFTtp) carry `row_sprms`, and the closing CR is a body paragraph
+// outside the table with default properties. Both grpprls must be an even
+// number of bytes so the BX length covers exactly the two style bytes plus the
+// modifiers.
 std::vector<uint8_t> Word6TableDocument(const std::vector<uint8_t>& cell_sprms,
-                                        const std::vector<uint8_t>& row_sprms) {
+                                        const std::vector<uint8_t>& row_sprms,
+                                        size_t cell_count = 2) {
   std::vector<uint8_t> word(2560);
   Put16(word, 0, 0xA5DC);
   Put16(word, 2, 0x65);
   Put16(word, 6, 0x0409);
-  Put32(word, 24, 768);
-  Put32(word, 28, 773);
-  Put32(word, 52, 5);
-  word[768] = 'A';
-  word[769] = 0x07;  // Cell mark.
-  word[770] = 'B';
-  word[771] = 0x07;  // Row-end mark.
-  word[772] = '\r';
-  // PAPX BTE PLC at 2060 covers the FC range 768-773.
+  const uint32_t text_begin = 768;
+  const uint32_t text_end = text_begin + 2 * cell_count + 1;
+  Put32(word, 24, text_begin);
+  Put32(word, 28, text_end);
+  Put32(word, 52, 2 * cell_count + 1);
+  for (size_t i = 0; i < cell_count; ++i) {
+    word[text_begin + 2 * i] = static_cast<uint8_t>('A' + i);
+    word[text_begin + 2 * i + 1] = 0x07;  // Cell or row-end mark.
+  }
+  word[text_end - 1] = '\r';  // Body paragraph after the table.
+  // PAPX BTE PLC at 2060 covers the whole body FC range.
   Put32(word, 88 + 13 * 8, 2060);
   Put32(word, 92 + 13 * 8, 10);
-  Put32(word, 2060, 768);
-  Put32(word, 2064, 773);
-  Put16(word, 2068, 3);
-  // PAPX FKP with three ranges: 768-770 (cell), 770-772 (row end) and
-  // 772-773 (body paragraph).
-  Put32(word, 1536, 768);
-  Put32(word, 1540, 770);
-  Put32(word, 1544, 772);
-  Put32(word, 1548, 773);
-  word[1552] = 32;   // Cell BX at page offset 64.
-  word[1559] = 100;  // Row BX at page offset 200.
-  word[1566] = 132;  // Body BX at page offset 264.
-  word[1600] = static_cast<uint8_t>((2 + cell_sprms.size()) / 2);
-  std::copy(cell_sprms.begin(), cell_sprms.end(), word.begin() + 1603);
-  word[1736] = static_cast<uint8_t>((2 + row_sprms.size()) / 2);
-  std::copy(row_sprms.begin(), row_sprms.end(), word.begin() + 1739);
-  word[1800] = 1;  // Style only, no modifiers.
-  word[2047] = 3;
+  Put32(word, 2060, text_begin);
+  Put32(word, 2064, text_end);
+  Put16(word, 2068, 3);  // FKP page 3.
+  // PAPX FKP with one range per cell plus the trailing body paragraph. The
+  // final cell range also owns the row-end mark, so it carries `row_sprms`.
+  const size_t ranges = cell_count + 1;
+  for (size_t j = 0; j < ranges; ++j) {
+    Put32(word, 1536 + 4 * j, text_begin + 2 * j);
+    Put32(word, 1540 + 4 * j,
+          j + 1 == ranges ? text_end : text_begin + 2 * (j + 1));
+  }
+  const size_t rgb = 1536 + 4 * (ranges + 1);
+  for (size_t j = 0; j < ranges; ++j) {
+    // Cell PAPXes sit near the front; the row PAPX gets the wide region so a
+    // long edit grpprl still fits before the body PAPX at page offset 480.
+    size_t offset = 480;
+    if (j + 1 != ranges) {
+      offset = j + 1 == cell_count ? 64 + 16 * (cell_count - 1) : 64 + 16 * j;
+    }
+    word[rgb + 7 * j] = static_cast<uint8_t>(offset / 2);
+    if (j + 1 == ranges) {
+      word[1536 + offset] = 1;  // Body PAPX: style only, no modifiers.
+      continue;
+    }
+    const auto& sprms = j + 1 == cell_count ? row_sprms : cell_sprms;
+    word[1536 + offset] = static_cast<uint8_t>((2 + sprms.size()) / 2);
+    std::copy(sprms.begin(), sprms.end(), word.begin() + 1536 + offset + 3);
+  }
+  word[2047] = static_cast<uint8_t>(ranges);
   return word;
 }
 
@@ -413,16 +446,19 @@ const std::vector<uint8_t> kLegacyTwoColumnDefinition = {
     0x00, 0x00, 0,    0,    0,    0,    0,    0,    0,    0,
 };
 
-// Builds a two-cell table whose row-end PAPX appends `edit_sprms` after the
-// two-column definition, then closes the row with sprmPFTtp/sprmPFInTable.
+// Builds a table with `cell_count` physical cells whose row-end PAPX appends
+// `edit_sprms` after the two-column definition, then closes the row with
+// sprmPFTtp/sprmPFInTable. The physical cell count must match the definition
+// after the edits for the writer to emit a cell for every definition entry.
 std::expected<doccraft::model::Document, doccraft::doc::Error>
-ParseWord6TableEdits(const std::vector<uint8_t>& edit_sprms) {
+ParseWord6TableEdits(const std::vector<uint8_t>& edit_sprms,
+                     size_t cell_count = 2) {
   std::vector<uint8_t> row = kLegacyTwoColumnDefinition;
   row.insert(row.end(), edit_sprms.begin(), edit_sprms.end());
   row.insert(row.end(), {0x19, 1, 0x18, 1});  // sprmPFTtp, sprmPFInTable.
   if (row.size() % 2)
     row.push_back(0);  // PAPX word alignment.
-  return ParseWord6(Word6TableDocument({0x18, 1}, row));
+  return ParseWord6(Word6TableDocument({0x18, 1}, row, cell_count));
 }
 
 TEST(LegacyWord, Word6FkpMapsFrameWrapAndLanguage) {
@@ -1033,18 +1069,26 @@ TEST(LegacyWord, Word6TableWidthAndInsertReachDocx) {
   // sprmTDxaCol [0,2) = 900 rewrites both columns, then sprmTInsert at
   // position 1 adds one 800-twip column, so the grid becomes 900/800/900.
   // Both operands share the modern layout (see LegacyScanMapsLegacyTableEdits)
-  // and are applied by the existing spra=5 table dispatcher.
-  auto document = ParseWord6TableEdits({
-      0xC4, 0x00, 0x02, 0x84, 0x03,  // sprmTDxaCol: [0,2) = 900 twips.
-      0xC2, 0x01, 0x01, 0x20, 0x03,  // sprmTInsert: at 1, one 800 cell.
-  });
+  // and are applied by the existing spra=5 table dispatcher. The synthetic
+  // row has three physical cells so the text stream matches the three cell
+  // definitions that remain after the insert.
+  auto document = ParseWord6TableEdits(
+      {
+          0xC4, 0x00, 0x02, 0x84, 0x03,  // sprmTDxaCol: [0,2) = 900 twips.
+          0xC2, 0x01, 0x01, 0x20, 0x03,  // sprmTInsert: at 1, one 800 cell.
+      },
+      3);
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->tables.size(), 1u);
   const auto& table = document->tables[0];
   EXPECT_EQ(table.columns, (std::vector<int>{900, 800, 900}));
   ASSERT_EQ(table.row_properties.size(), 1u);
-  EXPECT_EQ(table.row_properties[0].cells.size(), 3u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 3u);
   EXPECT_EQ(table.row_properties[0].cells[0].width, 900);
+  EXPECT_EQ(table.row_properties[0].cells[1].width, -1);
+  EXPECT_EQ(table.row_properties[0].cells[2].width, 900);
+  ASSERT_EQ(table.rows.size(), 1u);
+  EXPECT_EQ(table.rows[0].size(), 3u);
   for (const auto& warning : document->warnings)
     EXPECT_NE(warning, "Word 6/95 FKP contains unsupported sprms");
   auto zip = doccraft::docx::Write(*document);
@@ -1055,24 +1099,111 @@ TEST(LegacyWord, Word6TableWidthAndInsertReachDocx) {
                "<w:gridCol w:w=\"900\"/></w:tblGrid>"),
       std::string::npos)
       << xml;
+  const auto cells = TableCells(xml);
+  ASSERT_EQ(cells.size(), 3u) << xml;
+  // The inserted middle cell has no per-cell width of its own and falls back
+  // to the inserted grid column; its text is the original second cell "B".
+  for (const char* fragment :
+       {"<w:tcW w:w=\"900\" w:type=\"dxa\"/>", ">A</w:t>"})
+    EXPECT_NE(cells[0].find(fragment), std::string::npos) << fragment << "\n"
+                                                          << cells[0];
+  for (const char* fragment :
+       {"<w:tcW w:w=\"800\" w:type=\"dxa\"/>", ">B</w:t>"})
+    EXPECT_NE(cells[1].find(fragment), std::string::npos) << fragment << "\n"
+                                                          << cells[1];
+  for (const char* fragment :
+       {"<w:tcW w:w=\"900\" w:type=\"dxa\"/>", ">C</w:t>"})
+    EXPECT_NE(cells[2].find(fragment), std::string::npos) << fragment << "\n"
+                                                          << cells[2];
 }
 
 TEST(LegacyWord, Word6TableDeleteReachesDocx) {
   // sprmTDelete [0,1) removes the first cell and its grid column, leaving a
-  // single 720-twip column.
-  auto document = ParseWord6TableEdits({0xC3, 0x00, 0x01});
+  // single 720-twip column. One physical cell keeps the text stream in step
+  // with the one definition that remains.
+  auto document = ParseWord6TableEdits({0xC3, 0x00, 0x01}, 1);
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->tables.size(), 1u);
   const auto& table = document->tables[0];
   EXPECT_EQ(table.columns, (std::vector<int>{720}));
   ASSERT_EQ(table.row_properties.size(), 1u);
-  EXPECT_EQ(table.row_properties[0].cells.size(), 1u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 1u);
+  EXPECT_EQ(table.row_properties[0].cells[0].width, 720);
+  ASSERT_EQ(table.rows.size(), 1u);
+  EXPECT_EQ(table.rows[0].size(), 1u);
   auto zip = doccraft::docx::Write(*document);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
   EXPECT_NE(xml.find("<w:tblGrid><w:gridCol w:w=\"720\"/></w:tblGrid>"),
             std::string::npos)
       << xml;
+  const auto cells = TableCells(xml);
+  ASSERT_EQ(cells.size(), 1u) << xml;
+  EXPECT_NE(cells[0].find("<w:tcW w:w=\"720\" w:type=\"dxa\"/>"),
+            std::string::npos)
+      << cells[0];
+  EXPECT_NE(cells[0].find(">A</w:t>"), std::string::npos) << cells[0];
+}
+
+TEST(LegacyWord, Word6TableEmptyRangesAreNoOps) {
+  // [MS-DOC] 2.9.123 ItcFirstLim: itcLim may equal itcFirst, which denotes a
+  // zero-cell range. Delete, merge, split and column-width edits must accept
+  // that operand and leave the row untouched instead of rejecting the whole
+  // document at FinishTableRow.
+  auto document = ParseWord6TableEdits({
+      0xC3, 0x01, 0x01,              // sprmTDelete: empty range.
+      0xC5, 0x01, 0x01,              // sprmTMerge: empty range.
+      0xC6, 0x01, 0x01,              // sprmTSplit: empty range.
+      0xC4, 0x01, 0x01, 0x84, 0x03,  // sprmTDxaCol: empty range.
+  });
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  EXPECT_EQ(table.columns, (std::vector<int>{720, 720}));
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 2u);
+  for (const auto& cell : table.row_properties[0].cells) {
+    EXPECT_EQ(cell.width, 720);
+    EXPECT_EQ(cell.horizontal_merge, 0);
+  }
+  ASSERT_EQ(table.rows.size(), 1u);
+  EXPECT_EQ(table.rows[0].size(), 2u);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_EQ(TableCells(xml).size(), 2u) << xml;
+  EXPECT_EQ(xml.find("<w:hMerge"), std::string::npos) << xml;
+}
+
+TEST(LegacyWord, Word6TableEditErrorsRejectDocument) {
+  // Invalid table edits keep the existing whole-document error path: zero
+  // inserted cells, an out-of-bounds ItcFirstLim and an insert beyond the
+  // 63-cell cap all surface as the modern opcode rejected by FinishTableRow.
+  auto zero_insert = ParseWord6TableEdits({
+      0xC2, 0x01, 0x00, 0x20, 0x03,  // sprmTInsert: ctc = 0.
+  });
+  ASSERT_FALSE(zero_insert);
+  EXPECT_NE(zero_insert.error().message.find("invalid TAPX operand 30241"),
+            std::string::npos)
+      << zero_insert.error().message;
+
+  auto out_of_range = ParseWord6TableEdits({
+      0xC3, 0x00, 0x03,  // sprmTDelete: itcLim 3 on a two-cell row.
+  });
+  ASSERT_FALSE(out_of_range);
+  EXPECT_NE(out_of_range.error().message.find("invalid TAPX operand 22050"),
+            std::string::npos)
+      << out_of_range.error().message;
+
+  // Grow the two-cell definition to the 63-cell cap, then insert one more.
+  std::vector<uint8_t> edits;
+  for (int i = 0; i < 62; ++i)
+    edits.insert(edits.end(), {0xC2, 0x01, 0x01, 0x20, 0x03});
+  auto over_cap = ParseWord6TableEdits(edits);
+  ASSERT_FALSE(over_cap);
+  EXPECT_NE(over_cap.error().message.find("invalid TAPX operand 30241"),
+            std::string::npos)
+      << over_cap.error().message;
 }
 
 TEST(LegacyWord, Word6TableMergeAndSplitReachDocx) {
