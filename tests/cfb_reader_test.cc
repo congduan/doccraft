@@ -20,6 +20,7 @@
 #include <array>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <string>
 #include <utility>
@@ -55,6 +56,38 @@ size_t DirSlotOffset(const std::vector<uint8_t>& bytes, size_t slot) {
   const uint32_t sector_size = 1u << (bytes[30] | (bytes[31] << 8));
   const uint32_t dir_start = Get32(bytes, 48);
   return (static_cast<size_t>(dir_start) + 1) * sector_size + slot * 128;
+}
+
+// Rewrite the declared size of directory slot `slot` without touching the
+// sectors the builder allocated for it. Used to model a chain that carries a
+// trailing sector beyond the declared length.
+void SetStreamSize(std::vector<uint8_t>& bytes, size_t slot, uint64_t size) {
+  const size_t at = DirSlotOffset(bytes, slot) + 120;
+  Put32(bytes, at, static_cast<uint32_t>(size));
+  Put32(bytes, at + 4, static_cast<uint32_t>(size >> 32));
+}
+
+// Payload whose 512-byte sectors carry different fills. Uniform payloads make
+// a shifted chain indistinguishable from the correct one.
+std::vector<uint8_t> SectorPattern(size_t size) {
+  constexpr size_t kSector = 512;
+  std::vector<uint8_t> out(size);
+  for (size_t i = 0; i < size; ++i)
+    out[i] = static_cast<uint8_t>(0x21 + (i / kSector) * 0x11);
+  return out;
+}
+
+// Concatenates the named sectors of a SectorPattern payload.
+std::vector<uint8_t> SelectSectors(const std::vector<uint8_t>& payload,
+                                   std::initializer_list<size_t> sectors) {
+  constexpr size_t kSector = 512;
+  std::vector<uint8_t> out;
+  for (size_t sector : sectors) {
+    out.insert(
+        out.end(), payload.begin() + static_cast<ptrdiff_t>(sector * kSector),
+        payload.begin() + static_cast<ptrdiff_t>((sector + 1) * kSector));
+  }
+  return out;
 }
 
 // Byte offset of the FAT entry describing `sector` when the whole FAT lives in
@@ -1036,10 +1069,12 @@ TEST(CfbReaderTest, SalvagesStreamChainIndexPastAllocationTable) {
 // A link that skips one sector is repaired when the skipped sector points at
 // the same successor: the sector was an orphaned chain member, not a jump.
 // ofz19065's 1Table has 47 -> 49 with fat[48] == 49; following the links
-// verbatim shifts every table byte after sector 47.
+// verbatim shifts every table byte after sector 47. The payload differs per
+// sector, so only the restored order reproduces the stream byte for byte.
 TEST(CfbReaderTest, RestoresSkippedSectorThatLinksToSameSuccessor) {
   CfbBuilder builder;
-  builder.AddStream("Big", MakePayload(4096, 0x5A));
+  const auto payload = SectorPattern(4096);
+  builder.AddStream("Big", payload);
   auto bytes = builder.Build();
   const uint32_t start = StreamStart(bytes, "Big");
   ASSERT_NE(start, DirEntry::kNoFollow);
@@ -1048,8 +1083,68 @@ TEST(CfbReaderTest, RestoresSkippedSectorThatLinksToSameSuccessor) {
   ASSERT_TRUE(reader) << reader.error().message;
   auto big = reader->ReadStream("Big");
   ASSERT_TRUE(big) << big.error().message;
-  EXPECT_EQ(*big, MakePayload(4096, 0x5A));
+  EXPECT_EQ(*big, payload);
   EXPECT_TRUE(HasWarning(*reader, "sector restored"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+}
+
+// The skipped sector is only an orphan when the chain without it is exactly one
+// sector short of the declared size. Here the chain already carries enough
+// sectors (a trailing one beyond the declared length), so inserting the skipped
+// neighbour would shift every byte after it. Keep the link order untouched.
+TEST(CfbReaderTest, DoesNotRestoreSkippedSectorWhenChainIsAlreadyComplete) {
+  CfbBuilder builder;
+  const auto payload = SectorPattern(4608);
+  builder.AddStream("Big", payload);
+  auto bytes = builder.Build();
+  const uint32_t start = StreamStart(bytes, "Big");
+  ASSERT_NE(start, DirEntry::kNoFollow);
+  // Eight declared sectors, nine allocated: start -> start+2 still reaches
+  // sectors 2..8 and covers the declared size without sector start+1.
+  SetStreamSize(bytes, 1, 8 * 512);
+  Put32(bytes, FatEntryOffset(bytes, start), start + 2);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  auto big = reader->ReadStream("Big");
+  ASSERT_TRUE(big) << big.error().message;
+  EXPECT_EQ(*big, SelectSectors(payload, {0, 2, 3, 4, 5, 6, 7, 8}));
+  EXPECT_FALSE(HasWarning(*reader, "sector restored"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+}
+
+// A skipped sector that is another stream's chain head is not an orphan of
+// this stream: inserting it would splice two streams together. The declared
+// size is one sector short without it, so only the ownership check blocks the
+// restoration; the read then degrades to the readable prefix.
+TEST(CfbReaderTest, DoesNotRestoreSkippedSectorThatStartsAnotherStream) {
+  CfbBuilder builder;
+  const auto big_payload = SectorPattern(4096);
+  const auto other_payload = SectorPattern(4096);
+  builder.AddStream("Big", big_payload);
+  builder.AddStream("Other", other_payload);
+  auto bytes = builder.Build();
+  const uint32_t start = StreamStart(bytes, "Big");
+  ASSERT_NE(start, DirEntry::kNoFollow);
+  const uint32_t other_start = StreamStart(bytes, "Other");
+  ASSERT_EQ(other_start, start + 8);
+  // Big declares ten sectors but its allocated chain stops at start+7, which
+  // now links past Other's first sector. fat[other_start] links to the same
+  // successor, so the skipped-sector pattern fires on Other's head.
+  SetStreamSize(bytes, 1, 10 * 512);
+  Put32(bytes, FatEntryOffset(bytes, start + 7), other_start + 1);
+  Put32(bytes, FatEntryOffset(bytes, other_start + 1), 0xFFFFFFFE);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  auto big = reader->ReadStream("Big");
+  ASSERT_TRUE(big) << big.error().message;
+  std::vector<uint8_t> expected = big_payload;
+  expected.insert(expected.end(),
+                  other_payload.begin() + static_cast<ptrdiff_t>(512),
+                  other_payload.begin() + static_cast<ptrdiff_t>(1024));
+  EXPECT_EQ(*big, expected);
+  EXPECT_FALSE(HasWarning(*reader, "sector restored"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream Big"))
       << (reader->warnings().empty() ? "" : reader->warnings()[0]);
 }
 

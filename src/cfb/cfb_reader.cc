@@ -520,6 +520,45 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
       static_cast<size_t>(std::min({size, backing_size, uint64_t{65536}})));
   std::vector<uint8_t> seen(table.size(), 0);
   uint32_t at = start;
+  // A skipped sector is only an orphan of *this* chain. When its start sector
+  // belongs to another directory stream, inserting it would splice two streams
+  // together, so treat the link as a jump and leave the chain untouched.
+  const auto is_other_stream_head = [&](uint32_t sector) {
+    for (const DirEntry& entry : entries_) {
+      if (entry.start_sector == start || entry.size == 0)
+        continue;
+      if (entry.type != EntryType::kStream && entry.type != EntryType::kRoot)
+        continue;
+      if (entry.start_sector == sector)
+        return true;
+    }
+    return false;
+  };
+  // Bytes the untouched link order can still reach (the current prefix plus
+  // every readable sector after `from`). The skipped sector is inserted only
+  // when that total is exactly one sector short of the declared size; a
+  // already-complete chain must keep its order, and a chain short by two or
+  // more sectors is handled by the existing truncation path.
+  const auto readable_bytes = [&](uint32_t from) {
+    uint64_t total = result.size();
+    std::vector<uint8_t> probe_seen = seen;
+    uint32_t cur = from;
+    while (total < size) {
+      if (cur >= table.size() || probe_seen[cur])
+        break;
+      if (mini) {
+        const uint64_t offset = static_cast<uint64_t>(cur) * unit;
+        if (offset + unit > mini_stream_.size())
+          break;
+      } else if (!SectorBytes(cur)) {
+        break;
+      }
+      probe_seen[cur] = 1;
+      total += unit;
+      cur = table[cur];
+    }
+    return total;
+  };
   // A chain that runs out of backing bytes is truncated, not corrupt: every
   // sector read so far is real data, so keep the prefix and report the loss.
   // A link that points past the allocation table cannot be followed either,
@@ -562,16 +601,21 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
     // 1Table at 36..46, 47 -> 49 while fat[48] is also 49, so following the
     // links verbatim shifts every table byte after sector 47 by 512. Insert
     // the skipped sector and keep reading in order. The pattern occurs in no
-    // other file of the 680-sample corpus.
+    // other file of the 680-sample corpus. Guard the repair so it cannot
+    // rewrite an already-complete chain or borrow another stream's sector.
     if (i + 1 < count && !mini && next == at + 2 && at + 1 < table.size() &&
-        table[at + 1] == next && !seen[at + 1]) {
-      Warn(&warnings_, "stream " + std::string(name) +
-                           ": FAT chain skips "
-                           "sector " +
-                           std::to_string(at + 1) +
-                           ", which links to the same successor; sector "
-                           "restored");
-      next = at + 1;
+        table[at + 1] == next && !seen[at + 1] &&
+        !is_other_stream_head(at + 1)) {
+      const uint64_t readable = readable_bytes(next);
+      if (readable < size && readable + unit >= size) {
+        Warn(&warnings_, "stream " + std::string(name) +
+                             ": FAT chain skips "
+                             "sector " +
+                             std::to_string(at + 1) +
+                             ", which links to the same successor; sector "
+                             "restored");
+        next = at + 1;
+      }
     }
     if (i + 1 == count) {
       // Tolerate one trailing chain sector beyond the declared size when it
