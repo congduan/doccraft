@@ -405,6 +405,26 @@ std::expected<doccraft::model::Document, doccraft::doc::Error> ParseWord6(
   return doccraft::doc::ParseFormatted(word, word, *fib);
 }
 
+// Word 6/95 sprmTDefTable (0xBE) for a two-column 720/720 row: cb, itcMac,
+// three XAS centres and two default ten-byte TC6 cells.
+const std::vector<uint8_t> kLegacyTwoColumnDefinition = {
+    0xBE, 0x1C, 0x00, 0x02, 0x00, 0x00, 0xD0, 0x02, 0xA0, 0x05,
+    0x00, 0x00, 0,    0,    0,    0,    0,    0,    0,    0,
+    0x00, 0x00, 0,    0,    0,    0,    0,    0,    0,    0,
+};
+
+// Builds a two-cell table whose row-end PAPX appends `edit_sprms` after the
+// two-column definition, then closes the row with sprmPFTtp/sprmPFInTable.
+std::expected<doccraft::model::Document, doccraft::doc::Error>
+ParseWord6TableEdits(const std::vector<uint8_t>& edit_sprms) {
+  std::vector<uint8_t> row = kLegacyTwoColumnDefinition;
+  row.insert(row.end(), edit_sprms.begin(), edit_sprms.end());
+  row.insert(row.end(), {0x19, 1, 0x18, 1});  // sprmPFTtp, sprmPFInTable.
+  if (row.size() % 2)
+    row.push_back(0);  // PAPX word alignment.
+  return ParseWord6(Word6TableDocument({0x18, 1}, row));
+}
+
 TEST(LegacyWord, Word6FkpMapsFrameWrapAndLanguage) {
   // sprmPWr (0x25, one byte) is a paragraph property: wrap=2 followed by
   // sprmPJc (0x05) right align proves the next modifier is still applied.
@@ -896,6 +916,50 @@ TEST(LegacyWord, LegacyScanMapsTableProperties) {
   EXPECT_TRUE(out.empty());
 }
 
+TEST(LegacyWord, LegacyScanMapsLegacyTableEdits) {
+  // Word 6/95 table-edit sprms 0xC2..0xC6 keep the operand layout their Word
+  // 97+ namesakes use, so the bytes pass through unchanged:
+  //   sprmTInsert  (4): itcFirst, ctc, dxaCol;
+  //   sprmTDelete  (2): ItcFirstLim;
+  //   sprmTDxaCol  (4): itcFirst, itcLim, dxaCol;
+  //   sprmTMerge   (2): ItcFirstLim;
+  //   sprmTSplit   (2): ItcFirstLim.
+  // Evidence: wvWare sprm.c rgsprmWord6 maps 194..198 onto the modern ids and
+  // wvApplysprmTInsert/TDelete/TDxaCol/TMerge/TSplit read exactly those
+  // fields; [MS-DOC] 2.6.3 gives sprmTInsert a TInsertOperand, sprmTDelete/
+  // sprmTMerge/sprmTSplit an ItcFirstLim and sprmTDxaCol a TDxaColOperand.
+  // LibreOffice ww8scan.cxx GetWW6SprmSearcher lists the same 4/2/4/2/2
+  // widths, and its ProcessSprmTInsert/TDelete/TDxaCol read the same fields.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {
+      0xC2, 0x01, 0x01, 0x20, 0x03,  // Insert at 1, one 800-twip cell.
+      0xC3, 0x00, 0x01,              // Delete [0, 1).
+      0xC4, 0x00, 0x02, 0x84, 0x03,  // Width [0, 2) = 900 twips.
+      0xC5, 0x00, 0x02,              // Merge [0, 2).
+      0xC6, 0x01, 0x02,              // Split [1, 2).
+      0x05, 0x02,                    // sprmPJc right: later bytes still read.
+  };
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> expected = {
+      0x21, 0x76, 0x01, 0x01, 0x20, 0x03,  // sprmTInsert (0x7621).
+      0x22, 0x56, 0x00, 0x01,              // sprmTDelete (0x5622).
+      0x23, 0x76, 0x00, 0x02, 0x84, 0x03,  // sprmTDxaCol (0x7623).
+      0x24, 0x56, 0x00, 0x02,              // sprmTMerge (0x5624).
+      0x25, 0x56, 0x01, 0x02,              // sprmTSplit (0x5625).
+      0x03, 0x24, 0x02,                    // sprmPJc80 right.
+  };
+  EXPECT_EQ(out, expected);
+  // Each operand is 2 or 4 bytes; an opcode alone is still truncated.
+  for (uint8_t code : {0xC2, 0xC3, 0xC4, 0xC5, 0xC6}) {
+    out.clear();
+    EXPECT_EQ(
+        doccraft::doc::detail::ScanLegacySprms(std::vector<uint8_t>{code}, out),
+        doccraft::doc::detail::LegacySprmScan::kStopped);
+    EXPECT_TRUE(out.empty());
+  }
+}
+
 TEST(LegacyWord, Word6TablePropertiesReachDocx) {
   // Synthetic byte stream built from the LibreOffice v6 widths (see
   // LegacyScanMapsTableProperties) and the [MS-DOC] operand semantics:
@@ -963,6 +1027,84 @@ TEST(LegacyWord, Word6TablePropertiesReachDocx) {
   EXPECT_NE(exact_xml.find("<w:trHeight w:val=\"340\" w:hRule=\"exact\"/>"),
             std::string::npos)
       << exact_xml;
+}
+
+TEST(LegacyWord, Word6TableWidthAndInsertReachDocx) {
+  // sprmTDxaCol [0,2) = 900 rewrites both columns, then sprmTInsert at
+  // position 1 adds one 800-twip column, so the grid becomes 900/800/900.
+  // Both operands share the modern layout (see LegacyScanMapsLegacyTableEdits)
+  // and are applied by the existing spra=5 table dispatcher.
+  auto document = ParseWord6TableEdits({
+      0xC4, 0x00, 0x02, 0x84, 0x03,  // sprmTDxaCol: [0,2) = 900 twips.
+      0xC2, 0x01, 0x01, 0x20, 0x03,  // sprmTInsert: at 1, one 800 cell.
+  });
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  EXPECT_EQ(table.columns, (std::vector<int>{900, 800, 900}));
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  EXPECT_EQ(table.row_properties[0].cells.size(), 3u);
+  EXPECT_EQ(table.row_properties[0].cells[0].width, 900);
+  for (const auto& warning : document->warnings)
+    EXPECT_NE(warning, "Word 6/95 FKP contains unsupported sprms");
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(
+      xml.find("<w:tblGrid><w:gridCol w:w=\"900\"/><w:gridCol w:w=\"800\"/>"
+               "<w:gridCol w:w=\"900\"/></w:tblGrid>"),
+      std::string::npos)
+      << xml;
+}
+
+TEST(LegacyWord, Word6TableDeleteReachesDocx) {
+  // sprmTDelete [0,1) removes the first cell and its grid column, leaving a
+  // single 720-twip column.
+  auto document = ParseWord6TableEdits({0xC3, 0x00, 0x01});
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  EXPECT_EQ(table.columns, (std::vector<int>{720}));
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  EXPECT_EQ(table.row_properties[0].cells.size(), 1u);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tblGrid><w:gridCol w:w=\"720\"/></w:tblGrid>"),
+            std::string::npos)
+      << xml;
+}
+
+TEST(LegacyWord, Word6TableMergeAndSplitReachDocx) {
+  // sprmTMerge [0,2) marks the first cell as the merge start and the second
+  // as a continuation; the writer maps those IR flags to w:hMerge. A following
+  // sprmTSplit over the same range clears both flags again.
+  auto merged = ParseWord6TableEdits({0xC5, 0x00, 0x02});
+  ASSERT_TRUE(merged) << merged.error().message;
+  ASSERT_EQ(merged->tables.size(), 1u);
+  ASSERT_EQ(merged->tables[0].row_properties.size(), 1u);
+  ASSERT_EQ(merged->tables[0].row_properties[0].cells.size(), 2u);
+  EXPECT_EQ(merged->tables[0].row_properties[0].cells[0].horizontal_merge, 2);
+  EXPECT_EQ(merged->tables[0].row_properties[0].cells[1].horizontal_merge, 1);
+  auto merged_zip = doccraft::docx::Write(*merged);
+  ASSERT_TRUE(merged_zip) << merged_zip.error().message;
+  const std::string merged_xml = Part(*merged_zip, "word/document.xml");
+  for (const char* fragment :
+       {"<w:hMerge w:val=\"restart\"/>", "<w:hMerge w:val=\"continue\"/>"})
+    EXPECT_NE(merged_xml.find(fragment), std::string::npos) << fragment << "\n"
+                                                            << merged_xml;
+
+  auto split = ParseWord6TableEdits({0xC5, 0x00, 0x02, 0xC6, 0x00, 0x02});
+  ASSERT_TRUE(split) << split.error().message;
+  ASSERT_EQ(split->tables.size(), 1u);
+  ASSERT_EQ(split->tables[0].row_properties.size(), 1u);
+  ASSERT_EQ(split->tables[0].row_properties[0].cells.size(), 2u);
+  EXPECT_EQ(split->tables[0].row_properties[0].cells[0].horizontal_merge, 0);
+  EXPECT_EQ(split->tables[0].row_properties[0].cells[1].horizontal_merge, 0);
+  auto split_zip = doccraft::docx::Write(*split);
+  ASSERT_TRUE(split_zip) << split_zip.error().message;
+  const std::string split_xml = Part(*split_zip, "word/document.xml");
+  EXPECT_EQ(split_xml.find("<w:hMerge"), std::string::npos) << split_xml;
 }
 
 TEST(LegacyWord, LegacyScanMapsLegacyTableBorders) {
