@@ -18,6 +18,7 @@
 > M14 链式文本框：`M14LinkedTextbox.EachTbkdUsesItsOwnShapeAnchor` 覆盖两个 Tbkd 分段按各自 OfficeArtClientTextbox 指针连接非连续 FSPA 锚点，并断言两份独立的 `w:txbxContent`。`M4Textbox.SyntheticFlowBreaksStayInStoryOrder` 与 `M18Bookmarks.LinkedTextboxBreakEmitsBookmarkEndOnce` 已改为逐框内容与书签断言。它属于故事结构而非 sprm；§6.6 因缺真实 Word 链式 golden 保持 ◐。
 > M8 续批 PAPX 局部降级：`Fuzz.BadPapxTableRegionKeepsFollowingBody` 与 `m8_bad_papx_cli` 验证坏 PAPX FKP 页省略受损表格、保留后续正文、CLI 发出警告；CLX 越界仍拒绝。该行为是结构恢复，不改变正常 sprm opcode 状态。
 > M8 续批文本框域 golden 搜索：扫描本地 Apache POI 候选并用 LibreOffice DOCX 导出复核，尚无同时包含可见文本框与其中字段的真实样本；`M11TextboxFields.*` 合成断言仍有效，§6.1 域项维持 ◐。
+> M8 续批 Word 6/95 表格样式/边框/底纹：`ScanLegacySprms` 把 `0xC0`/`0xC1`/`0xC7`/`0xC8` 从「按宽度跳过」升级为翻译——`sprmTTlp` 四字节操作数与现代同布局直通；`sprmTSetBrc`/`sprmTSetBrc10` 由 itcFirst/itcLim/sides + BRC6/BRC10 重建现代 `sprmTSetBrc`(0xD62F) 的 12 字节操作数；`sprmTSetShd` 由 SHD16 重建 `sprmTSetShd`(0xD62D) 的 13 字节操作数。测试：`LegacyWord.LegacyScanMapsLegacyTtlp`、`LegacyWord.LegacyScanMapsLegacyTableSetBrc`、`LegacyWord.LegacyScanMapsLegacyTableSetBrc10`、`LegacyWord.LegacyScanMapsLegacyTableSetShd`、`LegacyWord.Word6TableCellBorderShadingReachDocx`；真实样本 `Bug50955.doc` 的 `C0 0800B700` 现进入 IR 并输出 `<w:tblLook w:val="06A0"/>`（改前该表无 tblLook）。
 
 > 代码中的 opcode 不再是裸字面量：统一引用 `src/doc/format/sprm_codes.h` 的
 > `kSprm<Name>` 常量；新增 sprm 时先在本表登记，再在同一文件补常量。
@@ -434,7 +435,10 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0xBC`/`0xBE` | sprmTDefTable10/sprmTDefTable | sprmTDefTable (0xD608) / sprmTDefTableObsolete (0xD606) | 2B cb + itcMac + (itcMac+1) XAS + itcMac×10B TC6；TC 完整时重建 20B TC80（TCGRF 复制、wWidth 0 由网格回填），短 TC 按 wvWare 早退只保留网格；r33；`LegacyWord.LegacyScanMapsLegacyTableDefinition`、`LegacyWord.LegacyScanKeepsGridWhenLegacyCellsAreShort`（合成） |
 | `0xBF` | sprmTDefTableShd | sprmTDefTableShd80 (0xD609) | cb + n×2B SHD（icoFore/icoBack/ipat，与 SHD80 同布局）原样转发，r31 的 cb 宽度语义不变；r33；`LegacyWord.LegacyScanConsumesTableShadingWithoutExtraFixedByte`、`LegacyWord.Word6TableBordersGridAndShadingReachDocx`（合成） |
 | `0xC2`–`0xC6` | sprmTInsert/TDelete/TDxaCol/TMerge/TSplit | sprmTInsert (0x7621)/sprmTDelete (0x5622)/sprmTDxaCol (0x7623)/sprmTMerge (0x5624)/sprmTSplit (0x5625) | 操作数布局与现代同：4B（itcFirst/ctc/dxaCol）/2B（ItcFirstLim）/4B（itcFirst/itcLim/dxaCol）/2B/2B，原样直通；r38；`LegacyWord.LegacyScanMapsLegacyTableEdits`、`LegacyWord.Word6TableWidthAndInsertReachDocx`、`LegacyWord.Word6TableDeleteReachesDocx`、`LegacyWord.Word6TableMergeAndSplitReachDocx`（合成） |
-| `0xC0`/`0xC1`/`0xC7`/`0xC8` | sprmTTlp/sprmTSetBrc/sprmTSetBrc10/sprmTSetShd | —（按宽度跳过） | 4B/5B/5B/4B；本轮不映射，维持测宽跳过；r38 登记 |
+| `0xC0` | sprmTTlp | sprmTTlp (0x740A) | 4B = itl(2)+grfatl(2)，与现代 TLP 同布局，原样直通；`LegacyWord.LegacyScanMapsLegacyTtlp`、`LegacyWord.Word6TableCellBorderShadingReachDocx`（合成） |
+| `0xC1` | sprmTSetBrc | sprmTSetBrc (0xD62F) | 5B = itcFirst/itcLim/sides/BRC6（无 cb 前缀）；重建 cb=11 + 3B + 8B Brc，ico 经 `Ico()` 转 COLORREF，全 1 字为 undefined；sides 原样保留由现代 handler 校验；`LegacyWord.LegacyScanMapsLegacyTableSetBrc`（合成） |
+| `0xC7` | sprmTSetBrc10 | sprmTSetBrc (0xD62F) | 5B = itcFirst/itcLim/sides/BRC10；线型按 wvConvertBRC10ToBRC 的 (line1,gap,line2) 表映射（1/2/4/6/7 与 1,1,1），ico 无对应字段按 0→-1（auto），width 取 dxpLine1Width；`LegacyWord.LegacyScanMapsLegacyTableSetBrc10`（合成） |
+| `0xC8` | sprmTSetShd | sprmTSetShd (0xD62D) | 4B = itcFirst/itcLim/SHD16；重建 cb=12 + 10B SHD（fore/back COLORREF + 2B ipat），icoFore/icoBack 经 `Ico()`（越界 16..31→-1），ipat 原样；`LegacyWord.LegacyScanMapsLegacyTableSetShd`（合成） |
 | `0x85`/`0x92`/`0x94`/`0x95`/`0xA3`/`0xAB` | sprmSOlstAnm/SFAutoPgn/SDyaPgn/SDxaPgn/SBCustomize/SDMPaperReq | —（按宽度跳过） | 0x85 变长、0x94/0x95/0xAB 2B、0x92 1B、0xA3 0B；r28 未映射 |
 | `0x99` | sprmSGprfIhdt | —（故事选择专用） | 1B；页眉读取消费，不施加为节属性 |
 
@@ -464,11 +468,35 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > [MS-DOC] 2.6.3 的 TInsertOperand/ItcFirstLim/TDxaColOperand 完全一致
 > （4/2/4/2/2 字节）；LO `GetWW6SprmSearcher` 宽度同。经 `FinishTableRow`
 > 的 spra=5 分派进入既有 handler，输出 `w:tblGrid` 列增减与 `w:hMerge`
-> 合并/拆分。`0xC0`/`0xC1`/`0xC7`/`0xC8` 仍按宽度跳过。测试：
+> 合并/拆分。`0xC0`/`0xC1`/`0xC7`/`0xC8` 当时仍按宽度跳过，M8 续批起已升级为翻译
+> （见上表及下方 r43 说明）。测试：
 > `LegacyWord.LegacyScanMapsLegacyTableEdits`、
 > `LegacyWord.Word6TableWidthAndInsertReachDocx`、
 > `LegacyWord.Word6TableDeleteReachesDocx`、
 > `LegacyWord.Word6TableMergeAndSplitReachDocx`（合成字节）。
+>
+> r43 Word 6/95 表格样式/边框/底纹（r38 遗留）：`ScanLegacySprms` 新增
+> `0xC0`/`0xC1`/`0xC7`/`0xC8` 四个 case。`0xC0`(sprmTTlp) 是 4 字节
+> itl+grfatl，与现代 `sprmTTlp`(0x740A) 的 TLP 完全同布局，直接转发；现代
+> `ApplyTableStyleOptions` 已把它折叠为 `Table::look` 并输出 `w:tblLook`。
+> `0xC1`(sprmTSetBrc) 与 `0xC7`(sprmTSetBrc10) 都是 5 字节
+> itcFirst/itcLim/sides/BRC，目标现代 `sprmTSetBrc`(0xD62F) 需要 cb=11 前缀，
+> 转换层重建为 12 字节操作数：BRC6 复用表格边框的 `AppendBrc6`，BRC10 新增
+> `AppendBrc10`（线型映射来自 wvWare `wvConvertBRC10ToBRC`：
+> (1,0,0)→single、(2,0,0)→thick、(4,0,0)→double、(6,0,0)→dotted、
+> (7,0,0)→hairline、(1,1,1)→double，其余→0；三元组顺序为
+> (dxpLine1Width, dxpSpaceBetween, dxpLine2Width)）。`0xC8`(sprmTSetShd) 是
+> 4 字节 itcFirst/itcLim/SHD16，目标现代 `sprmTSetShd`(0xD62D) 需要 cb=12
+> 前缀，重建为 13 字节操作数（icoFore/icoBack 经 `Ico()` 转 COLORREF，ipat
+> 原样）。sides 字节不做转换层截断，由共用 handler 的 0x3F 校验处理；itcLim
+> 越界同样交给 `TableRange`。语料实测：poi `Bug50955.doc`（nFib 0x0068）
+> 的行 grpprl 含 `C0 0800B700`，改前该操作数被静默跳过，改后表格输出
+> `w:tblLook w:val="06A0"`；其余列出的 7 份 POI/wvWare 样本为 nFib
+> 0xC1/0xC2（Word 97+），不经过旧版一字节扫描器，stderr 与输出均不变。测试：
+> `LegacyWord.LegacyScanMapsLegacyTtlp`、`LegacyWord.LegacyScanMapsLegacyTableSetBrc`、
+> `LegacyWord.LegacyScanMapsLegacyTableSetBrc10`、`LegacyWord.LegacyScanMapsLegacyTableSetShd`、
+> `LegacyWord.Word6TableCellBorderShadingReachDocx`（合成字节，TLP 操作数取自
+> Bug50955 实测）。
 
 ## 规范外旧账别名（不计入 314）
 
