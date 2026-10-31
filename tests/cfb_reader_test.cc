@@ -934,20 +934,57 @@ TEST(CfbReaderTest, SalvagesStreamChainThatEndsEarly) {
       << (reader->warnings().empty() ? "" : reader->warnings()[0]);
 }
 
-// The mini FAT is read through the regular chain path; an out-of-file start
-// leaves it empty, and a stream that depends on it reports the missing table
-// rather than returning fabricated bytes.
+// The mini FAT is read through the regular chain path. A chain that ends
+// before its declared sector count keeps the sector it read (r48), so the
+// first 128 mini FAT entries stay usable.
 TEST(CfbReaderTest, SalvagesTruncatedMiniFatChain) {
+  CfbBuilder builder;
+  builder.AddStream("Small", MakePayload(100, 0x33));
+  auto bytes = builder.Build();
+  // The builder stores one mini FAT sector; declaring two keeps the start in
+  // range while the chain still ends early.
+  Put32(bytes, 64, 2);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream mini FAT"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "kept 512 of 1024 declared bytes"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto small = reader->ReadStream("Small");
+  ASSERT_TRUE(small) << small.error().message;
+  EXPECT_EQ(*small, MakePayload(100, 0x33));
+}
+
+// r49: a mini FAT start outside the file is caught in the header and the mini
+// FAT is ignored there, so the dependent stream reports the missing table
+// instead of returning fabricated bytes.
+TEST(CfbReaderTest, ImpossibleMiniFatStartLeavesNoTable) {
   CfbBuilder builder;
   builder.AddStream("Small", MakePayload(100, 0x33));
   auto bytes = builder.Build();
   Put32(bytes, 60, PhysicalSectorEnd(bytes) + 5);  // header mini FAT start
   auto reader = CfbReader::Open(bytes);
   ASSERT_TRUE(reader) << reader.error().message;
-  EXPECT_TRUE(HasWarning(*reader, "truncated stream mini FAT"))
+  EXPECT_TRUE(HasWarning(*reader, "mini FAT start sector is impossible"))
       << (reader->warnings().empty() ? "" : reader->warnings()[0]);
-  EXPECT_TRUE(HasWarning(*reader, "kept 0 of 512 declared bytes"))
-      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto small = reader->ReadStream("Small");
+  ASSERT_FALSE(small);
+  EXPECT_EQ(small.error().code, ErrorCode::kCorruptFat);
+  EXPECT_NE(small.error().message.find("chain exceeds allocation table"),
+            std::string::npos)
+      << small.error().message;
+}
+
+// A container that declares no mini FAT has no table; a stream that depends on
+// it fails at read time rather than being rejected at Open.
+TEST(CfbReaderTest, StreamNeedingMissingMiniFatFailsOnRead) {
+  CfbBuilder builder;
+  builder.AddStream("Small", MakePayload(100, 0x33));
+  auto bytes = builder.Build();
+  Put32(bytes, 64, 0);  // no mini FAT sectors
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(reader->warnings().empty());
   auto small = reader->ReadStream("Small");
   ASSERT_FALSE(small);
   EXPECT_EQ(small.error().code, ErrorCode::kCorruptFat);

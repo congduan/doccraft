@@ -28,6 +28,11 @@ namespace {
 using test::CfbBuilder;
 using test::MakePayload;
 
+constexpr uint32_t kFree = 0xFFFFFFFF;
+constexpr uint32_t kEnd = 0xFFFFFFFE;
+constexpr size_t kHeaderDifatOffset = 76;
+constexpr size_t kHeaderDifatSlots = 109;
+
 uint16_t U16(const std::vector<uint8_t>& bytes, size_t at) {
   return static_cast<uint16_t>(bytes[at] | (bytes[at + 1] << 8));
 }
@@ -62,6 +67,14 @@ size_t FatEntryOffset(const std::vector<uint8_t>& bytes, uint32_t sector) {
   const uint32_t sector_size = 1u << U16(bytes, 30);
   const uint32_t fat_sector = U32(bytes, 76);
   return (static_cast<size_t>(fat_sector) + 1) * sector_size + sector * 4;
+}
+
+size_t HeaderDifatSlot(size_t slot) {
+  return kHeaderDifatOffset + slot * 4;
+}
+
+uint32_t TotalSectors(const std::vector<uint8_t>& bytes) {
+  return static_cast<uint32_t>(bytes.size() / (1u << U16(bytes, 30)) - 1);
 }
 
 // A valid container with one mini stream; callers corrupt one header field.
@@ -169,13 +182,121 @@ TEST(CfbLenientHeader, RejectsCyclicDirectoryChain) {
 
 TEST(CfbLenientHeader, RejectsDirectoryChainTwoSectorsPastEnd) {
   auto bytes = ValidContainer();
-  const uint32_t total =
-      static_cast<uint32_t>(bytes.size() / (1u << U16(bytes, 30)) - 1);
+  const uint32_t total = TotalSectors(bytes);
   const uint32_t dir_start = U32(bytes, 48);
   Put32(bytes, FatEntryOffset(bytes, dir_start), total + 1);
   auto reader = CfbReader::Open(bytes);
   ASSERT_FALSE(reader.has_value());
   EXPECT_EQ(reader.error().code, ErrorCode::kCorruptDirectory);
+}
+
+// r49: when the allocation metadata in the header cannot be believed, the FAT
+// sector numbers are re-derived from the 109-slot header DIFAT array. This is
+// the cluster-A shape: fat_count (34) is one past the physical sector count
+// (33) while the array itself still names one valid FAT sector and then
+// FREESECT. Exactly one warning names the field that was discarded.
+TEST(CfbLenientHeader, DerivesFatSectorsWhenFatCountIsImpossible) {
+  auto bytes = ValidContainer();
+  Put32(bytes, 44, TotalSectors(bytes) + 1);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "FAT sector count is impossible"));
+  EXPECT_TRUE(HasWarning(*reader, "deriving FAT sectors"));
+  auto stream = reader->ReadStream("s");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(100, 7));
+}
+
+// r49 cluster C: the header DIFAT array holds a valid sector, then three
+// out-of-range junk entries, then ENDOFCHAIN. The junk is skipped without
+// aborting the scan and the terminator ends it, so one FAT sector is found.
+// difat_count (3595) is itself impossible, which is what triggers the
+// re-derivation; no DIFAT chain is followed.
+TEST(CfbLenientHeader, SkipsOutOfRangeHeaderDifatEntriesWhileDeriving) {
+  auto bytes = ValidContainer();
+  const uint32_t total = TotalSectors(bytes);
+  Put32(bytes, 68, kEnd);       // difat_start
+  Put32(bytes, 72, total + 1);  // difat_count
+  Put32(bytes, HeaderDifatSlot(1), 0xFF18FFFF);
+  Put32(bytes, HeaderDifatSlot(2), 0x7FFFFFFF);
+  Put32(bytes, HeaderDifatSlot(3), 0xFFB7FFFF);
+  Put32(bytes, HeaderDifatSlot(4), kEnd);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "DIFAT sector count is impossible"));
+  auto stream = reader->ReadStream("s");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(100, 7));
+}
+
+// r49 cluster D: every header DIFAT slot is out-of-range junk, so the array
+// yields no FAT sector at all. The container stays rejected at the CFB layer.
+TEST(CfbLenientHeader, RejectsWhenHeaderDifatYieldsNoFatSector) {
+  auto bytes = ValidContainer();
+  Put32(bytes, 44, TotalSectors(bytes) + 1);
+  for (size_t slot = 0; slot < kHeaderDifatSlots; ++slot)
+    Put32(bytes, HeaderDifatSlot(slot), 0xFFFF0000);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_FALSE(reader.has_value());
+  EXPECT_EQ(reader.error().code, ErrorCode::kCorruptFat);
+  EXPECT_NE(reader.error().message.find("impossible sector count"),
+            std::string::npos)
+      << reader.error().message;
+}
+
+// Re-derivation must not become a new back door: a derived sector still has to
+// carry the FAT marker, so pointing the array at an ordinary sector fails.
+TEST(CfbLenientHeader, DerivedFatSectorStillNeedsFatMarker) {
+  auto bytes = ValidContainer();
+  Put32(bytes, 44, TotalSectors(bytes) + 1);
+  Put32(bytes, HeaderDifatSlot(0), U32(bytes, 48));  // the directory sector
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_FALSE(reader.has_value());
+  EXPECT_EQ(reader.error().code, ErrorCode::kCorruptFat);
+  EXPECT_NE(reader.error().message.find("FAT marker missing"),
+            std::string::npos)
+      << reader.error().message;
+}
+
+// r49: an impossible mini FAT sector count disables the mini FAT instead of
+// rejecting the container. A regular (>=4096-byte) stream stays readable.
+TEST(CfbLenientHeader, ImpossibleMiniFatCountIsIgnored) {
+  auto bytes = CfbBuilder().AddStream("s", MakePayload(5000, 9)).Build();
+  Put32(bytes, 64, TotalSectors(bytes) + 1);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "mini FAT sector count is impossible"));
+  auto stream = reader->ReadStream("s");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(5000, 9));
+}
+
+// The start sector is the companion field of the count: a mini FAT whose
+// declared start lies outside the file cannot be read, so it is ignored the
+// same way.
+TEST(CfbLenientHeader, ImpossibleMiniFatStartIsIgnored) {
+  auto bytes = CfbBuilder().AddStream("s", MakePayload(5000, 9)).Build();
+  Put32(bytes, 64, 1);  // num_mini_fat
+  Put32(bytes, 60, TotalSectors(bytes) + 1);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "mini FAT start sector is impossible"));
+  auto stream = reader->ReadStream("s");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(5000, 9));
+}
+
+// A container whose header fields are self-consistent takes the original path
+// and gains no r49 warning.
+TEST(CfbLenientHeader, HealthyHeaderKeepsNoAllocationWarning) {
+  auto bytes = ValidContainer();
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  EXPECT_TRUE(reader->warnings().empty());
 }
 
 }  // namespace
