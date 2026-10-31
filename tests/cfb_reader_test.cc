@@ -33,9 +33,35 @@ namespace {
 using test::CfbBuilder;
 using test::MakePayload;
 
+void Put16(std::vector<uint8_t>& bytes, size_t at, uint16_t value) {
+  bytes[at] = static_cast<uint8_t>(value);
+  bytes[at + 1] = static_cast<uint8_t>(value >> 8);
+}
+
 void Put32(std::vector<uint8_t>& bytes, size_t at, uint32_t value) {
   for (size_t i = 0; i < 4; ++i)
     bytes[at + i] = static_cast<uint8_t>(value >> (8 * i));
+}
+
+uint32_t Get32(const std::vector<uint8_t>& bytes, size_t at) {
+  return static_cast<uint32_t>(bytes[at]) |
+         (static_cast<uint32_t>(bytes[at + 1]) << 8) |
+         (static_cast<uint32_t>(bytes[at + 2]) << 16) |
+         (static_cast<uint32_t>(bytes[at + 3]) << 24);
+}
+
+// Byte offset of directory slot `slot` in a builder-produced v3 container.
+size_t DirSlotOffset(const std::vector<uint8_t>& bytes, size_t slot) {
+  const uint32_t sector_size = 1u << (bytes[30] | (bytes[31] << 8));
+  const uint32_t dir_start = Get32(bytes, 48);
+  return (static_cast<size_t>(dir_start) + 1) * sector_size + slot * 128;
+}
+
+bool HasWarning(const CfbReader& reader, const std::string& needle) {
+  return std::any_of(reader.warnings().begin(), reader.warnings().end(),
+                     [&](const std::string& warning) {
+                       return warning.find(needle) != std::string::npos;
+                     });
 }
 
 // A compact v4 container whose FAT table describes far more sectors than exist.
@@ -465,6 +491,116 @@ TEST(CfbReaderTest, HandlesMutatedHeadersAndDirectoryWithoutCrashing) {
       (void)stream;
     }
   }
+}
+
+// [MS-CFB] §2.6.1 compares directory names case-insensitively; POI bug 47950
+// covers producers that store the Word stream names in lower or upper case.
+TEST(CfbReaderTest, FindsStreamNameCaseInsensitively) {
+  auto lower = CfbBuilder()
+                   .AddStream("worddocument", MakePayload(4096, 0x11))
+                   .AddStream("1table", MakePayload(5000, 0x22))
+                   .Build();
+  auto lower_reader = CfbReader::Open(lower);
+  ASSERT_TRUE(lower_reader) << lower_reader.error().message;
+  auto word = lower_reader->ReadStream("WordDocument");
+  ASSERT_TRUE(word) << word.error().message;
+  EXPECT_EQ(*word, MakePayload(4096, 0x11));
+  auto table = lower_reader->ReadStream("1Table");
+  ASSERT_TRUE(table) << table.error().message;
+  EXPECT_EQ(*table, MakePayload(5000, 0x22));
+
+  auto upper =
+      CfbBuilder().AddStream("WORDDOCUMENT", MakePayload(4096, 0x33)).Build();
+  auto upper_reader = CfbReader::Open(upper);
+  ASSERT_TRUE(upper_reader) << upper_reader.error().message;
+  word = upper_reader->ReadStream("WordDocument");
+  ASSERT_TRUE(word) << word.error().message;
+  EXPECT_EQ(*word, MakePayload(4096, 0x33));
+
+  // Nested paths fold the same way for both the relative and full-path ranks.
+  auto nested = CfbBuilder()
+                    .AddStream("objectpool/item/data", MakePayload(64, 0x44))
+                    .Build();
+  auto nested_reader = CfbReader::Open(nested);
+  ASSERT_TRUE(nested_reader) << nested_reader.error().message;
+  auto data = nested_reader->ReadStream("ObjectPool/Item/Data");
+  ASSERT_TRUE(data) << data.error().message;
+  EXPECT_EQ(*data, MakePayload(64, 0x44));
+  data = nested_reader->ReadStream("ROOT ENTRY/OBJECTPOOL/ITEM/DATA");
+  ASSERT_TRUE(data) << data.error().message;
+  EXPECT_EQ(*data, MakePayload(64, 0x44));
+}
+
+// Case folding must not change the rank rule: both names tie at the same rank,
+// so the first entry in directory (Visit) order wins, even when the request
+// matches the other variant exactly.
+TEST(CfbReaderTest, ReadStreamCaseVariantsKeepDirectoryOrder) {
+  auto bytes = CfbBuilder()
+                   .AddStream("Data", MakePayload(16, 0x55))
+                   .AddStream("data", MakePayload(16, 0x66))
+                   .Build();
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  // CfbBuilder orders "Data" before "data"; Visit is in-order, so "Data" is
+  // the first match for either spelling.
+  for (const char* request : {"Data", "data"}) {
+    auto stream = reader->ReadStream(request);
+    ASSERT_TRUE(stream) << request << ": " << stream.error().message;
+    EXPECT_EQ((*stream)[0], 0x55) << request;
+  }
+}
+
+// A non-root entry whose name fails validation makes only that entry
+// unreachable: the container opens, other streams stay readable, and the
+// skip is reported with the directory slot number.
+TEST(CfbReaderTest, SkipsStreamWithInvalidName) {
+  auto bytes = CfbBuilder()
+                   .AddStream("Alpha", MakePayload(4096, 0x71))
+                   .AddStream("Beta", MakePayload(4096, 0x72))
+                   .Build();
+  // Entry order follows insertion: slot 1 = Alpha, slot 2 = Beta. An
+  // impossible name length (65 bytes) triggers the name check.
+  Put16(bytes, DirSlotOffset(bytes, 2) + 64, 65);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "slot 2")) << reader->warnings()[0];
+  auto alpha = reader->ReadStream("Alpha");
+  ASSERT_TRUE(alpha) << alpha.error().message;
+  EXPECT_EQ(*alpha, MakePayload(4096, 0x71));
+  auto beta = reader->ReadStream("Beta");
+  ASSERT_FALSE(beta);
+  EXPECT_EQ(beta.error().code, ErrorCode::kStreamNotFound);
+}
+
+// The root entry carries no stream identity; a missing NUL terminator inside
+// its declared length is tolerated silently (POI test-fields.doc stores
+// "Y:\Desktop\~WRD0000.tmp" with len=22, no terminator). The declared bytes
+// are decoded as the name.
+TEST(CfbReaderTest, ToleratesRootNameWithoutNulTerminator) {
+  auto bytes = CfbBuilder().AddStream("Data", MakePayload(16, 0x77)).Build();
+  // Root "Root Entry" is 10 characters plus the terminator; overwrite the
+  // terminator with a normal character.
+  Put16(bytes, DirSlotOffset(bytes, 0) + 20, 'X');
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(reader->warnings().empty());
+  auto stream = reader->ReadStream("Data");
+  ASSERT_TRUE(stream) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(16, 0x77));
+}
+
+// Unlike a missing terminator, a structurally impossible root name keeps the
+// whole container rejected: the root cannot be addressed or given a path.
+TEST(CfbReaderTest, RejectsRootWithInvalidNameLength) {
+  auto bytes = CfbBuilder().AddStream("Data", MakePayload(16, 0x78)).Build();
+  Put16(bytes, DirSlotOffset(bytes, 0) + 64, 3);  // odd length
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_FALSE(reader);
+  EXPECT_EQ(reader.error().code, ErrorCode::kCorruptDirectory);
+  EXPECT_NE(reader.error().message.find("invalid directory name"),
+            std::string::npos)
+      << reader.error().message;
 }
 
 TEST(CfbReaderTest, ReadsLibreOfficePlainTextCorpus) {
