@@ -258,7 +258,7 @@
 | ✅ | `0xD632` | sprmTCellPadding | A CSSAOperand value that specifies the cell margin for one or more cell sides. cssa.ftsWidth MUST be ftsNil (0x00) or ftsDxa (0x03). | 表格 TAP §2.6.3；`M3Batch3.TableCellPaddingIgnoresEmptyCellRange`；`M3Batch3.TableCellPaddingClampsRangeToRow`；`M3Batch3.TableCellPaddingStillRejectsMalformedOperands` |
 | ✅ | `0xD633` | sprmTCellSpacingDefault | A CSSAOperand that specifies the cell spacing for each cell in the entire row. cssa.itc.itcFirst MUST be 0, cssa.itc.itcLim MUST be 1, cssa.grfbrc MUST be fbrcSidesOnly (0x0F), cssa.ftsWidth… | 表格 TAP §2.6.3 |
 | ✅ | `0xD634` | sprmTCellPaddingDefault | A CSSAOperand that specifies the cell margin for one or more cell sides for each cell in the entire row. cssa.itc.itcFirst MUST be 0, cssa.itc.itcLim MUST be 1, cssa.ftsWidth MUST be ftsNil… | 表格 TAP §2.6.3 |
-| ✅ | `0xD635` | sprmTCellWidth | Preferred width of one or more table cells. | 表格 TAP §2.6.3 |
+| ✅ | `0xD635` | sprmTCellWidth | Preferred width of one or more table cells. | 表格 TAP §2.6.3；`M20Malformed.CellWidthRangeOutsideRowIsIgnored`（itc 越界时忽略操作数） |
 | ✅ | `0xF636` | sprmTFitText | A CellRangeFitText value that specifies a set of cells in a table row and whether their contents are to be stretched or compressed to exactly fill their widths. | 表格 TAP §2.6.3 |
 | ✅ | `0xD639` | sprmTFCellNoWrap | A CellRangeNoWrap value that specifies a set of cells in a table row and whether their contents wrap over multiple lines. | 表格 TAP §2.6.3 |
 | ✅ | `0x563A` | sprmTIstd | An unsigned integer value that specifies the istd value of a table style to apply. | 表格 TAP §2.6.3；w:tblStyle；M3Batch7.TableStyleAndFloatingPosition |
