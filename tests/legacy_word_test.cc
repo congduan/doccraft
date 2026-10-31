@@ -1756,7 +1756,11 @@ TEST(LegacyWord, ComplexWord95UsesDirectFcAndUtf16) {
   ASSERT_TRUE(text) << text.error().message;
   EXPECT_EQ(*text, "中文\n");
   Put32(word, 415, 1023);
-  EXPECT_FALSE(doccraft::doc::ExtractText(word, word, *fib));
+  // A legacy piece that runs past WordDocument is dropped like a modern one;
+  // the document keeps the pieces that are still readable (here: none).
+  auto truncated = doccraft::doc::ExtractText(word, word, *fib);
+  ASSERT_TRUE(truncated) << truncated.error().message;
+  EXPECT_EQ(*truncated, "");
 }
 
 TEST(LegacyWord, Word95AnsiPieceUsesTraditionalChineseCodepage) {

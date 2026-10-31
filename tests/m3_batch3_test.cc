@@ -714,8 +714,15 @@ TEST(M3Batch3, IndirectTablePropertyLengthChain) {
   ASSERT_TRUE(valid.has_value()) << valid.error().message;
   EXPECT_EQ(valid->tables[0].row_properties[0].cells[0].margins[1], 120);
   EXPECT_NE(Xml(*valid).find("<w:left w:w=\"121\""), std::string::npos);
+  // A nested PAPX whose declared length overruns the Data stream no longer
+  // rejects the document: the row keeps its cells and defaults (r50).
   auto malformed = SyntheticTable({}, true, true, true);
-  EXPECT_FALSE(malformed.has_value());
+  ASSERT_TRUE(malformed.has_value()) << malformed.error().message;
+  bool warned = false;
+  for (const auto& warning : malformed->warnings)
+    warned |=
+        warning.find("table row properties unreadable") != std::string::npos;
+  EXPECT_TRUE(warned);
 }
 
 TEST(M3Batch3, RealTableFixturesEmitCellProperties) {

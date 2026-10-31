@@ -1011,9 +1011,11 @@ TEST(CfbReaderTest, RejectsCyclicStreamChainAfterSalvageWork) {
       << big.error().message;
 }
 
-// A link past the allocation table cannot be followed at all; the salvage
-// deliberately does not guess where the chain would have gone.
-TEST(CfbReaderTest, RejectsStreamChainIndexPastAllocationTable) {
+// A link past the allocation table cannot be followed. The sectors read before
+// it are real data, so keep the prefix and warn, exactly like an early
+// ENDOFCHAIN: LibreOffice sw/qa ofz18414-1 ends the WordDocument chain with
+// FAT link 580 while the table only holds 128 entries. A cycle stays fatal.
+TEST(CfbReaderTest, SalvagesStreamChainIndexPastAllocationTable) {
   CfbBuilder builder;
   builder.AddStream("Big", MakePayload(8192, 0x88));
   auto bytes = builder.Build();
@@ -1023,11 +1025,32 @@ TEST(CfbReaderTest, RejectsStreamChainIndexPastAllocationTable) {
   auto reader = CfbReader::Open(bytes);
   ASSERT_TRUE(reader) << reader.error().message;
   auto big = reader->ReadStream("Big");
-  ASSERT_FALSE(big);
-  EXPECT_EQ(big.error().code, ErrorCode::kCorruptFat);
-  EXPECT_NE(big.error().message.find("invalid or cyclic FAT chain"),
-            std::string::npos)
-      << big.error().message;
+  ASSERT_TRUE(big) << big.error().message;
+  EXPECT_EQ(*big, MakePayload(512, 0x88));
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream Big"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "kept 512 of 8192 declared bytes"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+}
+
+// A link that skips one sector is repaired when the skipped sector points at
+// the same successor: the sector was an orphaned chain member, not a jump.
+// ofz19065's 1Table has 47 -> 49 with fat[48] == 49; following the links
+// verbatim shifts every table byte after sector 47.
+TEST(CfbReaderTest, RestoresSkippedSectorThatLinksToSameSuccessor) {
+  CfbBuilder builder;
+  builder.AddStream("Big", MakePayload(4096, 0x5A));
+  auto bytes = builder.Build();
+  const uint32_t start = StreamStart(bytes, "Big");
+  ASSERT_NE(start, DirEntry::kNoFollow);
+  Put32(bytes, FatEntryOffset(bytes, start), start + 2);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  auto big = reader->ReadStream("Big");
+  ASSERT_TRUE(big) << big.error().message;
+  EXPECT_EQ(*big, MakePayload(4096, 0x5A));
+  EXPECT_TRUE(HasWarning(*reader, "sector restored"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
 }
 
 // Regression guard: a healthy container that mixes regular and mini streams

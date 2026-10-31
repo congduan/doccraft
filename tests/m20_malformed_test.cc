@@ -25,6 +25,9 @@
 #include <vector>
 
 #include "doc/format.h"
+#include "doc/format/formatted_helpers.h"
+#include "doc/format/internal.h"
+#include "doc/format/sprm.h"
 #include "model/document.h"
 #include "tests/fuzz_util.h"
 #include "tests/m20_doc_util.h"
@@ -159,11 +162,30 @@ TEST(M20Malformed, FibXorEncrypted) {
   ExpectRejected(Pack(s), "not an RC4 encrypted document");
 }
 
-TEST(M20Malformed, FibMissingClx) {
+TEST(M20Malformed, FibMissingClxFallsBackToContiguousText) {
+  // With no CLX at all there is no piece table to read. The text still lives
+  // contiguously from fcMin to fcMac, so read it as one implicit piece and
+  // warn instead of rejecting the document.
   DocSpec spec = TextSpec();
   spec.include_clx = false;
-  ExpectRejected(Pack(doccraft::test::BuildDocStreams(spec)),
-                 "missing CLX Pcdt");
+  const DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  std::string text;
+  for (const auto& para : document->paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  EXPECT_EQ(text, "Hi");
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("missing CLX Pcdt") != std::string::npos &&
+              warning.find("contiguous") != std::string::npos;
+  }
+  EXPECT_TRUE(warned) << (document->warnings.empty()
+                              ? ""
+                              : document->warnings.front());
 }
 
 TEST(M20Malformed, FibFcMinBelowHeaderIsIgnored) {
@@ -237,18 +259,102 @@ TEST(M20Malformed, ClxPcdtSizeTooSmall) {
   ExpectRejected(Pack(s), "invalid PlcPcd size");
 }
 
-TEST(M20Malformed, ClxOutsideTableStream) {
+TEST(M20Malformed, ClxOutsideTableStreamFallsBackToContiguousText) {
   DocStreams s = doccraft::test::BuildDocStreams(TextSpec());
   Put32(s.word, 158 + 33 * 8, 0x1000);
-  ExpectRejected(Pack(s), "CLX outside table stream");
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("CLX outside table stream") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
 }
 
-TEST(M20Malformed, ClxCompressedPieceOverrunsWord) {
+TEST(M20Malformed, ClxCompressedPieceOverrunsWordIsSkipped) {
   DocSpec spec;
   spec.text = {'A', '\r'};
   spec.pieces = {{0, 2, 0x30000, true, 0}};
-  ExpectRejected(Pack(doccraft::test::BuildDocStreams(spec)),
-                 "piece outside WordDocument");
+  const DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("piece 0") != std::string::npos &&
+              warning.find("outside WordDocument") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
+TEST(M20Malformed, ClxDropsOutOfRangePieceAndKeepsTheRest) {
+  // ofz18534-1 shape: five pieces where piece 1 points far outside
+  // WordDocument. The other pieces still form the text (CP 256..512 is a
+  // hole) and the drop is reported.
+  DocSpec spec;
+  spec.text = {'O', 'K', '\r'};
+  spec.pieces = {
+      {0, 2, 0, true, 0}, {2, 4, 0x30000, true, 0}, {4, 5, 2, true, 0}};
+  const DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  std::string text;
+  for (const auto& para : document->paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  EXPECT_EQ(text, "OK");
+  ASSERT_FALSE(document->warnings.empty());
+  EXPECT_NE(document->warnings.front().find("piece 1"), std::string::npos);
+  EXPECT_NE(document->warnings.front().find("outside WordDocument"),
+            std::string::npos);
+}
+
+TEST(M20Malformed, ClxMissingPcdtFallsBackToContiguousText) {
+  DocStreams s = doccraft::test::BuildDocStreams(TextSpec());
+  s.table[ClxOffset(s)] = 0;
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  std::string text;
+  for (const auto& para : document->paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  EXPECT_EQ(text, "Hi");
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("missing CLX Pcdt") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
+TEST(M20Malformed, ClxFallbackReadsUtf16WhenExtCharIsSet) {
+  // The ofz19065 shape: fExtChar is set and the fallback range is 16-bit.
+  DocSpec spec;
+  spec.text = {'A', 0, 'B', 0, '\r', 0};
+  spec.ccp_override = 3;
+  spec.include_clx = false;
+  DocStreams s = doccraft::test::BuildDocStreams(spec);
+  Put16(s.word, 10, static_cast<uint16_t>(Get16(s.word, 10) | 0x1000));
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  std::string text;
+  for (const auto& para : document->paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  EXPECT_EQ(text, "AB");
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("16-bit") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
 }
 
 TEST(M20Malformed, ClxPrcSizeOverflow) {
@@ -266,12 +372,6 @@ TEST(M20Malformed, ClxPrmIndexOutsidePrcArray) {
                  "CLX Prm1 index outside Prc array");
 }
 
-TEST(M20Malformed, ClxMissingPcdt) {
-  DocStreams s = doccraft::test::BuildDocStreams(TextSpec());
-  s.table[ClxOffset(s)] = 0;
-  ExpectRejected(Pack(s), "missing CLX Pcdt");
-}
-
 TEST(M20Malformed, ClxPieceOverCoversWord) {
   DocSpec spec;
   spec.text = {'A', '\r'};
@@ -279,6 +379,108 @@ TEST(M20Malformed, ClxPieceOverCoversWord) {
   spec.pieces = {{0, 10000, 0, true, 0}};
   ExpectRejected(Pack(doccraft::test::BuildDocStreams(spec)),
                  "piece table over-covers WordDocument");
+}
+
+// ---------------------------------------------------------------------------
+// r50 document-layer degradation: one damaged structure loses its own
+// formatting/attachment, never the body.
+// ---------------------------------------------------------------------------
+
+TEST(M20Malformed, SectionSeparatorOutsideWordDocumentUsesDefaults) {
+  // ofz18414-1 shape: the WordDocument prefix was salvaged, so the SEPX that
+  // sat past the readable end is gone. The section stays.
+  DocSpec spec = TextSpec();
+  spec.section_ends = {3};
+  DocStreams s = doccraft::test::BuildDocStreams(spec);
+  const size_t sed = Get32(s.word, 154 + 6 * 8);
+  Put32(s.table, sed + 4 * 2 + 2, 0x1000);  // fcSepx past WordDocument
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("SEPX for section 0") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
+TEST(M20Malformed, CorruptMainFieldPlcWarnsAndKeepsBody) {
+  DocStreams s = doccraft::test::BuildDocStreams(TextSpec());
+  const size_t at = doccraft::test::AlignUp(s.table.size(), 4);
+  s.table.resize(at, 0);
+  Put32(s.table, at, 0);           // first CP
+  Put32(s.table, at + 4, 100000);  // far past ccpText
+  s.table.push_back(0);            // one 2-byte grffldEnd entry
+  s.table.push_back(0);
+  Put32(s.word, 154 + 16 * 8, static_cast<uint32_t>(at));
+  Put32(s.word, 158 + 16 * 8, 10);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  std::string text;
+  for (const auto& para : document->paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  EXPECT_EQ(text, "Hi");
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("skipped main field PLC") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
+TEST(M20Malformed, UnreadableHugePapxKeepsTableRow) {
+  doccraft::model::Table table;
+  std::vector<doccraft::model::Cell> row(1);
+  doccraft::model::Paragraph para;
+  doccraft::doc::detail::FormatRange pap;
+  pap.first = 0;
+  pap.last = 10;
+  pap.sprms = Prl(0x6646, {0, 0, 0, 0});        // nested PAPX at Data offset 0
+  const std::vector<uint8_t> data{0xFF, 0xFF};  // length 65535, no payload
+  std::vector<std::string> warnings;
+  auto done = doccraft::doc::FinishTableRow(
+      table, row, para, &pap, doccraft::doc::detail::Bytes(data), &warnings);
+  ASSERT_TRUE(done) << done.error().message;
+  EXPECT_EQ(table.rows.size(), 1u);
+  bool warned = false;
+  for (const auto& warning : warnings) {
+    warned |=
+        warning.find("table row properties unreadable") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
+TEST(M20Malformed, CellWidthRangeOutsideRowIsIgnored) {
+  doccraft::model::Table table;
+  doccraft::model::RowProperties row;
+  row.cells.resize(6);
+  // ofz19065: itcFirst 65, itcLim 3, fts 0, dxa 0.
+  const std::vector<uint8_t> v{5, 0x41, 3, 0, 0, 0};
+  EXPECT_TRUE(doccraft::doc::detail::ApplyTable(
+      table, row, 0xD635, doccraft::doc::detail::Bytes(v)));
+  EXPECT_EQ(row.cells[0].width_type, 3);
+}
+
+TEST(M20Malformed, BteRangePastWordDocumentIsDropped) {
+  std::vector<uint8_t> word(1024, 0);
+  std::vector<uint8_t> table(12, 0);
+  Put32(table, 0, 0);       // first FC
+  Put32(table, 4, 100000);  // last FC past the 1024-byte stream
+  Put32(table, 8, 0);       // page 0
+  std::vector<std::string> warnings;
+  auto ranges = doccraft::doc::detail::ReadFkps(word, table, {0, 12}, true,
+                                                &warnings, false);
+  ASSERT_TRUE(ranges) << ranges.error().message;
+  EXPECT_TRUE(ranges->empty());
+  bool warned = false;
+  for (const auto& warning : warnings) {
+    warned |=
+        warning.find("FC range outside WordDocument") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
 }
 
 // ---------------------------------------------------------------------------

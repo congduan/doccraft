@@ -587,28 +587,42 @@ TEST(Fuzz, SprmDispatchOnEveryOpcodeNeverCrashes) {
 // ---------------------------------------------------------------------------
 TEST(Fuzz, KnownCorruptionsReportDistinguishableErrors) {
   const SyntheticDoc base = MakeSyntheticDoc();
-  // CLX and malformed table sprms remain hard errors. Local FKP page damage
-  // degrades to a warning (§6.9), so those cases assert the skip instead.
+  // CLX structural damage and malformed table sprms remain hard errors; a CLX
+  // without a usable Pcdt and a piece outside WordDocument degrade (§6.9 and
+  // r50), so those cases assert the warning instead.
   auto error_of = [](SyntheticDoc d) {
     auto parsed = doc::ParseFormatted(d.word, d.table, d.fib, d.data);
     EXPECT_FALSE(parsed.has_value());
     return parsed.has_value() ? std::string("(success)")
                               : parsed.error().message;
   };
+  auto warnings_of = [](SyntheticDoc d) {
+    auto parsed = doc::ParseFormatted(d.word, d.table, d.fib, d.data);
+    EXPECT_TRUE(parsed.has_value())
+        << (parsed.has_value() ? "" : parsed.error().message);
+    return parsed.has_value() ? parsed->warnings : std::vector<std::string>{};
+  };
+  auto has_warning = [](const std::vector<std::string>& warnings,
+                        const char* needle) {
+    return std::any_of(warnings.begin(), warnings.end(),
+                       [&](const std::string& w) {
+                         return w.find(needle) != std::string::npos;
+                       });
+  };
 
   SyntheticDoc d = base;
   d.fib.lcb_clx = 1000;
-  EXPECT_EQ(error_of(d), "CLX outside table stream");
+  EXPECT_TRUE(has_warning(warnings_of(d), "CLX outside table stream"));
   d = base;
   d.fib.fc_clx = 1000;
-  EXPECT_EQ(error_of(d), "CLX outside table stream");
+  EXPECT_TRUE(has_warning(warnings_of(d), "CLX outside table stream"));
   d = base;
   Put32(d.table, 11, 6);  // CPs out of order
   Put32(d.table, 15, 0);
   EXPECT_EQ(error_of(d), "invalid piece CP order");
   d = base;
   Put32(d.table, 21, 0x7FFFFFFFu);  // fc far outside WordDocument
-  EXPECT_EQ(error_of(d), "piece outside WordDocument");
+  EXPECT_TRUE(has_warning(warnings_of(d), "outside WordDocument"));
   d = base;
   Put32(d.table, 15, 5000);  // pieces claim more text than WordDocument has
   d.fib.ccp_text = 5000;
@@ -618,7 +632,7 @@ TEST(Fuzz, KnownCorruptionsReportDistinguishableErrors) {
   EXPECT_EQ(error_of(d), "CLX Prm1 index outside Prc array");
   d = base;
   Put32(d.table, 21, 2048);  // compressed bit cleared, UTF-16 at stream end
-  EXPECT_EQ(error_of(d), "piece outside WordDocument");
+  EXPECT_TRUE(has_warning(warnings_of(d), "outside WordDocument"));
 
   d = base;
   d.word[d.chpx_cb] = 2;  // opcode left, operand truncated away
@@ -700,10 +714,15 @@ TEST(Fuzz, BadPapxTableRegionKeepsFollowingBody) {
   EXPECT_EQ(parsed->paragraphs[0].runs[0].text, "After");
   auto truncated = d;
   truncated.fib.lcb_clx = static_cast<uint32_t>(d.table.size() + 1);
-  auto rejected = doc::ParseFormatted(truncated.word, truncated.table,
+  auto salvaged = doc::ParseFormatted(truncated.word, truncated.table,
                                       truncated.fib, truncated.data);
-  ASSERT_FALSE(rejected);
-  EXPECT_EQ(rejected.error().message, "CLX outside table stream");
+  ASSERT_TRUE(salvaged) << (salvaged.has_value() ? ""
+                                                 : salvaged.error().message);
+  EXPECT_TRUE(std::any_of(salvaged->warnings.begin(), salvaged->warnings.end(),
+                          [](const std::string& w) {
+                            return w.find("CLX outside table stream") !=
+                                   std::string::npos;
+                          }));
 }
 
 }  // namespace

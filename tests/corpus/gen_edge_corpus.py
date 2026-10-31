@@ -56,6 +56,7 @@ EXPECTED_TEXT = {
     "control-object-marks": "AB",
     "piece-fcmin-mismatch": "AB",
     "piece-mixed-encoding": "AB\u4e2d\u6587CD",
+    "piece-outside-stream": "",
     "cp1252-all-256": cp1252_text(),
     "utf16-surrogate-pair": "\U0001f600X",
     "utf16-unpaired-surrogate": "\ufffdX",
@@ -68,7 +69,6 @@ EXPECTED_TEXT = {
 
 EXPECTED_ERROR = {
     "piece-cp-descending": "invalid piece CP order",
-    "piece-outside-stream": "piece outside WordDocument",
     "piece-prm-index": "CLX Prm1 index outside Prc array",
 }
 
