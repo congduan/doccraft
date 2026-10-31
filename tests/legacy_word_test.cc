@@ -1305,6 +1305,148 @@ TEST(LegacyWord, LegacyScanMapsLegacyTableBorders) {
     EXPECT_EQ(out[3 + i], 0xFF) << i;
 }
 
+TEST(LegacyWord, LegacyScanMapsLegacyTtlp) {
+  // Word 6/95 sprmTTlp (0xC0) is a four-byte TLP: itl (2) then grfatl (2).
+  // That is exactly the modern TlpOperand ([MS-DOC] 2.9.154 sprmTTlp), so
+  // the operand reaches the shared handler unchanged. Bug50955.doc carries
+  // `C0 0800B700` on a real table row, which is why this mapping matters.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {0xC0, 0x08, 0x00, 0xB7, 0x00};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> expected = {0x0A, 0x74, 0x08, 0x00, 0xB7, 0x00};
+  EXPECT_EQ(out, expected);
+}
+
+TEST(LegacyWord, LegacyScanMapsLegacyTableSetBrc) {
+  // Word 6/95 sprmTSetBrc (0xC1) is a fixed five-byte operand without the cb
+  // prefix the modern sprmTSetBrc requires: itcFirst, itcLim, sides and a
+  // two-byte BRC6 (wvWare sprm.c reads itcFirst/itcLim/sides/BRC; LibreOffice
+  // lists {5, L_FIX}). The modern TSetBrcOperand is cb(11) + the same three
+  // bytes + an eight-byte Brc, so the scan rebuilds it byte for byte.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {
+      0xC1, 0x00, 0x02, 0x05, 0x4C, 0x08,
+  };
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  // BRC6 0x084C: width 4, single, ico 1 (black), space 1. sides 0x05 is top
+  // and bottom, which the translator keeps verbatim for the shared handler.
+  const std::vector<uint8_t> expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x02, 0x05, 0x00,
+      0x00, 0x00, 0x00, 0x04, 0x01, 0x01, 0x00,
+  };
+  EXPECT_EQ(out, expected);
+  // An all-ones BRC6 is the undefined sentinel: eight 0xFF bytes, which the
+  // modern TableBorder resets to an explicit nil border.
+  out.clear();
+  const std::vector<uint8_t> undefined = {0xC1, 0x01, 0x03, 0x01, 0xFF, 0xFF};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(undefined, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  std::vector<uint8_t> undefined_expected = {0x2F, 0xD6, 0x0B,
+                                             0x01, 0x03, 0x01};
+  undefined_expected.insert(undefined_expected.end(), 8, 0xFF);
+  EXPECT_EQ(out, undefined_expected);
+}
+
+TEST(LegacyWord, LegacyScanMapsLegacyTableSetBrc10) {
+  // Word 6/95 sprmTSetBrc10 (0xC7) is the same five-byte shape as 0xC1 but
+  // carries a BRC10 word: dxpLine2Width(3) @0, dxpSpaceBetween(3) @3,
+  // dxpLine1Width(3) @6, dxpSpace(5) @9, fShadow(1) @14 (wvGetBRC10_internal).
+  // wvConvertBRC10ToBRC maps the (line1, gap, line2) triple to a border type;
+  // BRC10 has no colour field and no width byte, so the colour is ico 0
+  // (auto, -1) and the line-1 width doubles as the modern width.
+  std::vector<uint8_t> out;
+  // line1=1, gap=0, line2=0, space=1 -> single, width 1.
+  const std::vector<uint8_t> single = {0xC7, 0x00, 0x02, 0x01, 0x40, 0x02};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(single, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> single_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x02, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x01, 0x01, 0x01, 0x00,
+  };
+  EXPECT_EQ(out, single_expected);
+  // line1=4, gap=0, line2=0, space=2, shadow -> double, width 4.
+  out.clear();
+  const std::vector<uint8_t> doubled = {0xC7, 0x00, 0x02, 0x01, 0x00, 0x45};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(doubled, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> doubled_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x02, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x04, 0x03, 0x22, 0x00,
+  };
+  EXPECT_EQ(out, doubled_expected);
+  // Two single lines (1,1,1) also read as double; a zero word stays a
+  // width-zero, type-zero border (the modern handler rejects nothing).
+  out.clear();
+  const std::vector<uint8_t> two_lines = {0xC7, 0x00, 0x02, 0x01, 0x49, 0x00};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(two_lines, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> two_lines_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x02, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x01, 0x03, 0x00, 0x00,
+  };
+  EXPECT_EQ(out, two_lines_expected);
+  // wvWare's hairline and dotted special cases keep their line width (7/6)
+  // in the width byte so a recognisable line survives into OOXML.
+  out.clear();
+  const std::vector<uint8_t> hairline = {0xC7, 0x00, 0x01, 0x01, 0xC0, 0x01};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(hairline, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> hairline_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x01, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x07, 0x05, 0x00, 0x00,
+  };
+  EXPECT_EQ(out, hairline_expected);
+  out.clear();
+  const std::vector<uint8_t> dotted = {0xC7, 0x00, 0x01, 0x01, 0x80, 0x01};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(dotted, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> dotted_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x01, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x06, 0x06, 0x00, 0x00,
+  };
+  EXPECT_EQ(out, dotted_expected);
+  out.clear();
+  const std::vector<uint8_t> zero = {0xC7, 0x00, 0x01, 0x01, 0x00, 0x00};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(zero, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> zero_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x01, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+  };
+  EXPECT_EQ(out, zero_expected);
+}
+
+TEST(LegacyWord, LegacyScanMapsLegacyTableSetShd) {
+  // Word 6/95 sprmTSetShd (0xC8) is a fixed four-byte operand: itcFirst,
+  // itcLim and a two-byte SHD with icoFore(5) @0, icoBack(5) @5 and
+  // ipat(6) @10 (wvGetSHD_internal). The modern sprmTSetShd takes cb(12) +
+  // the range + a ten-byte SHD of two COLORREFs and a two-byte pattern, so
+  // the scan expands both palette indices through Ico().
+  std::vector<uint8_t> out;
+  // icoFore 1 (black), icoBack 8 (white), ipat 1 (solid).
+  const std::vector<uint8_t> raw = {0xC8, 0x00, 0x02, 0x01, 0x05};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> expected = {
+      0x2D, 0xD6, 0x0C, 0x00, 0x02, 0x00, 0x00, 0x00,
+      0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x01, 0x00,
+  };
+  EXPECT_EQ(out, expected);
+  // Palette indices above 15 have no COLORREF and Ico() saturates them to
+  // -1, Word's "automatic"; ipat passes through unchanged.
+  out.clear();
+  const std::vector<uint8_t> beyond = {0xC8, 0x00, 0x01, 0x30, 0x0A};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(beyond, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> beyond_expected = {
+      0x2D, 0xD6, 0x0C, 0x00, 0x01, 0xFF, 0xFF, 0xFF,
+      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02, 0x00,
+  };
+  EXPECT_EQ(out, beyond_expected);
+}
+
 TEST(LegacyWord, LegacyScanMapsLegacyTableDefinition) {
   // sprmTDefTable (0xBE) and sprmTDefTable10 (0xBC) share the Word 6/95
   // operand: a two-byte cb (bytes after cb, plus one), one-byte itcMac,
@@ -1430,6 +1572,53 @@ TEST(LegacyWord, LegacyScanStopsAfterTablePropertiesOnUnknownOpcode) {
   for (const auto& warning : document->warnings)
     warned = warned || warning == "Word 6/95 FKP contains unsupported sprms";
   EXPECT_TRUE(warned);
+}
+
+TEST(LegacyWord, Word6TableCellBorderShadingReachDocx) {
+  // A real Word 6/95 row: the two-column definition first (the cell range must
+  // exist before a range-limited border or shading operand), then sprmTTlp
+  // (0xC0), sprmTSetBrc (0xC1) and sprmTSetShd (0xC8). The TTlp bytes are the
+  // `C0 0800B700` operand from Bug50955.doc; the border is a 4-wide single
+  // black top and the shading is black-on-white solid for both cells.
+  const std::vector<uint8_t> row =
+      {
+          0xBE, 0x1C, 0x00, 0x02, 0x00, 0x00, 0xD0, 0x02, 0xA0,
+          0x05, 0x00, 0x00, 0,    0,    0,    0,    0,    0,
+          0,    0,    0x00, 0x00, 0,    0,    0,    0,    0,
+          0,    0,    0,    0xC0, 0x08, 0x00, 0xB7, 0x00,  // sprmTTlp.
+          0xC1, 0x00, 0x02, 0x01, 0x4C, 0x08,  // sprmTSetBrc, top only.
+          0xC8, 0x00, 0x02, 0x01, 0x05,        // sprmTSetShd.
+          0x19, 0x01, 0x18, 0x01,              // sprmPFTtp, sprmPFInTable.
+      };
+  auto document = ParseWord6(Word6TableDocument({0x18, 1}, row));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  // grfatl 0x00B7 has neither band flag, so the shared handler adds the two
+  // "no band" look bits: (0xB7 & 0x01E0) | 0x0200 | 0x0400 = 0x06A0.
+  EXPECT_EQ(table.look, 0x06A0);
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 2u);
+  for (const auto& cell : table.row_properties[0].cells) {
+    EXPECT_TRUE(cell.borders[0].set);
+    EXPECT_EQ(cell.borders[0].type, 1);
+    EXPECT_EQ(cell.borders[0].width, 4);
+    EXPECT_EQ(cell.borders[0].color, 0);
+    EXPECT_EQ(cell.borders[0].space, 1);
+    EXPECT_FALSE(cell.borders[2].set);
+    EXPECT_EQ(cell.shade, 0xFFFFFF);
+    EXPECT_EQ(cell.shade_fore, 0);
+    EXPECT_EQ(cell.shade_pattern, 1);
+  }
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  for (const char* fragment :
+       {"<w:tblLook w:val=\"06A0\"/>",
+        "<w:tcBorders><w:top w:val=\"single\" w:sz=\"4\" "
+        "w:color=\"000000\" w:space=\"1\"/></w:tcBorders>",
+        "<w:shd w:val=\"solid\" w:fill=\"FFFFFF\" w:color=\"000000\"/>"})
+    EXPECT_NE(xml.find(fragment), std::string::npos) << fragment << "\n" << xml;
 }
 
 TEST(LegacyWord, Word6BadPictureReferenceIsSkippedWithWarning) {
