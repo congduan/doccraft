@@ -244,43 +244,88 @@ std::expected<FatTables, Error> LoadFatTables(std::span<const uint8_t> bytes,
   return tables;
 }
 
-// Decodes one 128-byte directory entry, including its UTF-16LE name.
-std::expected<DirEntry, Error> ParseDirEntry(Bytes p, uint16_t version) {
-  DirEntry entry{};
-  const uint16_t len = U16(p, 64);
-  const uint8_t type = p[66];
-  if (type == 1 || type == 2 || type == 5) {
-    if (len < 2 || len > 64 || len % 2 != 0 || U16(p, len - 2) != 0) {
-      return std::unexpected(
-          Fail(ErrorCode::kCorruptDirectory, "invalid directory name"));
-    }
-    for (size_t j = 0; j + 2 < len; j += 2) {
-      uint32_t cp = U16(p, j);
-      if (cp >= 0xD800 && cp <= 0xDBFF) {
-        if (j + 4 >= len) {
-          return std::unexpected(
-              Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
-        }
-        uint32_t low = U16(p, j + 2);
-        if (low < 0xDC00 || low > 0xDFFF) {
-          return std::unexpected(
-              Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
-        }
-        cp = 0x10000 + ((cp - 0xD800) << 10) + low - 0xDC00;
-        j += 2;
-      } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+// [MS-CFB] §2.6.1 compares directory names with the Word up-wchar uppercase
+// table. This reader folds ASCII only (no Unicode table dependency): all Word
+// stream names are ASCII, so the 47950 lower/upper-case samples resolve while
+// non-ASCII case variants remain distinct (KNOWN-SIMPLIFICATIONS).
+bool AsciiEqualsNoCase(std::string_view a, std::string_view b) {
+  if (a.size() != b.size())
+    return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    char lhs = a[i];
+    char rhs = b[i];
+    if (lhs >= 'A' && lhs <= 'Z')
+      lhs = static_cast<char>(lhs - 'A' + 'a');
+    if (rhs >= 'A' && rhs <= 'Z')
+      rhs = static_cast<char>(rhs - 'A' + 'a');
+    if (lhs != rhs)
+      return false;
+  }
+  return true;
+}
+
+// Decodes a UTF-16LE directory entry name. The declared length delimits the
+// name even when the producer omitted the NUL terminator (POI test-fields.doc
+// stores "Y:\Desktop\~WRD0000.tmp" with len=22); the extra declared bytes are
+// then part of the name instead of an error.
+std::expected<std::string, Error> DecodeEntryName(Bytes p, uint16_t len) {
+  if (len < 2 || len > 64 || len % 2 != 0) {
+    return std::unexpected(
+        Fail(ErrorCode::kCorruptDirectory, "invalid directory name"));
+  }
+  const size_t name_bytes = U16(p, len - 2) == 0 ? len - 2 : len;
+  std::string name;
+  for (size_t j = 0; j < name_bytes; j += 2) {
+    uint32_t cp = U16(p, j);
+    if (cp >= 0xD800 && cp <= 0xDBFF) {
+      if (j + 4 > name_bytes) {
         return std::unexpected(
             Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
       }
-      AppendUtf8(entry.name, cp);
+      uint32_t low = U16(p, j + 2);
+      if (low < 0xDC00 || low > 0xDFFF) {
+        return std::unexpected(
+            Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
+      }
+      cp = 0x10000 + ((cp - 0xD800) << 10) + low - 0xDC00;
+      j += 2;
+    } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+      return std::unexpected(Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
     }
+    AppendUtf8(name, cp);
   }
-  entry.type = static_cast<EntryType>(type);
+  return name;
+}
+
+// Decodes one directory entry. A non-root entry with an undecodable name is
+// degraded to kUnknown (unreachable) and reported; the root keeps rejecting
+// because no stream path can be rooted.
+std::expected<DirEntry, Error> ParseDirEntry(
+    Bytes p, uint16_t version, size_t slot,
+    std::vector<std::string>* warnings) {
+  DirEntry entry{};
+  entry.type = static_cast<EntryType>(p[66]);
   entry.left = U32(p, 68);
   entry.right = U32(p, 72);
   entry.child = U32(p, 76);
   entry.start_sector = U32(p, 116);
   entry.size = version == 3 ? U32(p, 120) : U64(p, 120);
+  if (entry.type != EntryType::kStorage && entry.type != EntryType::kStream &&
+      entry.type != EntryType::kRoot) {
+    return entry;
+  }
+  auto name = DecodeEntryName(p, U16(p, 64));
+  if (!name) {
+    if (slot == 0)
+      return std::unexpected(name.error());
+    Warn(warnings, "invalid directory entry name at slot " +
+                       std::to_string(slot) + "; entry skipped");
+    entry.name.clear();
+    entry.type = EntryType::kUnknown;
+    entry.child = DirEntry::kNoFollow;
+    return entry;
+  }
+  entry.name = std::move(*name);
   return entry;
 }
 
@@ -326,8 +371,9 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
   std::vector<DirEntry> entries;
   for (size_t i = 0; i + kDirEntrySize <= directory.size();
        i += kDirEntrySize) {
+    const size_t slot = i / kDirEntrySize;
     auto entry = ParseDirEntry(Bytes(directory).subspan(i, kDirEntrySize),
-                               header.major_version);
+                               header.major_version, slot, warnings);
     if (!entry) {
       return std::unexpected(entry.error());
     }
@@ -485,8 +531,10 @@ std::expected<CfbReader, Error> CfbReader::Open(
 std::expected<std::vector<uint8_t>, Error> CfbReader::ReadStream(
     std::string_view name) const {
   // Disambiguate '/' by priority: full path > relative path > entry name.
-  // Collect the best match instead of returning the first directory-order
-  // hit, so a stream named "a/b" can no longer shadow storage "a"/stream "b".
+  // Names compare ASCII case-insensitively ([MS-CFB] §2.6.1); ties keep the
+  // existing directory-order-first rule. Collect the best match instead of
+  // returning the first directory-order hit, so a stream named "a/b" can no
+  // longer shadow storage "a"/stream "b".
   const DirEntry* best = nullptr;
   int best_rank = -1;  // 2 = full path, 1 = relative, 0 = entry name
   auto visited = Visit([&](const DirEntry& entry, std::string_view path, bool) {
@@ -498,11 +546,11 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadStream(
     }
     const std::string_view relative = path.substr(prefix_length);
     int rank = -1;
-    if (path == name)
+    if (AsciiEqualsNoCase(path, name))
       rank = 2;
-    else if (relative == name)
+    else if (AsciiEqualsNoCase(relative, name))
       rank = 1;
-    else if (entry.name == name)
+    else if (AsciiEqualsNoCase(entry.name, name))
       rank = 0;
     if (rank > best_rank) {
       best_rank = rank;

@@ -71,9 +71,9 @@ class CfbReader {
   // Takes a non-owning view; caller must keep `bytes` alive.
   static std::expected<CfbReader, Error> Open(std::span<const uint8_t> bytes);
 
-  // Returns the raw bytes of the named stream (first match in directory
-  // order). Streams under storages are addressed "storage/stream" or by
-  // exact entry name.
+  // Returns the raw bytes of the named stream. Stream names compare ASCII
+  // case-insensitively ([MS-CFB] §2.6.1). Streams under storages are addressed
+  // "storage/stream" or by entry name.
   std::expected<std::vector<uint8_t>, Error> ReadStream(
       std::string_view name) const;
 
@@ -158,6 +158,12 @@ std::expected<void, Error> CfbReader::Visit(F&& visitor) const {
     }
     const DirEntry& entry = entries_[task.index];
     if (task.emit) {
+      if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage &&
+          entry.type != EntryType::kStream) {
+        // LoadDirectory degraded an invalid non-root name to kUnknown: it has
+        // no path and its children are unreachable. Siblings stay queued.
+        continue;
+      }
       std::vector<std::string_view> parts;
       parts.reserve(task.depth + 1);
 
@@ -192,11 +198,6 @@ std::expected<void, Error> CfbReader::Visit(F&& visitor) const {
     }
     seen[task.index] = 1;
     parents[task.index] = task.parent;
-    if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage &&
-        entry.type != EntryType::kStream) {
-      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
-                                   "directory link points to empty entry"});
-    }
     tasks.push_back({entry.right, task.parent, task.depth, false});
     tasks.push_back({task.index, task.parent, task.depth, true});
     tasks.push_back({entry.left, task.parent, task.depth, false});
