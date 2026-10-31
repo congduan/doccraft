@@ -108,6 +108,18 @@ inline constexpr uint8_t kLegacySprmTTableBorders = 0xBB;
 inline constexpr uint8_t kLegacySprmTDefTable10 = 0xBC;
 inline constexpr uint8_t kLegacySprmTDefTable = 0xBE;
 inline constexpr uint8_t kLegacySprmTDefTableShd = 0xBF;
+// Word 6/95 table edits. wvWare sprm.c rgsprmWord6 maps these opcodes onto
+// sprmTInsert/sprmTDelete/sprmTDxaCol/sprmTMerge/sprmTSplit, and its
+// apply functions read the same operands as [MS-DOC] 2.6.3: TInsertOperand
+// (itcFirst/ctc/dxaCol, 4 bytes), ItcFirstLim (2), TDxaColOperand
+// (itcFirst/itcLim/dxaCol, 4), ItcFirstLim (2), ItcFirstLim (2).
+// LibreOffice ww8scan.cxx GetWW6SprmSearcher lists the same 4/2/4/2/2 widths,
+// so ScanLegacySprms forwards the operands unchanged.
+inline constexpr uint8_t kLegacySprmTInsert = 0xC2;
+inline constexpr uint8_t kLegacySprmTDelete = 0xC3;
+inline constexpr uint8_t kLegacySprmTDxaCol = 0xC4;
+inline constexpr uint8_t kLegacySprmTMerge = 0xC5;
+inline constexpr uint8_t kLegacySprmTSplit = 0xC6;
 inline constexpr uint8_t kLegacySprmCFBold = 0x55;
 inline constexpr uint8_t kLegacySprmCFItalic = 0x56;
 inline constexpr uint8_t kLegacySprmCFStrike = 0x57;

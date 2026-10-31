@@ -559,6 +559,33 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
           modern = kSprmTDefTableShd80;
         }
         break;
+      // Word 6/95 table edits share the modern operand layout, so the bytes
+      // pass through unchanged: TInsertOperand is itcFirst/ctc/dxaCol (4),
+      // TDxaColOperand is itcFirst/itcLim/dxaCol (4), and TDelete/TMerge/
+      // TSplit are ItcFirstLim (2). wvWare sprm.c rgsprmWord6 maps these
+      // opcodes onto the modern ids and wvApplysprmTInsert/TDelete/TDxaCol/
+      // TMerge/TSplit read exactly those fields ([MS-DOC] 2.6.3); LibreOffice
+      // GetWW6SprmSearcher lists the same 4/2/4/2/2 widths.
+      case kLegacySprmTInsert:
+        modern = kSprmTInsert;
+        size = kTableInsertSize;
+        break;
+      case kLegacySprmTDelete:
+        modern = kSprmTDelete;
+        size = kTableRangeSize;
+        break;
+      case kLegacySprmTDxaCol:
+        modern = kSprmTDxaCol;
+        size = kTableColumnWidthSize;
+        break;
+      case kLegacySprmTMerge:
+        modern = kSprmTMerge;
+        size = kTableRangeSize;
+        break;
+      case kLegacySprmTSplit:
+        modern = kSprmTSplit;
+        size = kTableRangeSize;
+        break;
       case kLegacySprmTDxaLeft:
         modern = kSprmTDxaLeft;
         size = 2;
