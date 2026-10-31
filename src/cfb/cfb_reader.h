@@ -94,8 +94,10 @@ class CfbReader {
     return major_version_;
   }
 
-  // Non-fatal header/chain inconsistencies that Open() tolerated. Callers
-  // such as the CLI surface these as "warning: ..." on stderr.
+  // Non-fatal header/chain inconsistencies that Open() tolerated, plus
+  // truncations met while reading a stream. Callers such as the CLI surface
+  // these as "warning: ..." on stderr. ReadStream may append to this list, so
+  // a caller that reads streams after Open() should print it again afterwards.
   const std::vector<std::string>& warnings() const {
     return warnings_;
   }
@@ -123,9 +125,13 @@ class CfbReader {
   // read past it.
   std::expected<std::span<const uint8_t>, Error> SectorBytes(
       uint32_t sector) const;
-  std::expected<std::vector<uint8_t>, Error> ReadChain(uint32_t start,
-                                                       uint64_t size,
-                                                       bool mini) const;
+  // Reads `size` bytes from the FAT (regular) or MiniFAT chain. A chain that
+  // walks off the physical file or ends before `size` yields the readable
+  // prefix and records a truncation warning naming `name`; a cycle, an index
+  // past the allocation table or a table shorter than the declared size is
+  // still fatal.
+  std::expected<std::vector<uint8_t>, Error> ReadChain(
+      uint32_t start, uint64_t size, bool mini, std::string_view name) const;
 
   std::span<const uint8_t> data_;
   uint32_t sector_size_ = 512;
@@ -139,7 +145,9 @@ class CfbReader {
   std::vector<uint32_t> mini_fat_;
   std::vector<DirEntry> entries_;
   std::vector<uint8_t> mini_stream_;
-  std::vector<std::string> warnings_;
+  // Open() seeds this and a const ReadStream() may append truncation warnings
+  // while following a chain, so the physical state stays const-correct.
+  mutable std::vector<std::string> warnings_;
   // Set by Open() when a link the tree walk actually stepped on names an entry
   // slot past the table: the tree is truncated at that link. A name lookup then
   // falls back to a linear scan of `entries_` so physically present streams

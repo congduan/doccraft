@@ -220,9 +220,21 @@ int main(int argc, char** argv) {
       return 1;
     }
     std::optional<doccraft::cfb::CfbReader> cfb(std::move(*opened));
-    for (const auto& warning : cfb->warnings())
-      std::fprintf(stderr, "warning: %s\n", warning.c_str());
+    // The warning list also grows while streams are read (a truncated chain
+    // is salvaged down to its readable prefix), so flush the new tail after
+    // each read instead of printing the whole snapshot twice.
+    size_t printed_warnings = 0;
+    const auto flush_warnings = [&]() {
+      const auto& warnings = cfb->warnings();
+      while (printed_warnings < warnings.size()) {
+        std::fprintf(stderr, "warning: %s\n",
+                     warnings[printed_warnings].c_str());
+        ++printed_warnings;
+      }
+    };
+    flush_warnings();
     auto word = cfb->ReadStream("WordDocument");
+    flush_warnings();
     if (!word) {
       std::fprintf(stderr, "convert: %s\n", word.error().message.c_str());
       return 1;
@@ -236,6 +248,7 @@ int main(int argc, char** argv) {
     if (fib && fib->legacy &&
         fib->codepage == doccraft::base::kDefaultCodepage) {
       auto summary = cfb->ReadStream("\005SummaryInformation");
+      flush_warnings();
       if (summary) {
         const uint32_t codepage = doccraft::doc::ReadSummaryCodepage(*summary);
         if (((codepage >= 1250 && codepage <= 1258) || codepage == 932 ||
@@ -252,6 +265,7 @@ int main(int argc, char** argv) {
     if (encrypted && !has_password) {
       const std::string table_name = ((*word)[11] & 0x02) ? "1Table" : "0Table";
       auto encrypted_table = cfb->ReadStream(table_name);
+      flush_warnings();
       if (!encrypted_table) {
         std::fprintf(stderr, "convert: %s\n",
                      encrypted_table.error().message.c_str());
@@ -277,6 +291,7 @@ int main(int argc, char** argv) {
                                    : ((*word)[11] & 0x02) ? "1Table"
                                                           : "0Table";
     auto table = cfb->ReadStream(table_name);
+    flush_warnings();
     if (!table && fib && fib->legacy)
       table = *word;
     if (!table) {
@@ -284,6 +299,7 @@ int main(int argc, char** argv) {
       return 1;
     }
     auto data = cfb->ReadStream("Data");
+    flush_warnings();
     if (encrypted && has_password) {
       const auto data_span =
           data ? std::span<uint8_t>(*data) : std::span<uint8_t>();

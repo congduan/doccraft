@@ -81,8 +81,9 @@ std::span<const uint8_t> SectorView(std::span<const uint8_t> bytes,
 // 512-byte header. Some real-world producers append a trailing fragment that is
 // shorter than one sector (the wvWare samples end with a single zero byte).
 // Such a fragment cannot belong to any FAT chain, so ignore it instead of
-// rejecting the file. Anything reaching a chain that references the dropped
-// bytes still fails cleanly in ReadChain ("sector outside file").
+// rejecting the file. A chain that references the dropped bytes now reads up to
+// the last complete sector and reports the truncation (r48); the fragment still
+// contributes no data.
 size_t UsableSize(size_t size, uint32_t sector_size) {
   return size / sector_size * sector_size;
 }
@@ -423,7 +424,7 @@ std::expected<Bytes, Error> CfbReader::SectorBytes(uint32_t sector) const {
 }
 
 std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
-    uint32_t start, uint64_t size, bool mini) const {
+    uint32_t start, uint64_t size, bool mini, std::string_view name) const {
   if (size == 0)
     return std::vector<uint8_t>{};
   const uint32_t unit = mini ? mini_sector_size_ : sector_size_;
@@ -441,6 +442,16 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
       static_cast<size_t>(std::min({size, backing_size, uint64_t{65536}})));
   std::vector<uint8_t> seen(table.size(), 0);
   uint32_t at = start;
+  // A chain that runs out of backing bytes is truncated, not corrupt: every
+  // sector read so far is real data, so keep the prefix and report the loss.
+  // A cycle, an index past the allocation table and a table shorter than the
+  // declared size stay fatal (the salvage must not guess at missing links).
+  const auto truncated = [&]() -> std::expected<std::vector<uint8_t>, Error> {
+    Warn(&warnings_, "truncated stream " + std::string(name) + ": kept " +
+                         std::to_string(result.size()) + " of " +
+                         std::to_string(size) + " declared bytes");
+    return std::move(result);
+  };
   for (uint64_t i = 0; i < count; ++i) {
     if (at >= table.size() || seen[at]) {
       return std::unexpected(
@@ -450,15 +461,13 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
     Bytes chunk;
     if (mini) {
       const uint64_t offset = static_cast<uint64_t>(at) * unit;
-      if (offset + unit > mini_stream_.size()) {
-        return std::unexpected(
-            Fail(ErrorCode::kCorruptFat, "mini sector outside root stream"));
-      }
+      if (offset + unit > mini_stream_.size())
+        return truncated();
       chunk = Bytes(mini_stream_).subspan(static_cast<size_t>(offset), unit);
     } else {
       auto sector = SectorBytes(at);
       if (!sector)
-        return std::unexpected(sector.error());
+        return truncated();
       chunk = *sector;
     }
     const size_t take =
@@ -482,8 +491,11 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
         at = next;
         continue;  // the following iteration must see ENDOFCHAIN
       }
-    } else if (next == kEnd || next == kFree || next == kFat ||
-               next == kDifat) {
+    } else if (next == kEnd || next == kFree) {
+      // The producer terminated the chain before the declared size. The bytes
+      // up to here are still the stream's prefix; keep them.
+      return truncated();
+    } else if (next == kFat || next == kDifat) {
       return std::unexpected(Fail(ErrorCode::kCorruptFat, "chain ends early"));
     }
     at = next;
@@ -610,7 +622,8 @@ std::expected<CfbReader, Error> CfbReader::Open(
   if (out.num_mini_fat_) {
     auto raw = out.ReadChain(
         out.mini_fat_start_,
-        static_cast<uint64_t>(out.num_mini_fat_) * out.sector_size_, false);
+        static_cast<uint64_t>(out.num_mini_fat_) * out.sector_size_, false,
+        "mini FAT");
     if (!raw) {
       return std::unexpected(raw.error());
     }
@@ -620,7 +633,7 @@ std::expected<CfbReader, Error> CfbReader::Open(
   }
   if (out.entries_[0].size) {
     auto root = out.ReadChain(out.entries_[0].start_sector,
-                              out.entries_[0].size, false);
+                              out.entries_[0].size, false, "Root Entry");
     if (!root) {
       return std::unexpected(root.error());
     }
@@ -779,6 +792,7 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadStream(
           Fail(ErrorCode::kStreamNotFound, "stream not found"));
     }
   }
-  return ReadChain(best->start_sector, best->size, best->size < 4096);
+  return ReadChain(best->start_sector, best->size, best->size < 4096,
+                   best->name);
 }
 }  // namespace doccraft::cfb
