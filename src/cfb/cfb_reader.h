@@ -18,6 +18,7 @@
 #include <concepts>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -56,11 +57,12 @@ struct DirEntry {
   EntryType type;
   uint32_t start_sector;
   uint64_t size;  // 64-bit for v4 (4096-byte sectors)
-  // Tree relationships (directory entry indices, kNoFollow = none).
+  // Tree relationships (directory entry indices, kNoFollow = NOSTREAM).
   uint32_t left = kNoFollow;
   uint32_t right = kNoFollow;
   uint32_t child = kNoFollow;
 
+  // [MS-CFB] §2.6.4 NOSTREAM: no directory entry follows this link.
   static constexpr uint32_t kNoFollow = 0xFFFFFFFF;
 };
 
@@ -100,6 +102,23 @@ class CfbReader {
 
  private:
   CfbReader() = default;
+
+  // Outcome of one tree walk. Open() uses it to tell links the walk actually
+  // stepped on (the tree is truncated there) from links on records the tree
+  // never reaches (the tree is complete; the records are junk).
+  struct WalkReport {
+    // One entry per out-of-range link the walk hit: the slot owning the link
+    // and the slot it names.
+    std::vector<uint32_t> dangling_owners;
+    std::vector<uint32_t> dangling_targets;
+    std::vector<uint8_t> reached;  // 1 for every slot the walk entered
+  };
+
+  using Visitor = std::function<bool(const DirEntry&, std::string_view, bool)>;
+
+  // Depth-first walk shared by Visit() and Open(); `report` is optional.
+  std::expected<void, Error> Walk(const Visitor& visitor,
+                                  WalkReport* report) const;
   // View of one sector; the span keeps the sector length so callers cannot
   // read past it.
   std::expected<std::span<const uint8_t>, Error> SectorBytes(
@@ -121,95 +140,19 @@ class CfbReader {
   std::vector<DirEntry> entries_;
   std::vector<uint8_t> mini_stream_;
   std::vector<std::string> warnings_;
-  // Set by Open() when a directory link named an entry slot past the table.
-  // The tree walk ignores such links; a name lookup then falls back to a
-  // linear scan of `entries_` so physically present streams stay readable.
+  // Set by Open() when a link the tree walk actually stepped on names an entry
+  // slot past the table: the tree is truncated at that link. A name lookup then
+  // falls back to a linear scan of `entries_` so physically present streams
+  // stay readable. Bad links on records the tree never reaches do not set it;
+  // a complete tree stays authoritative for those.
   bool directory_tree_incomplete_ = false;
 };
 
 template <typename F>
   requires std::invocable<F, const DirEntry&, std::string_view, bool>
 std::expected<void, Error> CfbReader::Visit(F&& visitor) const {
-  if (entries_.empty()) {
-    return std::unexpected(Error{ErrorCode::kCorruptDirectory, "missing root"});
-  }
-
-  std::vector<uint8_t> seen(entries_.size(), 0);
-
-  std::vector<uint32_t> parents(entries_.size(), DirEntry::kNoFollow);
-  constexpr uint32_t kMaxDepth = 256;
-  struct Task {
-    uint32_t index;
-    uint32_t parent;
-    uint32_t depth;
-    bool emit;
-  };
-  std::vector<Task> tasks{{0, DirEntry::kNoFollow, 0, false}};
-
-  while (!tasks.empty()) {
-    Task task = tasks.back();
-    tasks.pop_back();
-
-    if (task.index == DirEntry::kNoFollow)
-      continue;
-    if (task.index >= entries_.size()) {
-      // [MS-CFB] §2.6.4 links name slot indices in the directory. A link past
-      // the table cannot reach any entry, so it is equivalent to ENDOFCHAIN:
-      // drop it. Open() reports the damage and enables the name-lookup
-      // salvage, keeping this walk a pure enumeration.
-      continue;
-    }
-    if (task.depth > kMaxDepth) {
-      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
-                                   "directory nesting exceeds limit"});
-    }
-    const DirEntry& entry = entries_[task.index];
-    if (task.emit) {
-      if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage &&
-          entry.type != EntryType::kStream) {
-        // LoadDirectory degraded an invalid non-root name to kUnknown: it has
-        // no path and its children are unreachable. Siblings stay queued.
-        continue;
-      }
-      std::vector<std::string_view> parts;
-      parts.reserve(task.depth + 1);
-
-      for (uint32_t at = task.index; at != DirEntry::kNoFollow;
-           at = parents[at]) {
-        parts.push_back(entries_[at].name);
-      }
-      std::string path;
-      for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
-        if (!path.empty())
-          path += '/';
-        path += *it;
-      }
-      if (!static_cast<bool>(visitor(entry, path,
-                                     entry.type == EntryType::kRoot ||
-                                         entry.type == EntryType::kStorage)))
-        return {};
-
-      if (entry.child != DirEntry::kNoFollow) {
-        if (entry.type != EntryType::kRoot &&
-            entry.type != EntryType::kStorage) {
-          return std::unexpected(
-              Error{ErrorCode::kCorruptDirectory, "stream has children"});
-        }
-        tasks.push_back({entry.child, task.index, task.depth + 1, false});
-      }
-      continue;
-    }
-    if (seen[task.index]) {
-      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
-                                   "directory link is invalid or cyclic"});
-    }
-    seen[task.index] = 1;
-    parents[task.index] = task.parent;
-    tasks.push_back({entry.right, task.parent, task.depth, false});
-    tasks.push_back({task.index, task.parent, task.depth, true});
-    tasks.push_back({entry.left, task.parent, task.depth, false});
-  }
-  return {};
+  const Visitor fn(std::forward<F>(visitor));
+  return Walk(fn, nullptr);
 }
 
 }  // namespace doccraft::cfb

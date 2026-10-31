@@ -398,34 +398,18 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
 }
 
 // A directory link naming a slot at or past the end of the entry table cannot
-// reach any record. The tree walk drops such links (equivalent to ENDOFCHAIN)
-// and Open() reports the first one.
-struct DanglingLinks {
-  uint32_t count = 0;
-  uint32_t first_slot = 0;
-  uint32_t first_target = 0;
-};
+// reach any record. [MS-CFB] §2.6.4 spells the terminator NOSTREAM; a link
+// past the table is treated the same way by the tree walk. Only links the walk
+// actually steps on prove the tree is truncated; the same damage on a record
+// the walk never reaches is junk in a complete tree.
+bool IsDanglingLink(uint32_t link, size_t entry_count) {
+  return link != DirEntry::kNoFollow && link >= entry_count;
+}
 
-DanglingLinks FindDanglingLinks(const std::vector<DirEntry>& entries) {
-  DanglingLinks out;
-  for (size_t i = 0; i < entries.size(); ++i) {
-    const DirEntry& entry = entries[i];
-    if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage &&
-        entry.type != EntryType::kStream) {
-      continue;
-    }
-    const uint32_t links[] = {entry.left, entry.right, entry.child};
-    for (uint32_t link : links) {
-      if (link == DirEntry::kNoFollow || link < entries.size())
-        continue;
-      if (out.count == 0) {
-        out.first_slot = static_cast<uint32_t>(i);
-        out.first_target = link;
-      }
-      ++out.count;
-    }
-  }
-  return out;
+bool CarriesDanglingLink(const DirEntry& entry, size_t entry_count) {
+  return IsDanglingLink(entry.left, entry_count) ||
+         IsDanglingLink(entry.right, entry_count) ||
+         IsDanglingLink(entry.child, entry_count);
 }
 }  // namespace
 
@@ -550,23 +534,75 @@ std::expected<CfbReader, Error> CfbReader::Open(
     return std::unexpected(
         Fail(ErrorCode::kCorruptDirectory, "root has sibling"));
   }
-  const DanglingLinks dangling = FindDanglingLinks(out.entries_);
-  if (dangling.count != 0) {
+  WalkReport walk;
+  auto visited = out.Walk(
+      [](const DirEntry&, std::string_view, bool) {
+        return true;
+      },
+      &walk);
+  if (!visited) {
+    return std::unexpected(visited.error());
+  }
+  // A link the walk stepped on is where the tree ends: drop it, warn once per
+  // damaged entry (slot and name, its links merged) and open the name-only
+  // salvage. Sorting keeps the warning order stable.
+  std::vector<std::pair<uint32_t, uint32_t>> hits;
+  hits.reserve(walk.dangling_owners.size());
+  for (size_t i = 0; i < walk.dangling_owners.size(); ++i)
+    hits.emplace_back(walk.dangling_owners[i], walk.dangling_targets[i]);
+  std::sort(hits.begin(), hits.end());
+  for (size_t i = 0; i < hits.size();) {
+    const uint32_t slot = hits[i].first;
+    std::vector<uint32_t> targets;
+    for (; i < hits.size() && hits[i].first == slot; ++i) {
+      if (targets.empty() || targets.back() != hits[i].second)
+        targets.push_back(hits[i].second);
+    }
+    std::string list;
+    for (uint32_t target : targets) {
+      if (!list.empty())
+        list += ", ";
+      list += std::to_string(target);
+    }
+    const std::string owner =
+        "slot " + std::to_string(slot) + " ('" + out.entries_[slot].name + "')";
+    if (targets.size() == 1) {
+      Warn(&out.warnings_, "directory link from " + owner + " to slot " + list +
+                               " points past the entry table; link ignored");
+    } else {
+      Warn(&out.warnings_, "directory links from " + owner + " to slots " +
+                               list +
+                               " point past the entry table; links "
+                               "ignored");
+    }
     out.directory_tree_incomplete_ = true;
-    Warn(&out.warnings_,
-         "directory link from slot " + std::to_string(dangling.first_slot) +
-             " ('" + out.entries_[dangling.first_slot].name + "') to slot " +
-             std::to_string(dangling.first_target) +
-             " points past the entry table; link ignored");
+  }
+  if (!hits.empty()) {
     Warn(&out.warnings_,
          "directory tree is incomplete; unreachable entries are matched by "
          "name only");
   }
-  auto visited = out.Visit([](const DirEntry&, std::string_view, bool) {
-    return true;
-  });
-  if (!visited) {
-    return std::unexpected(visited.error());
+  // The same damage on records the tree never reaches does not prove the tree
+  // is truncated: a complete tree stays authoritative and the salvage stays
+  // closed. One line keeps a corrupt table from flooding the log.
+  size_t stranded = 0;
+  for (size_t slot = 0; slot < out.entries_.size(); ++slot) {
+    const DirEntry& entry = out.entries_[slot];
+    if (walk.reached[slot])
+      continue;
+    if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage &&
+        entry.type != EntryType::kStream) {
+      continue;
+    }
+    if (CarriesDanglingLink(entry, out.entries_.size()))
+      ++stranded;
+  }
+  if (stranded != 0) {
+    Warn(&out.warnings_,
+         std::to_string(stranded) +
+             (stranded == 1 ? " unreachable directory record has a link"
+                            : " unreachable directory records have links") +
+             " past the entry table; ignored, the tree is complete");
   }
   if (out.num_mini_fat_) {
     auto raw = out.ReadChain(
@@ -588,6 +624,102 @@ std::expected<CfbReader, Error> CfbReader::Open(
     out.mini_stream_ = std::move(*root);
   }
   return out;
+}
+
+std::expected<void, Error> CfbReader::Walk(const Visitor& visitor,
+                                           WalkReport* report) const {
+  if (entries_.empty()) {
+    return std::unexpected(Error{ErrorCode::kCorruptDirectory, "missing root"});
+  }
+  if (report != nullptr)
+    report->reached.assign(entries_.size(), 0);
+
+  std::vector<uint8_t> seen(entries_.size(), 0);
+
+  std::vector<uint32_t> parents(entries_.size(), DirEntry::kNoFollow);
+  constexpr uint32_t kMaxDepth = 256;
+  struct Task {
+    uint32_t index;
+    uint32_t parent;
+    uint32_t depth;
+    bool emit;
+    uint32_t owner;  // slot whose link queued this task
+  };
+  std::vector<Task> tasks{
+      {0, DirEntry::kNoFollow, 0, false, DirEntry::kNoFollow}};
+
+  while (!tasks.empty()) {
+    Task task = tasks.back();
+    tasks.pop_back();
+
+    if (task.index == DirEntry::kNoFollow)
+      continue;
+    if (task.index >= entries_.size()) {
+      // [MS-CFB] §2.6.4 links name slot indices in the directory. A link past
+      // the table reaches no record, so it terminates the walk like NOSTREAM.
+      // Open() uses the report to tell this truncated-tree case from the same
+      // damage on a record the walk never reached.
+      if (report != nullptr && task.owner != DirEntry::kNoFollow) {
+        report->dangling_owners.push_back(task.owner);
+        report->dangling_targets.push_back(task.index);
+      }
+      continue;
+    }
+    if (task.depth > kMaxDepth) {
+      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
+                                   "directory nesting exceeds limit"});
+    }
+    const DirEntry& entry = entries_[task.index];
+    if (task.emit) {
+      if (entry.type != EntryType::kRoot && entry.type != EntryType::kStorage &&
+          entry.type != EntryType::kStream) {
+        // LoadDirectory degraded an invalid non-root name to kUnknown: it has
+        // no path and its children are unreachable. Siblings stay queued.
+        continue;
+      }
+      std::vector<std::string_view> parts;
+      parts.reserve(task.depth + 1);
+
+      for (uint32_t at = task.index; at != DirEntry::kNoFollow;
+           at = parents[at]) {
+        parts.push_back(entries_[at].name);
+      }
+      std::string path;
+      for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
+        if (!path.empty())
+          path += '/';
+        path += *it;
+      }
+      if (!static_cast<bool>(visitor(entry, path,
+                                     entry.type == EntryType::kRoot ||
+                                         entry.type == EntryType::kStorage)))
+        return {};
+
+      if (entry.child != DirEntry::kNoFollow) {
+        if (entry.type != EntryType::kRoot &&
+            entry.type != EntryType::kStorage) {
+          return std::unexpected(
+              Error{ErrorCode::kCorruptDirectory, "stream has children"});
+        }
+        tasks.push_back(
+            {entry.child, task.index, task.depth + 1, false, task.index});
+      }
+      continue;
+    }
+    if (seen[task.index]) {
+      return std::unexpected(Error{ErrorCode::kCorruptDirectory,
+                                   "directory link is invalid or cyclic"});
+    }
+    seen[task.index] = 1;
+    if (report != nullptr)
+      report->reached[task.index] = 1;
+    parents[task.index] = task.parent;
+    tasks.push_back({entry.right, task.parent, task.depth, false, task.index});
+    tasks.push_back(
+        {task.index, task.parent, task.depth, true, DirEntry::kNoFollow});
+    tasks.push_back({entry.left, task.parent, task.depth, false, task.index});
+  }
+  return {};
 }
 
 std::expected<std::vector<uint8_t>, Error> CfbReader::ReadStream(
@@ -627,10 +759,11 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadStream(
       return std::unexpected(
           Fail(ErrorCode::kStreamNotFound, "stream not found"));
     }
-    // A dangling link left at least one record unreachable through the tree.
-    // The tree cannot prove the stream absent, so scan the entry table for a
-    // name match (still ASCII case-insensitive). Salvaged entries are matched
-    // by their own name; their storage path is unknown.
+    // The walk hit a link past the entry table, so at least one record may be
+    // unreachable through the tree. The tree cannot prove the stream absent,
+    // so scan the entry table for a name match (still ASCII case-insensitive).
+    // Salvaged entries are matched by their own name; their storage path is
+    // unknown.
     for (const DirEntry& entry : entries_) {
       if (entry.type == EntryType::kStream && !entry.name.empty() &&
           AsciiEqualsNoCase(entry.name, name)) {
