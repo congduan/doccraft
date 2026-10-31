@@ -108,6 +108,16 @@ inline constexpr uint8_t kLegacySprmTTableBorders = 0xBB;
 inline constexpr uint8_t kLegacySprmTDefTable10 = 0xBC;
 inline constexpr uint8_t kLegacySprmTDefTable = 0xBE;
 inline constexpr uint8_t kLegacySprmTDefTableShd = 0xBF;
+// 0xC0/0xC1/0xC7/0xC8 were once only stepped over through the width table.
+// They are now translated: sprmTTlp (0xC0) is a four-byte TLP identical to the
+// modern operand, sprmTSetBrc (0xC1) and sprmTSetBrc10 (0xC7) are fixed
+// five-byte itcFirst/itcLim/sides plus a two-byte BRC6/BRC10, and sprmTSetShd
+// (0xC8) is a four-byte itcFirst/itcLim plus a two-byte SHD. ScanLegacySprms
+// rebuilds the modern cb-prefixed TSetBrc/TSetShd operands from them.
+inline constexpr uint8_t kLegacySprmTTlp = 0xC0;
+inline constexpr uint8_t kLegacySprmTSetBrc = 0xC1;
+inline constexpr uint8_t kLegacySprmTSetBrc10 = 0xC7;
+inline constexpr uint8_t kLegacySprmTSetShd = 0xC8;
 // Word 6/95 table edits. wvWare sprm.c rgsprmWord6 maps these opcodes onto
 // sprmTInsert/sprmTDelete/sprmTDxaCol/sprmTMerge/sprmTSplit, and its
 // apply functions read the same operands as [MS-DOC] 2.6.3: TInsertOperand
@@ -336,15 +346,15 @@ inline constexpr LegacySprmSpec kLegacySprmSpecs[] = {
     // would overrun by one byte. The SHD pairs are already the SHD80 layout,
     // so the operand is forwarded to sprmTDefTableShd80 unchanged.
     {0xBF, 0, LegacySprmWidth::kVar},  // sprmTDefTableShd
-    {0xC0, 4, LegacySprmWidth::kFix},  // sprmTTlp
-    {0xC1, 5, LegacySprmWidth::kFix},  // sprmTSetBrc
+    {0xC0, 4, LegacySprmWidth::kFix},  // sprmTTlp (mapped)
+    {0xC1, 5, LegacySprmWidth::kFix},  // sprmTSetBrc (mapped)
     {0xC2, 4, LegacySprmWidth::kFix},  // sprmTInsert
     {0xC3, 2, LegacySprmWidth::kFix},  // sprmTDelete
     {0xC4, 4, LegacySprmWidth::kFix},  // sprmTDxaCol
     {0xC5, 2, LegacySprmWidth::kFix},  // sprmTMerge
     {0xC6, 2, LegacySprmWidth::kFix},  // sprmTSplit
-    {0xC7, 5, LegacySprmWidth::kFix},  // sprmTSetBrc10
-    {0xC8, 4, LegacySprmWidth::kFix},  // sprmTSetShd
+    {0xC7, 5, LegacySprmWidth::kFix},  // sprmTSetBrc10 (mapped)
+    {0xC8, 4, LegacySprmWidth::kFix},  // sprmTSetShd (mapped)
     {0xCF, 0, LegacySprmWidth::kVar},  // unknown RTL property
 };
 

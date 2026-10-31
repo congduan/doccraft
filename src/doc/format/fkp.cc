@@ -288,6 +288,26 @@ constexpr size_t kLegacyTableBordersSize = 12;
 constexpr size_t kLegacyBrc6Size = 2;
 constexpr size_t kLegacyTc6Size = 10;
 constexpr size_t kLegacyTc6BorderCount = 4;
+// sprmTTlp/sprmTSetBrc/sprmTSetBrc10/sprmTSetShd are fixed-width legacy
+// operands. The two border forms are itcFirst, itcLim, sides and a two-byte
+// BRC word; the shading form drops sides and carries a two-byte SHD word.
+constexpr size_t kLegacyTtlpSize = 4;
+constexpr size_t kLegacySetBrcSize = 5;
+constexpr size_t kLegacyCellSidesOffset = 3;
+constexpr size_t kLegacySetShdSize = 4;
+// BRC10 bit fields (wvGetBRC10_internal): dxpLine2Width(3) @0,
+// dxpSpaceBetween(3) @3, dxpLine1Width(3) @6, dxpSpace(5) @9, fShadow(1) @14.
+constexpr uint16_t kLegacyBrcWidthMask = 0x07;
+constexpr int kLegacyBrc10GapShift = 3;
+constexpr int kLegacyBrc10Line1Shift = 6;
+constexpr int kLegacyBrc10SpaceShift = 9;
+constexpr int kLegacyBrc10ShadowShift = 14;
+// SHD16 bit fields (wvGetSHD_internal): icoFore(5) @0, icoBack(5) @5,
+// ipat(6) @10.
+constexpr uint16_t kLegacyShdColorMask = 0x1F;
+constexpr int kLegacyShd16BackShift = 5;
+constexpr int kLegacyShd16PatternShift = 10;
+constexpr uint16_t kLegacyShd16PatternMask = 0x3F;
 
 void PutU16(std::vector<uint8_t>& out, uint16_t v) {
   out.push_back(static_cast<uint8_t>(v));
@@ -322,6 +342,58 @@ void AppendBrc6(std::vector<uint8_t>& out, uint16_t v) {
   out.push_back(0);
 }
 
+// BRC10: dxpLine2Width(3), dxpSpaceBetween(3), dxpLine1Width(3), dxpSpace(5)
+// and fShadow(1); there is no colour field. wvConvertBRC10ToBRC maps the
+// (line1, gap, line2) triple to a line type and leaves unrecognised
+// combinations as type 0. BRC10 has no width byte either, so the line-1 width
+// doubles as the modern width; that keeps wvWare's hairline (7) and dotted (6)
+// special values recognisable instead of dropping them to a width-less line.
+// wvWare marks those two special cases uncertain; the mapping is kept because
+// the alternative (type 0) erases the border entirely.
+void AppendBrc10(std::vector<uint8_t>& out, uint16_t v) {
+  const unsigned line2 = v & kLegacyBrcWidthMask;
+  const unsigned gap = (v >> kLegacyBrc10GapShift) & kLegacyBrcWidthMask;
+  const unsigned line1 = (v >> kLegacyBrc10Line1Shift) & kLegacyBrcWidthMask;
+  // OOXML border type codes: 1 single, 2 thick, 3 double, 5 hairline,
+  // 6 dotted (the same values model::Border carries).
+  unsigned type = 0;
+  if (gap == 0 && line2 == 0) {
+    switch (line1) {
+      case 1:
+        type = 1;
+        break;
+      case 2:
+        type = 2;
+        break;
+      case 4:  // wvWare widens a four-wide line to a double line.
+        type = 3;
+        break;
+      case 6:
+        type = 6;
+        break;
+      case 7:
+        type = 5;
+        break;
+      default:
+        type = 0;
+        break;
+    }
+  } else if (line1 == 1 && gap == 1 && line2 == 1) {
+    type = 3;  // Two single lines read as a double line.
+  }
+  // BRC10 has no palette index; ico 0 ("auto") maps to -1, Word's COLORREF
+  // value for an unset colour.
+  PutU32(out, static_cast<uint32_t>(Ico(0)));
+  out.push_back(static_cast<uint8_t>(line1));
+  out.push_back(static_cast<uint8_t>(type));
+  uint8_t flags =
+      static_cast<uint8_t>((v >> kLegacyBrc10SpaceShift) & kBrcSpaceMask);
+  if ((v >> kLegacyBrc10ShadowShift) & 1)
+    flags |= kBrcShadow;
+  out.push_back(flags);
+  out.push_back(0);
+}
+
 // TC6: two-byte TCGRF, then four two-byte BRC10 borders. TCGRF has the same
 // merge and text-flow layout as TC80, so it is copied; the width is left zero
 // because the column grid supplies it. The BRC10 borders are not converted:
@@ -346,6 +418,38 @@ void RebuildLegacyTableBorders(Bytes v, std::vector<uint8_t>& out) {
   out.push_back(static_cast<uint8_t>(kTableBorderCount * kBrcSize));
   for (size_t i = 0; i < kTableBorderCount; i++)
     AppendBrc6(out, U16(v, i * kLegacyBrc6Size));
+}
+
+// Rebuilds a five-byte sprmTSetBrc/sprmTSetBrc10 operand (itcFirst, itcLim,
+// sides, BRC word) as the modern TSetBrcOperand: cb(11), the same three
+// leading bytes and an eight-byte Brc. The sides byte is copied verbatim; the
+// shared handler rejects bits above 0x3F.
+void RebuildLegacyCellBorders(Bytes v, std::vector<uint8_t>& out, bool brc10) {
+  out.clear();
+  out.push_back(static_cast<uint8_t>(kCellBorderSize - 1));
+  out.insert(out.end(), v.begin(), v.begin() + kLegacyCellSidesOffset);
+  const uint16_t brc = U16(v, kLegacyCellSidesOffset);
+  if (brc10)
+    AppendBrc10(out, brc);
+  else
+    AppendBrc6(out, brc);
+}
+
+// Rebuilds a four-byte sprmTSetShd operand (itcFirst, itcLim, SHD16) as the
+// modern TSetShdOperand: cb(12), the range, then a ten-byte SHD of two
+// COLORREFs and a two-byte pattern. SHD16 stores palette indices; Ico() maps
+// 0..15 to COLORREFs and leaves 16..31 at -1 (automatic), which is the same
+// "unset" value TableShade writes into model::CellProperties.
+void RebuildLegacyCellShading(Bytes v, std::vector<uint8_t>& out) {
+  out.clear();
+  out.push_back(static_cast<uint8_t>(kCellShadingCb));
+  out.insert(out.end(), v.begin(), v.begin() + kTableRangeSize);
+  const uint16_t shd = U16(v, kTableRangeSize);
+  PutU32(out, static_cast<uint32_t>(Ico(shd & kLegacyShdColorMask)));
+  PutU32(out, static_cast<uint32_t>(
+                  Ico((shd >> kLegacyShd16BackShift) & kLegacyShdColorMask)));
+  PutU16(out, static_cast<uint16_t>((shd >> kLegacyShd16PatternShift) &
+                                    kLegacyShd16PatternMask));
 }
 
 // Rebuilds a Word 6/95 sprmTDefTable operand as a modern sprmTDefTable
@@ -375,7 +479,14 @@ bool RebuildLegacyTableDefinition(Bytes v, std::vector<uint8_t>& out,
   return true;
 }
 
-enum class LegacyTableTransform { kNone, kBorders, kDefinition };
+enum class LegacyTableTransform {
+  kNone,
+  kBorders,
+  kDefinition,
+  kCellBorders,
+  kCellBorders10,
+  kCellShading
+};
 }  // namespace
 
 // Word 6/95 grpprls use one-byte opcodes. Translate the scalar properties
@@ -559,6 +670,29 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
           modern = kSprmTDefTableShd80;
         }
         break;
+      // Word 6/95 table style options, cell borders and cell shading. TTlp
+      // already matches the modern operand, so it passes through; the two
+      // border forms and the SHD16 form are rebuilt into the modern
+      // cb-prefixed operands by RebuildLegacyCellBorders/Shading.
+      case kLegacySprmTTlp:
+        modern = kSprmTTlp;
+        size = kLegacyTtlpSize;
+        break;
+      case kLegacySprmTSetBrc:
+        modern = kSprmTSetBrc;
+        size = kLegacySetBrcSize;
+        transform = LegacyTableTransform::kCellBorders;
+        break;
+      case kLegacySprmTSetBrc10:
+        modern = kSprmTSetBrc;
+        size = kLegacySetBrcSize;
+        transform = LegacyTableTransform::kCellBorders10;
+        break;
+      case kLegacySprmTSetShd:
+        modern = kSprmTSetShd;
+        size = kLegacySetShdSize;
+        transform = LegacyTableTransform::kCellShading;
+        break;
       // Word 6/95 table edits share the modern operand layout, so the bytes
       // pass through unchanged: TInsertOperand is itcFirst/ctc/dxaCol (4),
       // TDxaColOperand is itcFirst/itcLim/dxaCol (4), and TDelete/TMerge/
@@ -718,6 +852,14 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         modern = 0;
         partial = true;
       }
+    } else if (transform == LegacyTableTransform::kCellBorders ||
+               transform == LegacyTableTransform::kCellBorders10) {
+      RebuildLegacyCellBorders(
+          operand, rebuilt, transform == LegacyTableTransform::kCellBorders10);
+      operand = rebuilt;
+    } else if (transform == LegacyTableTransform::kCellShading) {
+      RebuildLegacyCellShading(operand, rebuilt);
+      operand = rebuilt;
     }
     if (mask_low_byte) {
       // Rebuild the operand as low byte + zero high byte (sprmTJc only).
