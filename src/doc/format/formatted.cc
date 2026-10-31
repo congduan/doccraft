@@ -292,7 +292,6 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   std::vector<TableFrame> frames;
   std::vector<FieldFrame> fields;
   int pending_ole = -1;
-  bool warned_field_control = false;
   bool page_field = false;
   std::string hyperlink;
   size_t next_section = 0;
@@ -541,15 +540,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
       continue;
     }
     if (!fields.empty() && fields.back().in_instruction) {
-      // Binary object markers sometimes occur inside fast-saved field code
-      // ranges. XML 1.0 cannot represent them, including as numeric refs.
+      // Field instructions carry Word's 0x01 field-code delimiter and, in
+      // damaged files, other C0 controls. XML 1.0 cannot represent them,
+      // including as numeric references. Every 0x01 observed in the corpus
+      // sits at a token boundary, so dropping it never joins tokens; header
+      // stories already read instructions without reporting these.
       if (control && static_cast<unsigned char>(control) < 32 &&
           control != '\t' && control != '\n' && control != '\r') {
-        if (!warned_field_control) {
-          doc.warnings.push_back(
-              "ignored non-XML control in field instruction");
-          warned_field_control = true;
-        }
         continue;
       }
       fields.back().instruction += text;

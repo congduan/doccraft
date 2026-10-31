@@ -266,3 +266,39 @@ TEST(M3Fields, FieldWithoutSeparatorStillCloses) {
   ASSERT_FALSE(runs.empty());
   EXPECT_EQ(runs.back(), "tail");
 }
+
+TEST(M3Fields, FieldCodeDelimiterIsDroppedWithoutWarning) {
+  // Word writes a 0x01 field-code delimiter between the last instruction
+  // token and the 0x14 separator. XML 1.0 cannot represent it, but the field
+  // is still complete, so the drop must not add a document warning.
+  auto doc =
+      Synthetic("\x13 HYPERLINK \"https://example.com\" \x01\x14site\x15");
+  ASSERT_TRUE(doc) << doc.error().message;
+  EXPECT_TRUE(doc->warnings.empty());
+  const std::string xml = Xml(*doc);
+  EXPECT_NE(xml.find("<w:hyperlink r:id="), std::string::npos);
+  EXPECT_EQ(xml.find("w:instrText"), std::string::npos);
+}
+
+TEST(M3Fields, FieldCodeDelimiterKeepsFollowingSwitches) {
+  // The delimiter may sit between switches: "REF _Ref1 \h \x01 \*
+  // MERGEFORMAT". Dropping it must not join tokens or truncate the switch.
+  auto doc = Synthetic("\x13 REF _Ref1 \\h \x01 \\* MERGEFORMAT \x14 1\x15");
+  ASSERT_TRUE(doc) << doc.error().message;
+  EXPECT_TRUE(doc->warnings.empty());
+  const std::string xml = Xml(*doc);
+  EXPECT_NE(xml.find("REF _Ref1 \\h  \\* MERGEFORMAT"), std::string::npos);
+}
+
+TEST(M3Fields, OtherControlInInstructionIsDroppedWithoutWarning) {
+  // A non-delimiter C0 control (0x1e in a corrupt mailto instruction) is
+  // equally unrepresentable in XML. The header story already drops these
+  // silently, so the main story follows suit instead of warning.
+  auto doc = Synthetic(
+      "\x13 REF a\x1e"
+      "b \\h \x14 x\x15");
+  ASSERT_TRUE(doc) << doc.error().message;
+  EXPECT_TRUE(doc->warnings.empty());
+  const std::string xml = Xml(*doc);
+  EXPECT_NE(xml.find("REF ab \\h"), std::string::npos);
+}
