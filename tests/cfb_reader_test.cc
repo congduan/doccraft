@@ -321,14 +321,17 @@ TEST(CfbReaderTest, RejectsInflatedAllFatStreamWithoutThrowing) {
   EXPECT_FALSE(threw);
 }
 
-// KNOWN-SIMPLIFICATIONS #2: header offset 40 directory sector count.
-// v3 must carry 0; a non-zero field is rejected.
-TEST(CfbReaderTest, RejectsV3HeaderWithDirectorySectorCount) {
+// Header offset 40 directory sector count: for v3 the field does not take
+// part in addressing, so a non-zero value is tolerated with a warning
+// (r41 leniency, see CfbLenientHeader.ToleratesV3DirectorySectorCount).
+TEST(CfbReaderTest, ToleratesV3HeaderWithDirectorySectorCount) {
   auto bytes = CfbBuilder().AddStream("s", MakePayload(100, 7)).Build();
-  Put32(bytes, 40, 3);  // v3 forbids a non-zero directory sector count
+  Put32(bytes, 40, 3);  // v3 normally forbids a non-zero count
   auto result = CfbReader::Open(bytes);
-  ASSERT_FALSE(result);
-  EXPECT_EQ(result.error().code, ErrorCode::kCorruptFat);
+  ASSERT_TRUE(result) << result.error().message;
+  auto stream = result->ReadStream("s");
+  ASSERT_TRUE(stream) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(100, 7));
 }
 
 // v4: the field must equal the actual directory chain length.

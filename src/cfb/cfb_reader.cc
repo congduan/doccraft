@@ -52,6 +52,11 @@ Error Fail(ErrorCode code, std::string message) {
   return {code, std::move(message)};
 }
 
+void Warn(std::vector<std::string>* warnings, std::string message) {
+  if (warnings != nullptr)
+    warnings->push_back(std::move(message));
+}
+
 // Parsed fields of the CFB header ([MS-CFB] §2.2).
 struct Header {
   uint16_t major_version = 3;
@@ -82,7 +87,8 @@ size_t UsableSize(size_t size, uint32_t sector_size) {
   return size / sector_size * sector_size;
 }
 
-std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes) {
+std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes,
+                                         std::vector<std::string>* warnings) {
   constexpr std::array<uint8_t, 8> signature{0xD0, 0xCF, 0x11, 0xE0,
                                              0xA1, 0xB1, 0x1A, 0xE1};
   if (bytes.size() < 8 ||
@@ -105,21 +111,30 @@ std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes) {
     return std::unexpected(
         Fail(ErrorCode::kUnsupportedSectorSize, "invalid sector shift"));
   }
-  if (U16(bytes, 28) != kLittleEndianMark ||
-      U32(bytes, 56) != kMiniStreamCutoff) {
-    return std::unexpected(
-        Fail(ErrorCode::kCorruptFat, "invalid byte order or mini cutoff"));
+  // [MS-CFB] §2.2: Byte Order (offset 28) and Mini Stream Cutoff Size
+  // (offset 56) are informational for this reader. Neither is used for
+  // addressing (streams below a fixed 4096-byte threshold are read from the
+  // mini stream), so tolerate the corrupt values seen in LibreOffice fuzz
+  // regressions instead of rejecting the whole document.
+  if (U16(bytes, 28) != kLittleEndianMark) {
+    Warn(warnings, "header byte order mark is not 0xFFFE; ignoring it");
+  }
+  if (U32(bytes, 56) != kMiniStreamCutoff) {
+    Warn(warnings,
+         "header mini stream cutoff is not 4096; treating it as 4096");
   }
   header.sector_size = 1u << shift;
   if (bytes.size() < header.sector_size) {
     return std::unexpected(Fail(ErrorCode::kTruncated, "partial sector"));
   }
   // [MS-CFB] §2.2: Number of Directory Sectors (offset 40). Must be 0 for
-  // v3; for v4 it holds the actual count of directory chain sectors.
+  // v3; for v4 it holds the actual count of directory chain sectors. The v3
+  // value is not used for addressing - the directory is reached through the
+  // first-dir-sector FAT chain - so a non-zero field is only a warning.
   header.num_dir_sectors = U32(bytes, 40);
   if (header.major_version == 3 && header.num_dir_sectors != 0) {
-    return std::unexpected(
-        Fail(ErrorCode::kCorruptFat, "v3 header with directory sectors"));
+    Warn(warnings,
+         "v3 header has non-zero directory sector count; ignoring it");
   }
   header.first_dir_sector = U32(bytes, 48);
   header.mini_fat_start = U32(bytes, 60);
@@ -272,11 +287,22 @@ std::expected<DirEntry, Error> ParseDirEntry(Bytes p, uint16_t version) {
 // Walks the FAT directory chain and decodes every entry.
 std::expected<std::vector<DirEntry>, Error> LoadDirectory(
     std::span<const uint8_t> bytes, const Header& header,
-    const std::vector<uint32_t>& fat) {
+    const std::vector<uint32_t>& fat, std::vector<std::string>* warnings) {
   std::vector<uint8_t> directory;
   std::vector<uint8_t> seen(header.total_sectors, 0);
   uint32_t at = header.first_dir_sector;
   while (at != kEnd) {
+    // Some LibreOffice fuzz regressions have a directory FAT chain that runs
+    // exactly one sector past the end of the file (the last link names the
+    // first sector that does not exist). The sectors before it are intact,
+    // so stop there instead of rejecting the container; deeper overruns
+    // still fail below.
+    if (at == header.total_sectors && directory.size() >= header.sector_size) {
+      Warn(warnings,
+           "directory chain ends one sector past end of file; "
+           "using the sectors read");
+      break;
+    }
     if (at >= header.total_sectors || at >= fat.size() || seen[at]) {
       return std::unexpected(
           Fail(ErrorCode::kCorruptDirectory, "invalid directory chain"));
@@ -391,7 +417,8 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
 
 std::expected<CfbReader, Error> CfbReader::Open(
     std::span<const uint8_t> bytes) {
-  auto header = ParseHeader(bytes);
+  std::vector<std::string> warnings;
+  auto header = ParseHeader(bytes, &warnings);
   if (!header) {
     return std::unexpected(header.error());
   }
@@ -403,11 +430,12 @@ std::expected<CfbReader, Error> CfbReader::Open(
   if (!tables) {
     return std::unexpected(tables.error());
   }
-  auto entries = LoadDirectory(bytes, *header, tables->fat);
+  auto entries = LoadDirectory(bytes, *header, tables->fat, &warnings);
   if (!entries) {
     return std::unexpected(entries.error());
   }
   CfbReader out;
+  out.warnings_ = std::move(warnings);
   out.major_version_ = header->major_version;
   out.sector_size_ = header->sector_size;
   out.data_ = bytes;

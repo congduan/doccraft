@@ -150,6 +150,8 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "inspect: %s\n", reader.error().message.c_str());
       return 1;
     }
+    for (const auto& warning : reader->warnings())
+      std::fprintf(stderr, "warning: %s\n", warning.c_str());
 
     std::printf("CFB version %u, sector size %u\n", reader->major_version(),
                 reader->sector_size());
@@ -218,6 +220,8 @@ int main(int argc, char** argv) {
       return 1;
     }
     std::optional<doccraft::cfb::CfbReader> cfb(std::move(*opened));
+    for (const auto& warning : cfb->warnings())
+      std::fprintf(stderr, "warning: %s\n", warning.c_str());
     auto word = cfb->ReadStream("WordDocument");
     if (!word) {
       std::fprintf(stderr, "convert: %s\n", word.error().message.c_str());

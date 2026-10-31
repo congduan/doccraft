@@ -92,6 +92,12 @@ class CfbReader {
     return major_version_;
   }
 
+  // Non-fatal header/chain inconsistencies that Open() tolerated. Callers
+  // such as the CLI surface these as "warning: ..." on stderr.
+  const std::vector<std::string>& warnings() const {
+    return warnings_;
+  }
+
  private:
   CfbReader() = default;
   // View of one sector; the span keeps the sector length so callers cannot
@@ -114,6 +120,7 @@ class CfbReader {
   std::vector<uint32_t> mini_fat_;
   std::vector<DirEntry> entries_;
   std::vector<uint8_t> mini_stream_;
+  std::vector<std::string> warnings_;
 };
 
 template <typename F>
