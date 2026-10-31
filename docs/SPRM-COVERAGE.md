@@ -20,6 +20,8 @@
 > M8 续批文本框域 golden 搜索：扫描本地 Apache POI 候选并用 LibreOffice DOCX 导出复核，尚无同时包含可见文本框与其中字段的真实样本；`M11TextboxFields.*` 合成断言仍有效，§6.1 域项维持 ◐。
 > M8 续批 Word 6/95 表格样式/边框/底纹：`ScanLegacySprms` 把 `0xC0`/`0xC1`/`0xC7`/`0xC8` 从「按宽度跳过」升级为翻译——`sprmTTlp` 四字节操作数与现代同布局直通；`sprmTSetBrc`/`sprmTSetBrc10` 由 itcFirst/itcLim/sides + BRC6/BRC10 重建现代 `sprmTSetBrc`(0xD62F) 的 12 字节操作数；`sprmTSetShd` 由 SHD16 重建 `sprmTSetShd`(0xD62D) 的 13 字节操作数。测试：`LegacyWord.LegacyScanMapsLegacyTtlp`、`LegacyWord.LegacyScanMapsLegacyTableSetBrc`、`LegacyWord.LegacyScanMapsLegacyTableSetBrc10`、`LegacyWord.LegacyScanMapsLegacyTableSetShd`、`LegacyWord.Word6TableCellBorderShadingReachDocx`、`LegacyWord.Word6TableCellBrc10ReachesDocx`、`LegacyWord.Word6TableCellBordersRejectInvalidSidesAndRanges`；真实样本 `Bug50955.doc` 的 `C0 0800B700` 现进入 IR 并输出 `<w:tblLook w:val="06A0"/>`（改前该表无 tblLook）。
 
+> r51 边界收紧：CFB 的「跳过扇区补回」只在原链恰好缺一扇区且该扇区不是其它流链首时生效（`CfbReaderTest.*SkippedSector*`）；行末 TAPX 改为先验证后应用，失败不保留部分属性（`M20Malformed.UnreadableHugePapxDoesNotKeepPartialTableProperties`、`InvalidTapxOperandOutranksUnreadableHugePapx`）；正文降级后无字符而 `ccpText > 0` 时警告 `no text extracted for a non-empty body`（`M20Malformed.ClxAllPiecesOutsideWordDocumentWarnsAboutEmptyText`、`edge_corpus`）。`sprmTCellWidth` 行据此补上越界警告。它们不是新 opcode，不改变本表计数。
+
 > 代码中的 opcode 不再是裸字面量：统一引用 `src/doc/format/sprm_codes.h` 的
 > `kSprm<Name>` 常量；新增 sprm 时先在本表登记，再在同一文件补常量。
 
@@ -258,7 +260,7 @@
 | ✅ | `0xD632` | sprmTCellPadding | A CSSAOperand value that specifies the cell margin for one or more cell sides. cssa.ftsWidth MUST be ftsNil (0x00) or ftsDxa (0x03). | 表格 TAP §2.6.3；`M3Batch3.TableCellPaddingIgnoresEmptyCellRange`；`M3Batch3.TableCellPaddingClampsRangeToRow`；`M3Batch3.TableCellPaddingStillRejectsMalformedOperands` |
 | ✅ | `0xD633` | sprmTCellSpacingDefault | A CSSAOperand that specifies the cell spacing for each cell in the entire row. cssa.itc.itcFirst MUST be 0, cssa.itc.itcLim MUST be 1, cssa.grfbrc MUST be fbrcSidesOnly (0x0F), cssa.ftsWidth… | 表格 TAP §2.6.3 |
 | ✅ | `0xD634` | sprmTCellPaddingDefault | A CSSAOperand that specifies the cell margin for one or more cell sides for each cell in the entire row. cssa.itc.itcFirst MUST be 0, cssa.itc.itcLim MUST be 1, cssa.ftsWidth MUST be ftsNil… | 表格 TAP §2.6.3 |
-| ✅ | `0xD635` | sprmTCellWidth | Preferred width of one or more table cells. | 表格 TAP §2.6.3；`M20Malformed.CellWidthRangeOutsideRowIsIgnored`（itc 越界时忽略操作数） |
+| ✅ | `0xD635` | sprmTCellWidth | Preferred width of one or more table cells. | 表格 TAP §2.6.3；`M20Malformed.CellWidthRangeOutsideRowIsIgnored`（itc 越界时忽略操作数并警告 `sprmTCellWidth ignored: cell range a..b outside the row's N cells`） |
 | ✅ | `0xF636` | sprmTFitText | A CellRangeFitText value that specifies a set of cells in a table row and whether their contents are to be stretched or compressed to exactly fill their widths. | 表格 TAP §2.6.3 |
 | ✅ | `0xD639` | sprmTFCellNoWrap | A CellRangeNoWrap value that specifies a set of cells in a table row and whether their contents wrap over multiple lines. | 表格 TAP §2.6.3 |
 | ✅ | `0x563A` | sprmTIstd | An unsigned integer value that specifies the istd value of a table style to apply. | 表格 TAP §2.6.3；w:tblStyle；M3Batch7.TableStyleAndFloatingPosition |
