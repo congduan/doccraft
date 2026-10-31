@@ -72,6 +72,28 @@ bool HasWarning(const CfbReader& reader, const std::string& needle) {
                      });
 }
 
+// Start sector of a named stream in a healthy builder-produced container.
+uint32_t StreamStart(const std::vector<uint8_t>& bytes, std::string_view name) {
+  auto reader = CfbReader::Open(bytes);
+  if (!reader)
+    return DirEntry::kNoFollow;
+  uint32_t start = DirEntry::kNoFollow;
+  auto visited =
+      reader->Visit([&](const DirEntry& entry, std::string_view, bool storage) {
+        if (!storage && entry.name == name) {
+          start = entry.start_sector;
+          return false;
+        }
+        return true;
+      });
+  return visited ? start : DirEntry::kNoFollow;
+}
+
+// First data sector index past the physical end of a v3 container.
+uint32_t PhysicalSectorEnd(const std::vector<uint8_t>& bytes) {
+  return static_cast<uint32_t>(bytes.size() / 512) - 1;
+}
+
 // A compact v4 container whose FAT table describes far more sectors than exist.
 std::vector<uint8_t> AllFatV4() {
   constexpr uint32_t kFatCount = 128;
@@ -249,7 +271,7 @@ TEST(CfbReaderTest, ReadsLibreOfficeFreeTerminatedDifat) {
   EXPECT_EQ(*stream, MakePayload(7 * 1024 * 1024, 0x37));
 }
 
-TEST(CfbReaderTest, RejectsCorruptLinksAndTruncation) {
+TEST(CfbReaderTest, RejectsCorruptLinksAndPartialSector) {
   CfbBuilder b;
   b.AddStream("Data", MakePayload(4096, 0x31));
   auto good = b.Build();
@@ -270,17 +292,28 @@ TEST(CfbReaderTest, RejectsCorruptLinksAndTruncation) {
   for (size_t i = 0; i < 4; ++i)
     bad_sector[76 + i] = 0x7F;
   EXPECT_FALSE(CfbReader::Open(bad_sector).has_value());
-  auto bad_chain = good;
-  // First stream FAT link is invalid.
-  const uint32_t fat_sector =
-      static_cast<uint32_t>(good[76]) | (static_cast<uint32_t>(good[77]) << 8);
-  const size_t fat_offset = (static_cast<size_t>(fat_sector) + 1) * 512;
-  // Directory is sector zero, stream starts at one.
-  for (size_t i = 0; i < 4; ++i)
-    bad_chain[fat_offset + 4 + i] = 0xFF;
-  auto opened = CfbReader::Open(bad_chain);
-  ASSERT_TRUE(opened.has_value());
-  EXPECT_FALSE(opened->ReadStream("Data").has_value());
+}
+
+// A chain that meets FREESECT before the declared size is the same truncation
+// as ENDOFCHAIN: the bytes before it are real, so they are kept with a
+// warning. (This shape used to be rejected; r48 moved it to the salvage path.)
+TEST(CfbReaderTest, SalvagesStreamChainEndingAtFreeSector) {
+  CfbBuilder builder;
+  builder.AddStream("Data", MakePayload(4096, 0x31));
+  auto bytes = builder.Build();
+  const uint32_t start = StreamStart(bytes, "Data");
+  ASSERT_NE(start, DirEntry::kNoFollow);
+  Put32(bytes, FatEntryOffset(bytes, start), 0xFFFFFFFFu);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  auto data = reader->ReadStream("Data");
+  ASSERT_TRUE(data) << data.error().message;
+  EXPECT_EQ(data->size(), 512u);
+  EXPECT_EQ(*data, MakePayload(512, 0x31));
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream Data"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "kept 512 of 4096 declared bytes"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
 }
 
 TEST(CfbReaderTest, RejectsRootSiblingWithoutThrowing) {
@@ -806,6 +839,177 @@ TEST(CfbReaderTest, MixedDanglingLinksKeepSummaryNeutral) {
     ASSERT_TRUE(stream) << name << ": " << stream.error().message;
     EXPECT_EQ(*stream, MakePayload(16, static_cast<uint8_t>(fill))) << name;
   }
+}
+
+// The root entry is a regular chain, so a root whose start lies past the
+// physical end cannot build any mini stream. Its readable prefix (here none)
+// still opens the container: the business streams live in the regular FAT and
+// stay intact, which is the shape of the LibreOffice sw/qa truncation samples
+// (ofz18414-1, ofz18534-1, ofz19065, ofz34749-1, ofz38011-1).
+TEST(CfbReaderTest, SalvagesRootChainThatLeavesTheFile) {
+  CfbBuilder builder;
+  builder.AddStream("Big", MakePayload(8192, 0x44));
+  builder.AddStream("Small", MakePayload(100, 0x55));
+  auto bytes = builder.Build();
+  // Root data holds the 100-byte mini stream rounded to two 64-byte units.
+  Put32(bytes, DirSlotOffset(bytes, 0) + 116, PhysicalSectorEnd(bytes) + 5);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream Root Entry"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "kept 0 of 128 declared bytes"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto big = reader->ReadStream("Big");
+  ASSERT_TRUE(big) << big.error().message;
+  EXPECT_EQ(*big, MakePayload(8192, 0x44));
+  // The mini stream has no backing bytes, so a dependent read degrades to an
+  // empty prefix instead of rejecting the container.
+  auto small = reader->ReadStream("Small");
+  ASSERT_TRUE(small) << small.error().message;
+  EXPECT_TRUE(small->empty());
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream Small"))
+      << (reader->warnings().empty() ? "" : reader->warnings().back());
+}
+
+// A root chain that leaves the file after its first sector keeps that sector:
+// mini streams inside the readable prefix stay complete and a stream that
+// crosses the cut returns its prefix.
+TEST(CfbReaderTest, SalvagesReadableRootPrefixForMiniStreams) {
+  CfbBuilder builder;
+  builder.AddStream("Mini0", MakePayload(300, 0x11));
+  builder.AddStream("Mini1", MakePayload(300, 0x22));
+  auto bytes = builder.Build();
+  auto healthy = CfbReader::Open(bytes);
+  ASSERT_TRUE(healthy) << healthy.error().message;
+  uint32_t root_start = DirEntry::kNoFollow;
+  ASSERT_TRUE(
+      healthy->Visit([&](const DirEntry& entry, std::string_view, bool) {
+        if (entry.type == EntryType::kRoot) {
+          root_start = entry.start_sector;
+          return false;
+        }
+        return true;
+      }));
+  // 640 bytes of root data occupy two sectors; cut the second one off.
+  Put32(bytes, FatEntryOffset(bytes, root_start), PhysicalSectorEnd(bytes) + 5);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream Root Entry"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "kept 512 of 640 declared bytes"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto first = reader->ReadStream("Mini0");
+  ASSERT_TRUE(first) << first.error().message;
+  EXPECT_EQ(*first, MakePayload(300, 0x11));
+  // Mini1 starts at mini offset 320 and needs five 64-byte units; three fit.
+  auto second = reader->ReadStream("Mini1");
+  ASSERT_TRUE(second) << second.error().message;
+  EXPECT_EQ(second->size(), 192u);
+  EXPECT_EQ(*second, MakePayload(192, 0x22));
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream Mini1"))
+      << (reader->warnings().empty() ? "" : reader->warnings().back());
+  EXPECT_TRUE(HasWarning(*reader, "kept 192 of 300 declared bytes"))
+      << (reader->warnings().empty() ? "" : reader->warnings().back());
+}
+
+// A chain shorter than the declared size keeps the bytes it did read. This is
+// the ordinary truncation shape: the FAT terminates before the stream ends.
+TEST(CfbReaderTest, SalvagesStreamChainThatEndsEarly) {
+  CfbBuilder builder;
+  builder.AddStream("Big", MakePayload(8192, 0x66));
+  auto bytes = builder.Build();
+  const uint32_t start = StreamStart(bytes, "Big");
+  ASSERT_NE(start, DirEntry::kNoFollow);
+  // Builder chains are contiguous; end the chain after four of 16 sectors.
+  Put32(bytes, FatEntryOffset(bytes, start + 3), 0xFFFFFFFEu);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  auto big = reader->ReadStream("Big");
+  ASSERT_TRUE(big) << big.error().message;
+  EXPECT_EQ(big->size(), 2048u);
+  EXPECT_EQ(*big, MakePayload(2048, 0x66));
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream Big"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "kept 2048 of 8192 declared bytes"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+}
+
+// The mini FAT is read through the regular chain path; an out-of-file start
+// leaves it empty, and a stream that depends on it reports the missing table
+// rather than returning fabricated bytes.
+TEST(CfbReaderTest, SalvagesTruncatedMiniFatChain) {
+  CfbBuilder builder;
+  builder.AddStream("Small", MakePayload(100, 0x33));
+  auto bytes = builder.Build();
+  Put32(bytes, 60, PhysicalSectorEnd(bytes) + 5);  // header mini FAT start
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "truncated stream mini FAT"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "kept 0 of 512 declared bytes"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto small = reader->ReadStream("Small");
+  ASSERT_FALSE(small);
+  EXPECT_EQ(small.error().code, ErrorCode::kCorruptFat);
+  EXPECT_NE(small.error().message.find("chain exceeds allocation table"),
+            std::string::npos)
+      << small.error().message;
+}
+
+// Salvage must not weaken the cycle guard: a link that revisits a sector is
+// still fatal, even though the prefix before it is readable.
+TEST(CfbReaderTest, RejectsCyclicStreamChainAfterSalvageWork) {
+  CfbBuilder builder;
+  builder.AddStream("Big", MakePayload(8192, 0x77));
+  auto bytes = builder.Build();
+  const uint32_t start = StreamStart(bytes, "Big");
+  ASSERT_NE(start, DirEntry::kNoFollow);
+  Put32(bytes, FatEntryOffset(bytes, start + 1), start);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  auto big = reader->ReadStream("Big");
+  ASSERT_FALSE(big);
+  EXPECT_EQ(big.error().code, ErrorCode::kCorruptFat);
+  EXPECT_NE(big.error().message.find("cyclic"), std::string::npos)
+      << big.error().message;
+}
+
+// A link past the allocation table cannot be followed at all; the salvage
+// deliberately does not guess where the chain would have gone.
+TEST(CfbReaderTest, RejectsStreamChainIndexPastAllocationTable) {
+  CfbBuilder builder;
+  builder.AddStream("Big", MakePayload(8192, 0x88));
+  auto bytes = builder.Build();
+  const uint32_t start = StreamStart(bytes, "Big");
+  ASSERT_NE(start, DirEntry::kNoFollow);
+  Put32(bytes, FatEntryOffset(bytes, start), 0x1000);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  auto big = reader->ReadStream("Big");
+  ASSERT_FALSE(big);
+  EXPECT_EQ(big.error().code, ErrorCode::kCorruptFat);
+  EXPECT_NE(big.error().message.find("invalid or cyclic FAT chain"),
+            std::string::npos)
+      << big.error().message;
+}
+
+// Regression guard: a healthy container that mixes regular and mini streams
+// reads everything back and stays warning-free.
+TEST(CfbReaderTest, HealthyContainerEmitsNoTruncationWarning) {
+  CfbBuilder builder;
+  builder.AddStream("Big", MakePayload(8192, 0x99));
+  builder.AddStream("Small", MakePayload(100, 0xAA));
+  auto bytes = builder.Build();
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(reader->warnings().empty());
+  auto big = reader->ReadStream("Big");
+  ASSERT_TRUE(big) << big.error().message;
+  EXPECT_EQ(*big, MakePayload(8192, 0x99));
+  auto small = reader->ReadStream("Small");
+  ASSERT_TRUE(small) << small.error().message;
+  EXPECT_EQ(*small, MakePayload(100, 0xAA));
+  EXPECT_TRUE(reader->warnings().empty());
 }
 
 // The root entry carries no stream identity; a missing NUL terminator inside
