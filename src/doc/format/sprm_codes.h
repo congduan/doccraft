@@ -114,7 +114,8 @@ inline constexpr uint8_t kLegacySprmTDefTableShd = 0xBF;
 // (itcFirst/ctc/dxaCol, 4 bytes), ItcFirstLim (2), TDxaColOperand
 // (itcFirst/itcLim/dxaCol, 4), ItcFirstLim (2), ItcFirstLim (2).
 // LibreOffice ww8scan.cxx GetWW6SprmSearcher lists the same 4/2/4/2/2 widths,
-// so ScanLegacySprms forwards the operands unchanged.
+// so ScanLegacySprms forwards the operands unchanged. Its v6 table switch maps
+// only 0xC2..0xC4; 0xC5/0xC6 follow wvWare's ItcFirstLim reading.
 inline constexpr uint8_t kLegacySprmTInsert = 0xC2;
 inline constexpr uint8_t kLegacySprmTDelete = 0xC3;
 inline constexpr uint8_t kLegacySprmTDxaCol = 0xC4;

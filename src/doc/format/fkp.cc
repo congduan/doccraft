@@ -565,7 +565,9 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
       // TSplit are ItcFirstLim (2). wvWare sprm.c rgsprmWord6 maps these
       // opcodes onto the modern ids and wvApplysprmTInsert/TDelete/TDxaCol/
       // TMerge/TSplit read exactly those fields ([MS-DOC] 2.6.3); LibreOffice
-      // GetWW6SprmSearcher lists the same 4/2/4/2/2 widths.
+      // GetWW6SprmSearcher lists the same 4/2/4/2/2 widths. Its v6 table
+      // switch maps only 0xC2..0xC4; the 0xC5/0xC6 range reading comes from
+      // wvWare, whose apply functions use ItcFirstLim for both.
       case kLegacySprmTInsert:
         modern = kSprmTInsert;
         size = kTableInsertSize;
