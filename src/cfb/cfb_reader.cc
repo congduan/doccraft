@@ -43,6 +43,10 @@ constexpr uint32_t kDifat = 0xFFFFFFFC;
 // [MS-CFB] §2.2 fixed structural sizes.
 constexpr size_t kHeaderSize = 512;
 constexpr size_t kDirEntrySize = 128;
+// [MS-CFB] §2.2: the header stores up to 109 FAT sector numbers at offset 76,
+// before the first DIFAT chain sector is consulted.
+constexpr size_t kHeaderDifatOffset = 76;
+constexpr size_t kHeaderDifatSlots = 109;
 constexpr uint32_t kMiniStreamCutoff = 4096;
 constexpr uint16_t kLittleEndianMark = 0xFFFE;
 constexpr uint16_t kSectorShiftV3 = 9;   // 2^9  = 512-byte sectors
@@ -69,6 +73,10 @@ struct Header {
   uint32_t num_mini_fat = 0;
   uint32_t difat_start = 0;
   uint32_t num_dir_sectors = 0;
+  // Set when the allocation counts were untrustworthy and the FAT sector
+  // numbers were re-derived from the header DIFAT array (r49).
+  bool fat_from_header_array = false;
+  std::vector<uint32_t> derived_fat;
 };
 
 std::span<const uint8_t> SectorView(std::span<const uint8_t> bytes,
@@ -86,6 +94,25 @@ std::span<const uint8_t> SectorView(std::span<const uint8_t> bytes,
 // contributes no data.
 size_t UsableSize(size_t size, uint32_t sector_size) {
   return size / sector_size * sector_size;
+}
+
+// [MS-CFB] §2.2: the 109 header slots hold FAT sector numbers until the first
+// DIFAT chain sector is needed. When the allocation counts are corrupt, the
+// array is the only trustworthy source: collect every in-range entry, skip
+// out-of-range junk instead of aborting the scan, and stop at the FREESECT or
+// ENDOFCHAIN terminator. An empty result means the array names no allocatable
+// FAT sector at all, which stays a hard failure.
+std::vector<uint32_t> DeriveFatSectorsFromHeaderDifat(
+    std::span<const uint8_t> bytes, uint32_t total_sectors) {
+  std::vector<uint32_t> sectors;
+  for (size_t i = 0; i < kHeaderDifatSlots; ++i) {
+    const uint32_t id = U32(bytes, kHeaderDifatOffset + i * 4);
+    if (id == kFree || id == kEnd)
+      break;
+    if (id < total_sectors)
+      sectors.push_back(id);
+  }
+  return sectors;
 }
 
 std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes,
@@ -145,11 +172,54 @@ std::expected<Header, Error> ParseHeader(std::span<const uint8_t> bytes,
   header.fat_count = U32(bytes, 44);
   header.difat_count = U32(bytes, 72);
   header.difat_start = U32(bytes, 68);
-  if (header.fat_count == 0 || header.fat_count > header.total_sectors ||
+  // Real LibreOffice fuzz regressions overwrite the allocation metadata at
+  // offsets 44..75 with spaces or fuzz words while leaving the header DIFAT
+  // array intact. A field that cannot describe this file no longer rejects the
+  // container: the FAT sector numbers are re-derived from the header array and
+  // an impossible mini FAT is disabled. Every untrusted field yields exactly
+  // one warning; a self-consistent header keeps the original path and its
+  // behavior byte for byte.
+  const bool fat_count_untrusted =
+      header.fat_count == 0 || header.fat_count > header.total_sectors;
+  const bool difat_untrusted =
       header.difat_count > header.total_sectors ||
-      header.num_mini_fat > header.total_sectors) {
-    return std::unexpected(
-        Fail(ErrorCode::kCorruptFat, "impossible sector count"));
+      (header.difat_count > 0 && header.difat_start >= header.total_sectors);
+  if (fat_count_untrusted) {
+    Warn(warnings,
+         "header FAT sector count is impossible; deriving FAT sectors from "
+         "the header DIFAT array");
+  }
+  if (difat_untrusted) {
+    Warn(warnings,
+         "header DIFAT sector count is impossible; deriving FAT sectors from "
+         "the header DIFAT array");
+  }
+  if (fat_count_untrusted || difat_untrusted) {
+    // The DIFAT chain cannot be trusted either, so the header array alone
+    // supplies the FAT sectors. The count it yields replaces the corrupt one;
+    // LoadFatTables still validates every sector's FAT marker.
+    header.derived_fat =
+        DeriveFatSectorsFromHeaderDifat(bytes, header.total_sectors);
+    if (header.derived_fat.empty()) {
+      return std::unexpected(
+          Fail(ErrorCode::kCorruptFat, "impossible sector count"));
+    }
+    header.fat_count = static_cast<uint32_t>(header.derived_fat.size());
+    header.fat_from_header_array = true;
+    header.difat_count = 0;
+  }
+  const bool mini_fat_count_untrusted =
+      header.num_mini_fat > header.total_sectors;
+  const bool mini_fat_start_untrusted =
+      header.num_mini_fat > 0 && header.mini_fat_start >= header.total_sectors;
+  if (mini_fat_count_untrusted || mini_fat_start_untrusted) {
+    Warn(warnings,
+         mini_fat_count_untrusted
+             ? "header mini FAT sector count is impossible; ignoring the mini "
+               "FAT"
+             : "header mini FAT start sector is impossible; ignoring the mini "
+               "FAT");
+    header.num_mini_fat = 0;
   }
   return header;
 }
@@ -164,8 +234,16 @@ struct Difat {
 std::expected<Difat, Error> ParseDifat(std::span<const uint8_t> bytes,
                                        const Header& header) {
   Difat difat;
-  for (size_t i = 0; i < 109 && difat.entries.size() < header.fat_count; ++i) {
-    uint32_t id = U32(bytes, 76 + i * 4);
+  if (header.fat_from_header_array) {
+    // The allocation counts were corrupt; the re-derived list is the whole
+    // allocation map and no DIFAT chain is followed.
+    difat.entries = header.derived_fat;
+    difat.seen.assign(header.total_sectors, 0);
+    return difat;
+  }
+  for (size_t i = 0;
+       i < kHeaderDifatSlots && difat.entries.size() < header.fat_count; ++i) {
+    uint32_t id = U32(bytes, kHeaderDifatOffset + i * 4);
     if (id != kFree) {
       difat.entries.push_back(id);
     }
