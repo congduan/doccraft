@@ -285,6 +285,16 @@ add_test(NAME m21_missing_pool_cli COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:doccraft> missing-pool
   ${CMAKE_SOURCE_DIR}/tests/fixtures/ole-embedded.doc)
 
+# A salvaged (truncated) ObjectPool stream is a successful read, so only the
+# CLI's post-RepackageStorage warning flush can surface it.
+add_executable(m4_ole_truncated_fixture m4_ole_truncated_fixture.cc
+  cfb_test_util.cc)
+target_link_libraries(m4_ole_truncated_fixture PRIVATE doccraft_cfb)
+add_test(NAME m4_ole_truncated_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_SOURCE_DIR}/tests/m4_ole_truncated_cli.py
+  $<TARGET_FILE:m4_ole_truncated_fixture> $<TARGET_FILE:doccraft>
+  ${CMAKE_SOURCE_DIR}/tests/fixtures/ole-embedded.doc)
+
 # The embedding API used by WebAssembly, Android and iOS builds.
 add_executable(api_test api_test.cc)
 target_link_libraries(api_test PRIVATE doccraft_api gtest_main)

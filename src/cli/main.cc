@@ -361,6 +361,10 @@ int main(int argc, char** argv) {
       }
       auto packaged = doccraft::cfb::RepackageStorage(
           *cfb, "Root Entry/ObjectPool/_" + std::to_string(object.storage_id));
+      // Repackaging reads the object's streams, so a salvaged truncation is
+      // recorded here rather than at Open(); surface it before the byte
+      // check so a later failure cannot hide it either.
+      flush_warnings();
       if (!packaged) {
         if (packaged.error().code ==
             doccraft::cfb::ErrorCode::kStreamNotFound) {
@@ -376,6 +380,7 @@ int main(int argc, char** argv) {
             "Root Entry/ObjectPool/_" + std::to_string(object.storage_id) + "/";
         for (const char prefix : {'\x01', '\x02'}) {
           auto stream = cfb->ReadStream(path + prefix + "OlePres000");
+          flush_warnings();
           if (!stream && stream.error().code !=
                              doccraft::cfb::ErrorCode::kStreamNotFound) {
             std::fprintf(stderr, "convert: OLE %d: %s\n", object.storage_id,
