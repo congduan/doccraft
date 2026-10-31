@@ -57,6 +57,14 @@ size_t DirSlotOffset(const std::vector<uint8_t>& bytes, size_t slot) {
   return (static_cast<size_t>(dir_start) + 1) * sector_size + slot * 128;
 }
 
+// Byte offset of the FAT entry describing `sector` when the whole FAT lives in
+// the header DIFAT array (the shape CfbBuilder emits).
+size_t FatEntryOffset(const std::vector<uint8_t>& bytes, uint32_t sector) {
+  const uint32_t sector_size = 1u << (bytes[30] | (bytes[31] << 8));
+  const uint32_t fat_sector = Get32(bytes, 76);
+  return (static_cast<size_t>(fat_sector) + 1) * sector_size + sector * 4;
+}
+
 bool HasWarning(const CfbReader& reader, const std::string& needle) {
   return std::any_of(reader.warnings().begin(), reader.warnings().end(),
                      [&](const std::string& warning) {
@@ -443,6 +451,44 @@ TEST(CfbReaderTest, ToleratesTrailingPartialSector) {
   }
 }
 
+// A directory FAT chain may name the trailing partial sector. The complete
+// 128-byte records physically present there are real directory entries: the
+// LibreOffice sw/qa samples ofz18414-1 and ofz57592-1 keep their last streams
+// (and MsoDataStore children) only in that fragment. Dropping the fragment
+// leaves the tree links pointing at entry slots that no longer exist, which
+// used to reject the whole container.
+TEST(CfbReaderTest, ReadsDirectoryEntriesFromTrailingPartialSector) {
+  constexpr uint32_t kSectorSize = 512;
+  CfbBuilder builder;
+  for (const char* name : {"Alpha", "Beta", "Gamma", "Delta", "Epsilon"})
+    builder.AddStream(name, MakePayload(1, static_cast<uint8_t>(name[0])));
+  auto bytes = builder.Build();
+  const uint32_t dir_start = Get32(bytes, 48);
+  ASSERT_EQ(Get32(bytes, FatEntryOffset(bytes, dir_start)), dir_start + 1)
+      << "expected a two-sector directory chain";
+
+  // Move the second directory sector (slots 4..7) into a trailing fragment:
+  // keep its first three records and end the file right after them.
+  const size_t second = (static_cast<size_t>(dir_start) + 2) * kSectorSize;
+  const std::vector<uint8_t> fragment(bytes.begin() + second,
+                                      bytes.begin() + second + 3 * 128);
+  const uint32_t old_total =
+      static_cast<uint32_t>(bytes.size() / kSectorSize) - 1;
+  bytes.insert(bytes.end(), fragment.begin(), fragment.end());
+  // The chain now ends in the fragment, whose sector index is `total_sectors`.
+  Put32(bytes, FatEntryOffset(bytes, dir_start), old_total);
+
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "trailing partial sector"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  for (const char* name : {"Alpha", "Beta", "Gamma", "Delta", "Epsilon"}) {
+    auto stream = reader->ReadStream(name);
+    ASSERT_TRUE(stream) << name << ": " << stream.error().message;
+    EXPECT_EQ(stream->size(), 1u) << name;
+  }
+}
+
 // A container with less than one complete sector cannot hold a directory,
 // so it stays rejected even after trailing fragments are tolerated.
 TEST(CfbReaderTest, RejectsFileShorterThanOneSector) {
@@ -571,6 +617,75 @@ TEST(CfbReaderTest, SkipsStreamWithInvalidName) {
   auto beta = reader->ReadStream("Beta");
   ASSERT_FALSE(beta);
   EXPECT_EQ(beta.error().code, ErrorCode::kStreamNotFound);
+}
+
+// A sibling link that names an entry slot past the table is a dangling link:
+// no entry can be reached through it, so it is equivalent to ENDOFCHAIN.
+// LibreOffice sw/qa fuzz regressions (ofz19065, ofz38011-1) and POI
+// clusterfuzz samples carry such links after their directory chain is cut
+// short. Rejecting the whole container is too strict; the link is dropped and
+// reported, and the other entries stay reachable.
+TEST(CfbReaderTest, IgnoresDirectoryLinkPastEntryTable) {
+  auto bytes = CfbBuilder()
+                   .AddStream("Alpha", MakePayload(16, 0x21))
+                   .AddStream("Beta", MakePayload(16, 0x22))
+                   .Build();
+  // One directory sector holds four slots (root, two streams, one empty).
+  const uint32_t entry_count = 4;
+  // Slot 1 (Alpha) keeps its siblings; point its right link past the table.
+  Put32(bytes, DirSlotOffset(bytes, 1) + 72, entry_count);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "points past the entry table"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto alpha = reader->ReadStream("Alpha");
+  ASSERT_TRUE(alpha) << alpha.error().message;
+  EXPECT_EQ(*alpha, MakePayload(16, 0x21));
+  auto beta = reader->ReadStream("Beta");
+  ASSERT_TRUE(beta) << beta.error().message;
+  EXPECT_EQ(*beta, MakePayload(16, 0x22));
+}
+
+// When a dangling link is the only route to a sibling, that sibling becomes
+// unreachable through the tree even though its directory record is intact
+// (LibreOffice sw/qa ofz18534-1, ofz34749-1 and ofz515655013 keep
+// WordDocument/1Table/Data that way). The tree walk cannot prove the stream is
+// absent, so a name lookup falls back to a linear scan of the records and the
+// salvage is reported once at Open time.
+TEST(CfbReaderTest, SalvagesOrphanedEntryByName) {
+  auto bytes = CfbBuilder()
+                   .AddStream("Alpha", MakePayload(16, 0x31))
+                   .AddStream("Beta", MakePayload(16, 0x32))
+                   .Build();
+  const uint32_t entry_count = 4;  // one past the single directory sector
+  // Slot 2 (Beta) is the root child; its left link used to reach Alpha.
+  Put32(bytes, DirSlotOffset(bytes, 2) + 68, entry_count);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "matched by name only"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto alpha = reader->ReadStream("Alpha");
+  ASSERT_TRUE(alpha) << alpha.error().message;
+  EXPECT_EQ(*alpha, MakePayload(16, 0x31));
+  auto beta = reader->ReadStream("Beta");
+  ASSERT_TRUE(beta) << beta.error().message;
+  EXPECT_EQ(*beta, MakePayload(16, 0x32));
+  // Case folding still applies to the salvage path.
+  auto folded = reader->ReadStream("ALPHA");
+  ASSERT_TRUE(folded) << folded.error().message;
+  EXPECT_EQ(*folded, MakePayload(16, 0x31));
+}
+
+// Orphan salvage is gated on a proven-dangling link: a healthy container that
+// simply lacks the name still reports "stream not found".
+TEST(CfbReaderTest, MissingStreamWithoutDanglingLinkStaysNotFound) {
+  auto bytes = CfbBuilder().AddStream("Alpha", MakePayload(16, 0x41)).Build();
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(reader->warnings().empty());
+  auto missing = reader->ReadStream("Gamma");
+  ASSERT_FALSE(missing);
+  EXPECT_EQ(missing.error().code, ErrorCode::kStreamNotFound);
 }
 
 // The root entry carries no stream identity; a missing NUL terminator inside
