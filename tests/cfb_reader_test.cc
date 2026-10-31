@@ -620,7 +620,7 @@ TEST(CfbReaderTest, SkipsStreamWithInvalidName) {
 }
 
 // A sibling link that names an entry slot past the table is a dangling link:
-// no entry can be reached through it, so it is equivalent to ENDOFCHAIN.
+// no entry can be reached through it, so the walk ends there like NOSTREAM.
 // LibreOffice sw/qa fuzz regressions (ofz19065, ofz38011-1) and POI
 // clusterfuzz samples carry such links after their directory chain is cut
 // short. Rejecting the whole container is too strict; the link is dropped and
@@ -686,6 +686,80 @@ TEST(CfbReaderTest, MissingStreamWithoutDanglingLinkStaysNotFound) {
   auto missing = reader->ReadStream("Gamma");
   ASSERT_FALSE(missing);
   EXPECT_EQ(missing.error().code, ErrorCode::kStreamNotFound);
+}
+
+// An entry the tree never reaches is not evidence that the tree was cut: the
+// reachable tree here is complete and Gamma is a detached record. Its bad
+// links must not open the name-only salvage, or a complete tree could hand out
+// streams it excludes; the damage is still reported once as a summary.
+TEST(CfbReaderTest, UnreachableDanglingLinkDoesNotEnableSalvage) {
+  auto bytes = CfbBuilder()
+                   .AddStream("Alpha", MakePayload(16, 0x51))
+                   .AddStream("Beta", MakePayload(16, 0x52))
+                   .AddStream("Gamma", MakePayload(16, 0x53))
+                   .Build();
+  const uint32_t entry_count = 4;  // one past the single directory sector
+  // Builder tree: root -> Beta, Beta.left -> Alpha, Beta.right -> Gamma.
+  // Cut Beta's right link: the reachable tree (root, Beta, Alpha) stays
+  // complete while Gamma becomes an orphan record.
+  Put32(bytes, DirSlotOffset(bytes, 2) + 72, DirEntry::kNoFollow);
+  // Give that unreachable record a link past the entry table.
+  Put32(bytes, DirSlotOffset(bytes, 3) + 68, entry_count);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_FALSE(HasWarning(*reader, "matched by name only"));
+  auto gamma = reader->ReadStream("Gamma");
+  ASSERT_FALSE(gamma);
+  EXPECT_EQ(gamma.error().code, ErrorCode::kStreamNotFound);
+  auto missing = reader->ReadStream("Delta");
+  ASSERT_FALSE(missing);
+  EXPECT_EQ(missing.error().code, ErrorCode::kStreamNotFound);
+  // The unreachable damage is still reported, aggregated into one line.
+  EXPECT_TRUE(HasWarning(*reader, "unreachable directory record"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  // The reachable half is unaffected.
+  auto beta = reader->ReadStream("Beta");
+  ASSERT_TRUE(beta) << beta.error().message;
+  EXPECT_EQ(*beta, MakePayload(16, 0x52));
+}
+
+// Warning granularity: every damaged entry the walk reaches gets one line
+// naming its slot and entry; several bad links from the same entry collapse
+// into that single line. One summary line states the salvage.
+TEST(CfbReaderTest, WarnsOncePerDanglingEntry) {
+  auto bytes = CfbBuilder()
+                   .AddStream("Alpha", MakePayload(16, 0x61))
+                   .AddStream("Beta", MakePayload(16, 0x62))
+                   .AddStream("Gamma", MakePayload(16, 0x63))
+                   .AddStream("Delta", MakePayload(16, 0x64))
+                   .Build();
+  const uint32_t entry_count = 8;  // two directory sectors
+  // Builder tree: root -> Delta, Delta.left -> Beta, Beta.left -> Alpha,
+  // Delta.right -> Gamma; slot 1 is Alpha, slot 3 is Gamma. Alpha carries two
+  // dangling links, Gamma one.
+  Put32(bytes, DirSlotOffset(bytes, 1) + 68, entry_count);
+  Put32(bytes, DirSlotOffset(bytes, 1) + 72, entry_count + 1);
+  Put32(bytes, DirSlotOffset(bytes, 3) + 68, entry_count + 2);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 3u);
+  EXPECT_NE(reader->warnings()[0].find("slot 1 ('Alpha')"), std::string::npos)
+      << reader->warnings()[0];
+  EXPECT_NE(reader->warnings()[0].find("8, 9"), std::string::npos)
+      << reader->warnings()[0];
+  EXPECT_NE(reader->warnings()[1].find("slot 3 ('Gamma')"), std::string::npos)
+      << reader->warnings()[1];
+  EXPECT_NE(reader->warnings()[1].find("slot 10"), std::string::npos)
+      << reader->warnings()[1];
+  EXPECT_TRUE(HasWarning(*reader, "matched by name only"));
+  // Each damaged entry is still readable through the tree.
+  for (const auto& [name, fill] :
+       {std::pair{"Alpha", 0x61}, std::pair{"Gamma", 0x63}}) {
+    auto stream = reader->ReadStream(name);
+    ASSERT_TRUE(stream) << name << ": " << stream.error().message;
+    EXPECT_EQ(*stream, MakePayload(16, static_cast<uint8_t>(fill))) << name;
+  }
 }
 
 // The root entry carries no stream identity; a missing NUL terminator inside
