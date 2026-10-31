@@ -762,6 +762,52 @@ TEST(CfbReaderTest, WarnsOncePerDanglingEntry) {
   }
 }
 
+// Mixed damage: the walk lands on a dangling link while another dangling link
+// sits on a record the walk never reaches. The reachable damage opens the
+// salvage, so the summary line must not claim the tree is complete regardless;
+// it only reports the unreachable links and says they do not gate the salvage.
+TEST(CfbReaderTest, MixedDanglingLinksKeepSummaryNeutral) {
+  auto bytes = CfbBuilder()
+                   .AddStream("Alpha", MakePayload(16, 0x71))
+                   .AddStream("Beta", MakePayload(16, 0x72))
+                   .AddStream("Gamma", MakePayload(16, 0x73))
+                   .AddStream("Delta", MakePayload(16, 0x74))
+                   .Build();
+  const uint32_t entry_count = 8;  // two directory sectors
+  // Builder tree: root -> Delta, Delta.left -> Beta, Beta.left -> Alpha,
+  // Delta.right -> Gamma. Cutting Delta's right link orphans Gamma; Alpha
+  // (reachable) and Gamma (unreachable) each carry a link past the table.
+  Put32(bytes, DirSlotOffset(bytes, 4) + 72, DirEntry::kNoFollow);
+  Put32(bytes, DirSlotOffset(bytes, 1) + 68, entry_count);
+  Put32(bytes, DirSlotOffset(bytes, 3) + 68, entry_count + 1);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  // Reachable damage: one line naming the entry, then the salvage line.
+  EXPECT_TRUE(HasWarning(*reader, "slot 1 ('Alpha')"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "matched by name only"));
+  // Unreachable damage still gets its own summary.
+  EXPECT_TRUE(HasWarning(*reader, "unreachable directory record"));
+  ASSERT_EQ(reader->warnings().size(), 3u);
+  // The summary must hold whether or not the reachable tree is complete.
+  for (const std::string& warning : reader->warnings()) {
+    EXPECT_EQ(warning.find("the tree is complete"), std::string::npos)
+        << warning;
+  }
+  // The salvage reaches the orphan record by entry name.
+  auto gamma = reader->ReadStream("Gamma");
+  ASSERT_TRUE(gamma) << gamma.error().message;
+  EXPECT_EQ(*gamma, MakePayload(16, 0x73));
+  // The reachable half still reads through the tree.
+  for (const auto& [name, fill] :
+       {std::pair{"Alpha", 0x71}, std::pair{"Beta", 0x72},
+        std::pair{"Delta", 0x74}}) {
+    auto stream = reader->ReadStream(name);
+    ASSERT_TRUE(stream) << name << ": " << stream.error().message;
+    EXPECT_EQ(*stream, MakePayload(16, static_cast<uint8_t>(fill))) << name;
+  }
+}
+
 // The root entry carries no stream identity; a missing NUL terminator inside
 // its declared length is tolerated silently (POI test-fields.doc stores
 // "Y:\Desktop\~WRD0000.tmp" with len=22, no terminator). The declared bytes

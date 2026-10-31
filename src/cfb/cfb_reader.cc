@@ -583,8 +583,10 @@ std::expected<CfbReader, Error> CfbReader::Open(
          "name only");
   }
   // The same damage on records the tree never reaches does not prove the tree
-  // is truncated: a complete tree stays authoritative and the salvage stays
-  // closed. One line keeps a corrupt table from flooding the log.
+  // is truncated, so it neither sets the flag nor opens the salvage by itself;
+  // a complete tree stays authoritative. The summary therefore must not claim
+  // the tree is complete: the reachable half may carry its own damage. One line
+  // keeps a corrupt table from flooding the log.
   size_t stranded = 0;
   for (size_t slot = 0; slot < out.entries_.size(); ++slot) {
     const DirEntry& entry = out.entries_[slot];
@@ -602,7 +604,8 @@ std::expected<CfbReader, Error> CfbReader::Open(
          std::to_string(stranded) +
              (stranded == 1 ? " unreachable directory record has a link"
                             : " unreachable directory records have links") +
-             " past the entry table; ignored, the tree is complete");
+             " past the entry table; ignored, does not enable the name "
+             "fallback by itself");
   }
   if (out.num_mini_fat_) {
     auto raw = out.ReadChain(

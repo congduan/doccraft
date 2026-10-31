@@ -105,7 +105,7 @@ class CfbReader {
 
   // Outcome of one tree walk. Open() uses it to tell links the walk actually
   // stepped on (the tree is truncated there) from links on records the tree
-  // never reaches (the tree is complete; the records are junk).
+  // never reaches (the records are detached; their links are junk).
   struct WalkReport {
     // One entry per out-of-range link the walk hit: the slot owning the link
     // and the slot it names.
