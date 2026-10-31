@@ -522,8 +522,11 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
   uint32_t at = start;
   // A chain that runs out of backing bytes is truncated, not corrupt: every
   // sector read so far is real data, so keep the prefix and report the loss.
-  // A cycle, an index past the allocation table and a table shorter than the
-  // declared size stay fatal (the salvage must not guess at missing links).
+  // A link that points past the allocation table cannot be followed either,
+  // and the bytes before it are equally real (LibreOffice sw/qa ofz18414-1
+  // ends the WordDocument chain on FAT link 580 while the table holds 128
+  // entries), so it takes the same prefix salvage. A cycle stays fatal: it
+  // proves the chain never ends, while the salvage must not guess at it.
   const auto truncated = [&]() -> std::expected<std::vector<uint8_t>, Error> {
     Warn(&warnings_, "truncated stream " + std::string(name) + ": kept " +
                          std::to_string(result.size()) + " of " +
@@ -531,7 +534,9 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
     return std::move(result);
   };
   for (uint64_t i = 0; i < count; ++i) {
-    if (at >= table.size() || seen[at]) {
+    if (at >= table.size())
+      return truncated();
+    if (seen[at]) {
       return std::unexpected(
           Fail(ErrorCode::kCorruptFat, "invalid or cyclic FAT chain"));
     }
@@ -552,12 +557,36 @@ std::expected<std::vector<uint8_t>, Error> CfbReader::ReadChain(
         static_cast<size_t>(std::min<uint64_t>(unit, size - result.size()));
     result.insert(result.end(), chunk.begin(), chunk.begin() + take);
     uint32_t next = table[at];
+    // A one-sector skip whose skipped neighbour links to the same successor is
+    // an orphaned chain member, not a jump: LibreOffice sw/qa ofz19065 has
+    // 1Table at 36..46, 47 -> 49 while fat[48] is also 49, so following the
+    // links verbatim shifts every table byte after sector 47 by 512. Insert
+    // the skipped sector and keep reading in order. The pattern occurs in no
+    // other file of the 680-sample corpus.
+    if (i + 1 < count && !mini && next == at + 2 && at + 1 < table.size() &&
+        table[at + 1] == next && !seen[at + 1]) {
+      Warn(&warnings_, "stream " + std::string(name) +
+                           ": FAT chain skips "
+                           "sector " +
+                           std::to_string(at + 1) +
+                           ", which links to the same successor; sector "
+                           "restored");
+      next = at + 1;
+    }
     if (i + 1 == count) {
       // Tolerate one trailing chain sector beyond the declared size when it
       // is properly ENDOFCHAIN-terminated: some real-world producers round
       // streams up to an extra sector and keep the terminator on that one.
       if (next != kEnd) {
-        if (next >= table.size() || seen[next]) {
+        if (next >= table.size()) {
+          // The declared size is fully read; a junk trailing link cannot hide
+          // stream bytes, so ignore it with a warning instead of failing.
+          Warn(&warnings_, "stream " + std::string(name) +
+                               ": chain link past the allocation table after "
+                               "the declared size; ignored");
+          return result;
+        }
+        if (seen[next]) {
           return std::unexpected(
               Fail(ErrorCode::kCorruptFat, "chain longer than stream"));
         }
