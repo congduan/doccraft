@@ -28,7 +28,6 @@ namespace {
 using test::CfbBuilder;
 using test::MakePayload;
 
-constexpr uint32_t kFree = 0xFFFFFFFF;
 constexpr uint32_t kEnd = 0xFFFFFFFE;
 constexpr size_t kHeaderDifatOffset = 76;
 constexpr size_t kHeaderDifatSlots = 109;
