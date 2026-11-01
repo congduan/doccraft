@@ -283,9 +283,15 @@ struct FatTables {
   std::vector<uint32_t> difat;
 };
 
-// Builds the DIFAT and FAT allocation tables, validating their markers.
-std::expected<FatTables, Error> LoadFatTables(std::span<const uint8_t> bytes,
-                                              const Header& header) {
+// Builds the DIFAT and FAT allocation tables. The FAT/DIFAT self-markers
+// ([MS-CFB] §3.1 FATSECT/DIFSECT) are a redundant consistency check: some
+// producers leave a FREESECT or an ordinary link in the entry that describes
+// the table sector itself while its contents stay valid. A missing marker is
+// therefore reported once per affected sector and the contents are trusted
+// (r55); out-of-range indices and chain validation remain hard failures.
+std::expected<FatTables, Error> LoadFatTables(
+    std::span<const uint8_t> bytes, const Header& header,
+    std::vector<std::string>* warnings) {
   FatTables tables;
   auto difat = ParseDifat(bytes, header);
   if (!difat) {
@@ -310,14 +316,15 @@ std::expected<FatTables, Error> LoadFatTables(std::span<const uint8_t> bytes,
   }
   for (uint32_t id : tables.difat) {
     if (tables.fat[id] != kFat) {
-      return std::unexpected(
-          Fail(ErrorCode::kCorruptFat, "FAT marker missing"));
+      Warn(warnings, "FAT sector " + std::to_string(id) +
+                         " is not marked as a FAT sector; trusting the DIFAT");
     }
   }
   for (uint32_t i = 0; i < header.total_sectors; ++i) {
     if (difat_seen[i] && tables.fat[i] != kDifat) {
-      return std::unexpected(
-          Fail(ErrorCode::kCorruptFat, "DIFAT marker missing"));
+      Warn(warnings, "sector " + std::to_string(i) +
+                         " is claimed as a DIFAT sector but not marked as one; "
+                         "trusting the header DIFAT");
     }
   }
   return tables;
@@ -699,7 +706,7 @@ std::expected<CfbReader, Error> CfbReader::Open(
   const std::span<const uint8_t> tail = bytes.subspan(usable);
   bytes = bytes.first(usable);
   bool chain_truncated = false;
-  auto tables = LoadFatTables(bytes, *header);
+  auto tables = LoadFatTables(bytes, *header, &warnings);
   if (!tables) {
     return std::unexpected(tables.error());
   }

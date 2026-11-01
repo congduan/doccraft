@@ -29,6 +29,8 @@ using test::CfbBuilder;
 using test::MakePayload;
 
 constexpr uint32_t kEnd = 0xFFFFFFFE;
+constexpr uint32_t kFree = 0xFFFFFFFF;
+constexpr uint32_t kDifat = 0xFFFFFFFC;
 constexpr size_t kHeaderDifatOffset = 76;
 constexpr size_t kHeaderDifatSlots = 109;
 
@@ -79,6 +81,26 @@ uint32_t TotalSectors(const std::vector<uint8_t>& bytes) {
 // A valid container with one mini stream; callers corrupt one header field.
 std::vector<uint8_t> ValidContainer() {
   return CfbBuilder().AddStream("s", MakePayload(100, 7)).Build();
+}
+
+// Appends a one-sector DIFAT chain naming the existing FAT sector and stores
+// `marker` in the FAT entry describing the new DIFAT sector. kDifat builds a
+// self-consistent container; any other value models the broken self-marker
+// that r55 tolerates.
+std::vector<uint8_t> ContainerWithDifatSector(uint32_t marker) {
+  auto bytes = ValidContainer();
+  const uint32_t sector_size = 1u << U16(bytes, 30);
+  const uint32_t difat_sector = TotalSectors(bytes);
+  bytes.resize(bytes.size() + sector_size, 0);
+  Put32(bytes, 68, difat_sector);  // difat_start
+  Put32(bytes, 72, 1);             // difat_count
+  const size_t base = (static_cast<size_t>(difat_sector) + 1) * sector_size;
+  Put32(bytes, base, U32(bytes, 76));  // the container's real FAT sector
+  for (uint32_t j = 1; j + 1 < sector_size / 4; ++j)
+    Put32(bytes, base + j * 4, kFree);
+  Put32(bytes, base + sector_size - 4, kEnd);
+  Put32(bytes, FatEntryOffset(bytes, difat_sector), marker);
+  return bytes;
 }
 
 TEST(CfbLenientHeader, ToleratesInvalidByteOrderMark) {
@@ -252,18 +274,58 @@ TEST(CfbLenientHeader, RejectsWhenHeaderDifatYieldsNoFatSector) {
       << reader.error().message;
 }
 
-// Re-derivation must not become a new back door: a derived sector still has to
-// carry the FAT marker, so pointing the array at an ordinary sector fails.
-TEST(CfbLenientHeader, DerivedFatSectorStillNeedsFatMarker) {
+// Re-derivation follows the same r55 marker policy: pointing the array at an
+// ordinary sector is now a warning and that sector's bytes are used as the
+// allocation table; out-of-range indices still fail in LoadFatTables.
+TEST(CfbLenientHeader, DerivedFatSectorWithoutMarkerIsTrusted) {
   auto bytes = ValidContainer();
   Put32(bytes, 44, TotalSectors(bytes) + 1);
   Put32(bytes, HeaderDifatSlot(0), U32(bytes, 48));  // the directory sector
   auto reader = CfbReader::Open(bytes);
-  ASSERT_FALSE(reader.has_value());
-  EXPECT_EQ(reader.error().code, ErrorCode::kCorruptFat);
-  EXPECT_NE(reader.error().message.find("FAT marker missing"),
-            std::string::npos)
-      << reader.error().message;
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  EXPECT_TRUE(
+      HasWarning(*reader, "FAT sector 0 is not marked as a FAT sector"));
+}
+
+// r55: a FAT table that leaves FREESECT in the entry describing itself stays
+// readable. Only the self-marker is ignored; the DIFAT still supplies the
+// sector and the tables are used as-is.
+TEST(CfbLenientHeader, UnmarkedFatSectorIsTrusted) {
+  auto bytes = ValidContainer();
+  const uint32_t fat_sector = U32(bytes, 76);
+  Put32(bytes, FatEntryOffset(bytes, fat_sector), kFree);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "FAT sector " + std::to_string(fat_sector) +
+                                      " is not marked as a FAT sector"));
+  auto stream = reader->ReadStream("s");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(100, 7));
+}
+
+// r55: the companion check for a DIFAT chain sector. The crafted container is
+// first validated with the correct marker (no warning), then the marker is
+// replaced with FREESECT and only the warning remains.
+TEST(CfbLenientHeader, UnmarkedDifatSectorIsTrusted) {
+  auto valid = ContainerWithDifatSector(kDifat);
+  auto healthy = CfbReader::Open(valid);
+  ASSERT_TRUE(healthy.has_value()) << healthy.error().message;
+  EXPECT_TRUE(healthy->warnings().empty());
+  auto stream = healthy->ReadStream("s");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(100, 7));
+
+  auto bytes = ContainerWithDifatSector(kFree);
+  const uint32_t difat_sector = U32(bytes, 68);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "sector " + std::to_string(difat_sector) +
+                                      " is claimed as a DIFAT sector"));
+  stream = reader->ReadStream("s");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(100, 7));
 }
 
 // r49: an impossible mini FAT sector count disables the mini FAT instead of
