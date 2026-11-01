@@ -61,7 +61,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/doccraft | Out-Null
-          Copy-Item build/src/cli/${{ matrix.binary }} dist/doccraft/
+          Copy-Item build/src/cli/Release/${{ matrix.binary }} dist/doccraft/
           Copy-Item README.md, LICENSE dist/doccraft/
           Compress-Archive -Path dist/doccraft -DestinationPath ${{ matrix.archive }}
           $hash = (Get-FileHash ${{ matrix.archive }} -Algorithm SHA256).Hash
