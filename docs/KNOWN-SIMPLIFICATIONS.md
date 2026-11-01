@@ -49,6 +49,13 @@
 >
 > 回归：黄金 40 样本对基线 bcfa5c6 逐 ZIP part SHA-256 + stderr + rc 零差异；三目标样本 rc=0；680 全库对 f2a6aff 逐文件分类零变化（ok 596 / warn 29 / reject 55），无 ok→warn、无 reject 增加。
 
+> r52 CFB 目录树两层容错（root 伪兄弟链接 + 目录链中途截断的前缀挽救）：
+>
+> - **root 伪兄弟链接**：`[MS-CFB]` §2.6.1 要求 root 条目的 left/right 均为 `NOSTREAM`，此前非 `NOSTREAM` 一律以 `root has sibling` 整篇拒绝。LibreOffice sw/qa 的 `ofz-delflyinrange-1`、`ofz41398-1`、`ofz42330-1`、`ofz45140-1` 在 right 上带垃圾槽号（`0xFF3FFFBF`），而目录链与其余条目完好。root 没有兄弟，该链接不可能到达 child 子树之外的记录，故改为每个方向一条 warning（`root entry has a right sibling link to slot N; the root has no siblings, link ignored`），并把字段重置为 `NOSTREAM` 后再走树。`first entry is not root` 的硬拒保留——root 槽位本身损坏时没有解码锚点。
+> - **目录链中途越界**：`LoadDirectory` 此前只容忍「链尾恰好指向 `total_sectors` 且已读 ≥1 扇区」。现推广为：链的下一环落在 `total_sectors` 之外或 FAT 表之外、且已读满 ≥1 个完整目录扇区时，保留已读前缀并 warning `directory chain cut short after N sector(s); entries read so far are used, streams fall back to name matching`，同时置位 `directory_tree_incomplete_` 复用既有按名回退。前缀为空（链头即越界）仍拒绝，错误改为更准确的 `directory chain starts outside the file`，不猜目录位置。环（`seen` 重入）仍拒绝，与越界不同类。v4 的 `Number of Directory Sectors` 校验在截断已确诊时跳过，否则断链必然表现为 `directory sector count mismatch`。
+> - **实证与简报的出入**：①只修 root sibling 后，4 个类型 A 样本仍止于 CFB 层 `stream has children`——其 `WordDocument` 条目的 child 字段是垃圾（`0xFFFFFCFF`），流条目的 child 按规范无意义但本批未放宽；临时探针证实即便忽略该字段，4 例也全部止于文档层 `unsupported legacy nFib version`，且 `WordDocument` 链自身截断（只读到 1024/2306 或 1408/2306 字节），所以本批不放行不改变最终可达性。②简报预期 7 例 `rc=0`，实测 0 例：类型 A 4 例 `stream has children`；`ofz46457-1`/`ofz53457-1` 越过 CFB 层后文档层报 `stream not found`——其 WordDocument 目录项名被污染为 `WordDocument픅`（多一个 `U+D005`），不是流链问题；`ofz18554-1` 越过 CFB 层后文档层报 `invalid BTE table`。3 个链头越界样本（`ofz-redlining-1`、`ofz-trailingpara`、`ofz21168-1`）按预期维持拒绝。文档层与目录名近似的挽救不在本轮范围。
+> - **回归**：`ctest` 589 项全绿；`plain-text.doc` 与 `tests/fixtures/bookmarks-basic.doc` 转换成功且 stderr 无新增 warning。新增测试：`CfbReaderTest.IgnoresRootLeftSiblingLink`、`IgnoresRootRightSiblingLink`、`SalvagesDirectoryChainCutShortMidway`、`RejectsDirectoryChainStartingOutsideTheFile`、`SalvagesDirectoryChainCutShortInV4`；原 `RejectsRootSiblingWithoutThrowing` 由前两项取代，`CfbLenientHeader.RejectsDirectoryChainTwoSectorsPastEnd` 改为 `SalvagesDirectoryChainTwoSectorsPastEnd`（前缀为 0 的拒绝边界移至 `RejectsDirectoryChainStartingOutsideTheFile`）。
+
 ## M2
 
 - `fComplex=1`（增量保存）文档按最终 CLX piece 表读取正文，Prm0 与 Prm1/Prc 字符及段落修饰现也应用于页眉、脚注、批注和文本框故事；piece 上的 `sprmPItap` 已参与正文表格深度判定。Prm0 中仅修订元数据用途的 `sprmPFNumRMIns` 不映射。真实样本的版式 golden 尚未通过，§6.1 保持 ◐。
