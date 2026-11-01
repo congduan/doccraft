@@ -15,15 +15,14 @@
 #ifndef SRC_DOCX_WRITER_H_
 #define SRC_DOCX_WRITER_H_
 
-#include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "model/document.h"
+
 namespace doccraft::docx {
 struct Error {
   std::string message;

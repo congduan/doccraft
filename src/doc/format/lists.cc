@@ -63,9 +63,9 @@ void ReadLists(model::Document& doc, Bytes table, const Fib& fib) {
       }
 
       Walk(lv.subspan(28, pp), [&](uint16_t op, Bytes v) {
-        if (op == 0x845E)
+        if (op == kSprmPDxaLeft)
           level.left = S16(v, 0);
-        if (op == 0x8460)
+        if (op == kSprmPDxaLeft1)
           level.first = S16(v, 0);
       });
       model::Run r;
