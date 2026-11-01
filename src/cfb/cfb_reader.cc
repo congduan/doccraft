@@ -350,37 +350,103 @@ bool AsciiEqualsNoCase(std::string_view a, std::string_view b) {
   return true;
 }
 
+// A name is decoded until an invalid sequence is met. Only a defect at the
+// end may be dropped: `HasDecodableUnit` asks whether any unit after the
+// defect still decodes, which keeps a genuinely broken middle fatal.
+bool HasDecodableUnit(Bytes p, size_t from, size_t end) {
+  for (size_t j = from; j + 2 <= end; j += 2) {
+    const uint32_t cp = U16(p, j);
+    if (cp >= 0xD800 && cp <= 0xDBFF) {
+      if (j + 4 <= end) {
+        const uint32_t low = U16(p, j + 2);
+        if (low >= 0xDC00 && low <= 0xDFFF)
+          return true;
+      }
+      continue;  // incomplete or unpaired high surrogate
+    }
+    if (cp >= 0xDC00 && cp <= 0xDFFF)
+      continue;  // orphan low surrogate
+    return true;
+  }
+  return false;
+}
+
+// Why DecodeEntryName stopped early; ParseDirEntry turns it into the warning.
+enum class NameTruncation {
+  kNone,
+  // [MS-CFB] §2.6.1: a name shorter than 64 bytes ends with a NUL. The final
+  // declared unit is not one; LibreOffice drops it and reads the prefix
+  // (sw/qa ofz46457-1 and ofz53457-1 store "WordDocument" + U+D505).
+  kUnterminated,
+  // The 64-byte name ends in a high surrogate without its low half, or in an
+  // orphan low surrogate.
+  kIncompleteSurrogate,
+};
+
+struct DecodedName {
+  std::string name;
+  NameTruncation truncation = NameTruncation::kNone;
+};
+
 // Decodes a UTF-16LE directory entry name. The declared length delimits the
 // name even when the producer omitted the NUL terminator (POI test-fields.doc
 // stores "Y:\Desktop\~WRD0000.tmp" with len=22); the extra declared bytes are
 // then part of the name instead of an error.
-std::expected<std::string, Error> DecodeEntryName(Bytes p, uint16_t len) {
+std::expected<DecodedName, Error> DecodeEntryName(Bytes p, uint16_t len,
+                                                  bool is_root) {
   if (len < 2 || len > 64 || len % 2 != 0) {
     return std::unexpected(
         Fail(ErrorCode::kCorruptDirectory, "invalid directory name"));
   }
-  const size_t name_bytes = U16(p, len - 2) == 0 ? len - 2 : len;
+  size_t name_bytes = U16(p, len - 2) == 0 ? len - 2 : len;
+  NameTruncation truncation = NameTruncation::kNone;
+  // A non-root name shorter than 64 bytes must end with NUL. When it does not,
+  // the final declared unit is the broken terminator slot, not part of the
+  // name: keep the prefix. The root keeps decoding its full declared length
+  // because its name only prefixes paths and POI test-fields.doc depends on
+  // that (ToleratesRootNameWithoutNulTerminator).
+  if (U16(p, len - 2) != 0 && !is_root && len < 64) {
+    name_bytes = len - 2;
+    truncation = NameTruncation::kUnterminated;
+    if (name_bytes == 0) {
+      return std::unexpected(
+          Fail(ErrorCode::kCorruptDirectory, "invalid directory name"));
+    }
+  }
   std::string name;
+  // Drops the undecodable tail. An empty prefix has no usable name, so the
+  // existing error path (root reject / non-root skip) still applies.
+  const auto truncate_at = [&]() -> std::expected<DecodedName, Error> {
+    if (name.empty()) {
+      return std::unexpected(Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
+    }
+    return DecodedName{std::move(name), NameTruncation::kIncompleteSurrogate};
+  };
   for (size_t j = 0; j < name_bytes; j += 2) {
     uint32_t cp = U16(p, j);
     if (cp >= 0xD800 && cp <= 0xDBFF) {
-      if (j + 4 > name_bytes) {
-        return std::unexpected(
-            Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
-      }
+      if (j + 4 > name_bytes)
+        return truncate_at();
       uint32_t low = U16(p, j + 2);
       if (low < 0xDC00 || low > 0xDFFF) {
-        return std::unexpected(
-            Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
+        if (HasDecodableUnit(p, j + 2, name_bytes)) {
+          return std::unexpected(
+              Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
+        }
+        return truncate_at();
       }
       cp = 0x10000 + ((cp - 0xD800) << 10) + low - 0xDC00;
       j += 2;
     } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
-      return std::unexpected(Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
+      if (HasDecodableUnit(p, j + 2, name_bytes)) {
+        return std::unexpected(
+            Fail(ErrorCode::kCorruptDirectory, "bad UTF-16"));
+      }
+      return truncate_at();
     }
     AppendUtf8(name, cp);
   }
-  return name;
+  return DecodedName{std::move(name), truncation};
 }
 
 // Decodes one directory entry. A non-root entry with an undecodable name is
@@ -400,7 +466,7 @@ std::expected<DirEntry, Error> ParseDirEntry(
       entry.type != EntryType::kRoot) {
     return entry;
   }
-  auto name = DecodeEntryName(p, U16(p, 64));
+  auto name = DecodeEntryName(p, U16(p, 64), slot == 0);
   if (!name) {
     if (slot == 0)
       return std::unexpected(name.error());
@@ -411,7 +477,20 @@ std::expected<DirEntry, Error> ParseDirEntry(
     entry.child = DirEntry::kNoFollow;
     return entry;
   }
-  entry.name = std::move(*name);
+  entry.name = std::move(name->name);
+  // Exactly one line per damaged entry, with the slot and the prefix that was
+  // kept, so a caller can see both the damage and the resulting stream name.
+  if (name->truncation == NameTruncation::kUnterminated) {
+    Warn(warnings, "directory entry name at slot " + std::to_string(slot) +
+                       " is not NUL-terminated within its declared length; "
+                       "using the decodable prefix '" +
+                       entry.name + "'");
+  } else if (name->truncation == NameTruncation::kIncompleteSurrogate) {
+    Warn(warnings, "directory entry name at slot " + std::to_string(slot) +
+                       " ends with an incomplete UTF-16 sequence; using the "
+                       "decodable prefix '" +
+                       entry.name + "'");
+  }
   return entry;
 }
 
