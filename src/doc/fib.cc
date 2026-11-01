@@ -232,10 +232,17 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
     return std::unexpected(Error{"truncated FIB pairs"});
   const uint16_t pairs = U16(word, pair_count_pos);
   const size_t pair_start = pair_count_pos + 2;
-  if (static_cast<size_t>(pairs) * 8 > word.size() - pair_start || pairs < 34)
+  if (static_cast<size_t>(pairs) * 8 > word.size() - pair_start)
     return std::unexpected(Error{"truncated FIB fc/lcb pairs"});
-  f.fc_clx = U32(word, pair_start + 33 * 8);
-  f.lcb_clx = U32(word, pair_start + 33 * 8 + 4);
+  // A short FibRgFcLcb (fewer than the 34 rows needed to reach fcClx) is a
+  // truncated table, not a reason to reject the document: LibreOffice reads
+  // the rows that are present and treats absent ranges as empty. sw/qa
+  // ofz46457-1 and ofz53457-1 declare only 15 pairs, so fcClx is absent and
+  // ReadChars falls back to the contiguous fcMin..fcMac text (r50).
+  if (pairs > 33) {
+    f.fc_clx = U32(word, pair_start + 33 * 8);
+    f.lcb_clx = U32(word, pair_start + 33 * 8 + 4);
+  }
   auto pair = [&](size_t i) -> Fib::Range {
     if (i >= pairs)
       return {};
