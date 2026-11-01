@@ -150,6 +150,29 @@ TEST(M20Malformed, FibTruncatedPairs) {
   ExpectRejected(Pack(s), "truncated FIB fc/lcb pairs");
 }
 
+TEST(M20Malformed, FibShortFcLcbFallsBackToContiguousText) {
+  // LibreOffice sw/qa ofz46457-1/ofz53457-1 declare only 15 fc/lcb pairs, so
+  // fcClx is absent. The rows that are present stay usable and the text falls
+  // back to the contiguous fcMin..fcMac piece instead of rejecting.
+  DocStreams s = doccraft::test::BuildDocStreams(TextSpec());
+  Put16(s.word, 152, 15);  // cbRgFcLcb too short to reach row 33 (fcClx)
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  EXPECT_EQ(fib->fc_clx, 0u);
+  EXPECT_EQ(fib->lcb_clx, 0u);
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  std::string text;
+  for (const auto& para : document->paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  EXPECT_EQ(text, "Hi");
+  bool warned = false;
+  for (const auto& warning : document->warnings)
+    warned |= warning.find("missing CLX Pcdt") != std::string::npos;
+  EXPECT_TRUE(warned);
+}
+
 TEST(M20Malformed, FibRc4Encrypted) {
   DocStreams s = doccraft::test::BuildDocStreams(TextSpec());
   Put16(s.word, 10, static_cast<uint16_t>(Get16(s.word, 10) | 0x0100));

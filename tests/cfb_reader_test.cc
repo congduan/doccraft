@@ -876,6 +876,92 @@ TEST(CfbReaderTest, SkipsStreamWithInvalidName) {
   EXPECT_EQ(beta.error().code, ErrorCode::kStreamNotFound);
 }
 
+// LibreOffice sw/qa ofz46457-1 and ofz53457-1 store the WordDocument entry
+// with namelen=26 (12 characters plus the terminator slot) but the final
+// declared code unit is 0xD505 instead of 0x0000. 0xD505 is a valid BMP
+// character (Hangul syllable), not a surrogate: the defect is a missing NUL
+// terminator, and LibreOffice drops the final declared unit when it is not a
+// terminator. Do the same for a non-root entry, warn once with slot and
+// prefix, and keep the stream reachable under its intended name.
+TEST(CfbReaderTest, DropsUnterminatedFinalNameUnit) {
+  auto bytes =
+      CfbBuilder().AddStream("WordDocument", MakePayload(4096, 0x5A)).Build();
+  Put16(bytes, DirSlotOffset(bytes, 1) + 24, 0xD505);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "slot 1")) << reader->warnings()[0];
+  EXPECT_TRUE(HasWarning(*reader, "WordDocument")) << reader->warnings()[0];
+  EXPECT_TRUE(HasWarning(*reader, "prefix")) << reader->warnings()[0];
+  auto word = reader->ReadStream("WordDocument");
+  ASSERT_TRUE(word) << word.error().message;
+  EXPECT_EQ(*word, MakePayload(4096, 0x5A));
+}
+
+// A high surrogate that runs to the end of a full 64-byte name cannot be
+// paired; the decodable prefix is kept instead of rejecting the entry. This
+// exercises the surrogate branch directly (len == 64 leaves no terminator
+// slot for the missing-NUL rule above).
+TEST(CfbReaderTest, TruncatesTrailingIncompleteSurrogate) {
+  const std::string name(31, 'a');
+  auto bytes = CfbBuilder().AddStream(name, MakePayload(16, 0x61)).Build();
+  const size_t at = DirSlotOffset(bytes, 1);
+  Put16(bytes, at + 62, 0xD800);  // unit 31 of 32; no low surrogate follows
+  Put16(bytes, at + 64, 64);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "slot 1")) << reader->warnings()[0];
+  EXPECT_TRUE(HasWarning(*reader, "incomplete UTF-16"))
+      << reader->warnings()[0];
+  auto stream = reader->ReadStream(name);
+  ASSERT_TRUE(stream) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(16, 0x61));
+}
+
+// Only a trailing incomplete sequence is relaxed: an orphan surrogate with a
+// decodable character after it still rejects the name, so the entry is skipped
+// with the existing warning.
+TEST(CfbReaderTest, RejectsOrphanSurrogateInsideName) {
+  auto bytes = CfbBuilder()
+                   .AddStream("Alpha", MakePayload(16, 0x71))
+                   .AddStream("Beta", MakePayload(16, 0x72))
+                   .Build();
+  Put16(bytes, DirSlotOffset(bytes, 1) + 4, 0xDC05);  // inside "Alpha"
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "slot 1")) << reader->warnings()[0];
+  EXPECT_TRUE(HasWarning(*reader, "entry skipped")) << reader->warnings()[0];
+  EXPECT_FALSE(reader->ReadStream("Alpha"));
+  auto beta = reader->ReadStream("Beta");
+  ASSERT_TRUE(beta) << beta.error().message;
+}
+
+// A name whose first unit is the only unit and is an orphan surrogate has an
+// empty decodable prefix: the existing non-root skip path stays in force.
+TEST(CfbReaderTest, SkipsStreamWhoseNameStartsWithOrphanSurrogate) {
+  auto bytes = CfbBuilder().AddStream("Alpha", MakePayload(16, 0x71)).Build();
+  Put16(bytes, DirSlotOffset(bytes, 1) + 0, 0xDC05);
+  Put16(bytes, DirSlotOffset(bytes, 1) + 64, 2);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "slot 1")) << reader->warnings()[0];
+  EXPECT_TRUE(HasWarning(*reader, "entry skipped")) << reader->warnings()[0];
+}
+
+// The same empty-prefix shape on the root still rejects the whole container:
+// no stream path can be rooted.
+TEST(CfbReaderTest, RejectsRootWhoseNameStartsWithOrphanSurrogate) {
+  auto bytes = CfbBuilder().AddStream("Data", MakePayload(16, 0x78)).Build();
+  Put16(bytes, DirSlotOffset(bytes, 0) + 0, 0xDC05);
+  Put16(bytes, DirSlotOffset(bytes, 0) + 64, 2);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_FALSE(reader);
+  EXPECT_EQ(reader.error().code, ErrorCode::kCorruptDirectory);
+}
+
 // A sibling link that names an entry slot past the table is a dangling link:
 // no entry can be reached through it, so the walk ends there like NOSTREAM.
 // LibreOffice sw/qa fuzz regressions (ofz19065, ofz38011-1) and POI
