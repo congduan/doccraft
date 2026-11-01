@@ -173,6 +173,7 @@
 - `sprmCKcd` 以外的新增字符属性只写单向推导：`sprmCFELayout` 的 `iWarichuBracket` 仅在 `fWarichu` 置位时输出，`sprmCFitText` 的 0 宽度视为未设置。
 - r34 CFB 尾部残扇区：文件大小不是扇区整数倍时，容器读取在完成头校验后把输入截断到 `floor(size/sector_size)` 个完整扇区，仅在不足一个扇区时仍报 `partial sector`。真实 wvWare 样本 `plainUmlaute.doc` 与 `simpledoc_mix_of_8_and_16_bit_chars.doc` 末尾各有 1 字节零垫料，此前被整篇拒绝，现可转换且与 LibreOffice TXT 导出逐字一致（`CfbReaderTest.ToleratesTrailingPartialSector`、`CfbReaderTest.RejectsFileShorterThanOneSector`）。残片不参与任何 FAT 链；若链仍引用被丢弃的扇区，`ReadChain` 以 `sector outside file` 失败，clusterfuzz 截断样本因此转入更深层拒绝而非静默读出垫料。
 - r34 sprmTCellPadding（0xD632）范围语义对齐 LibreOffice `WW8TabBandDesc::ProcessSpecificSpacing`：`itcFirst >= itcLim`（空范围）按无操作处理，`itcLim` 超过行单元格数时截断到实际列数，两者均返回成功；其余校验（CSSA 长度/cb、sides 掩码、ftsWidth ∈ {Nil,Dxa}、width ≤ 31680）保持不变。0xD634 使用固定的 `[0, 1)` 范围，不经过该路径。真实样本 `ProblemExtracting.doc`（Word 97，354 个 0xD632，其中 84 个空范围）此前报 `invalid TAPX operand 54834`，现转换成功并输出 `w:tcMar`。与 LO 的一处差异：LO 在 `nEndCell > MAX_COL+1`（64）时直接忽略整个操作数，本实现统一截断到实际列数；该边界没有真实样本，且 itcLim 为单字节时只有 >64 的畸形操作数可见。
+- `sprmSDyaLinePitch`（0x9031）操作数为 0 时视为「未设置」：保留模型默认 `grid_line_pitch = -1`，writer 不输出 `w:docGrid`/`w:linePitch`；此前该值触发 `invalid SEPX sprm` 并拒绝整篇文档（r59 恢复 `fdo40686-1.doc`）。与 LibreOffice 的差异：LO 对该样本输出 `<w:docGrid w:type="default" w:linePitch="400" w:charSpace="0"/>`，doccraft 在 0 值下不输出 `w:docGrid`（`grid_mode` 也未设置）；LO 的 400 是其默认网格值，本实现按「未设置」保留阅读器默认，像素影响尚未对拍。操作数大于 31680 twips 仍按非法 SEPX 拒绝。测试：`M3Batch3.ZeroSectionLinePitchKeepsDefaultGrid`、`M3Batch3.OversizedSectionLinePitchRejectsSepx`。
 
 ## M5 当前范围
 

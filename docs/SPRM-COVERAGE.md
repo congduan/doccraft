@@ -340,7 +340,7 @@
 | ✅ | `0x702E` | sprmSBrcRight80 | A Brc80 that specifies the right page border. | 节 SEP §2.6.4；M3Batch6.SectionBordersAndNumbering |
 | ✅ | `0x522F` | sprmSPgbProp | An SPgbPropOperand that specifies page border properties. | 节 SEP §2.6.4；M3Batch8.PageBorderScopeAndFormProtection |
 | ✅ | `0x7030` | sprmSDxtCharSpace | A signed 32-bit integer that specifies the difference between the desired character pitch for the document grid, if enabled (see sprmSClm), and the pitch of the font that is specified by the… | 节 SEP §2.6.4；M3Batch6.SectionBordersAndNumbering |
-| ✅ | `0x9031` | sprmSDyaLinePitch | A YAS that specifies, in twips, the line height that is used for document grid, if enabled (see sprmSClm). | 节 SEP §2.6.4 |
+| ✅ | `0x9031` | sprmSDyaLinePitch | A YAS that specifies, in twips, the line height that is used for document grid, if enabled (see sprmSClm).；M3Batch3.ZeroSectionLinePitchKeepsDefaultGrid、M3Batch3.OversizedSectionLinePitchRejectsSepx | 节 SEP §2.6.4 |
 | ✅ | `0x5032` | sprmSClm | An SClmOperand that specifies the document grid mode that is in use for the section. | 节 SEP §2.6.4 |
 | ✅ | `0x5033` | sprmSTextFlow | A MSOTXFL that specifies the text flow of the section, as specified in [MS- ODRAW] section 2.4.5. | 节 SEP §2.6.4 |
 | ✅ | `0xD234` | sprmSBrcTop | A BrcOperand that specifies the top page border. | 节 SEP §2.6.4；M3Batch6.SectionBordersAndNumbering |
