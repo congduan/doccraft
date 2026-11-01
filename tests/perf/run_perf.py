@@ -13,7 +13,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE = Path(__file__).with_name("baseline.json")
-DEFAULT_BASELINE_REF = "ee2df0e"  # Last verified clean Release comparison.
+# Last verified clean Release comparison. Re-check that the revision still
+# builds after any history rewrite; `--write-baseline` reseeds baseline.json.
+DEFAULT_BASELINE_REF = "34c8b33"
 WALL_REGRESSION = 0.20
 RSS_WARNING = 0.30
 RUNS = 5
