@@ -21,7 +21,7 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            os: ubuntu-latest
+            os: ubuntu-24.04
             binary: doccraft
             archive: doccraft-v0.9.0-linux-x86_64.tar.gz
           - name: macos-arm64
