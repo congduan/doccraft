@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Smoke-test the Apache POI real-world corpus: no crashes, sane success rate.
 
-The corpus lives outside the repo (download once, see docs/KNOWN-SIMPLIFICATIONS.md
-"M19 语料回归"). Skipped cleanly when the directory is absent so upstream CI
-without the corpus still passes."""
+The corpus lives outside the repo (download once, see docs/CI.md). Point
+DOCRAFT_CORPUS_DIR at the directory that holds the POI .doc files to enable
+this test on a local or self-hosted runner. Skipped cleanly when the directory
+is absent so upstream CI without the corpus still passes."""
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 binary = Path(sys.argv[1]).resolve()
-corpus = Path("/home/ubuntu/doccraft-corpus/poi-test-data")
+corpus = Path(os.environ.get(
+    "DOCRAFT_CORPUS_DIR", "/home/ubuntu/doccraft-corpus/poi-test-data"))
 if not corpus.is_dir():
-    print("POI corpus not present - skipping (download to", corpus, ")")
+    print(f"POI corpus not present - skipping (download to {corpus})")
     sys.exit(0)
 
 files = sorted(corpus.glob("*.doc"))
