@@ -194,8 +194,9 @@ than 16 grayscale levels. Page-count exceptions require a sample-specific
 
 At the recorded baseline, 32 of 37 measured samples pass, four fail, and one
 cannot be rendered from the output DOCX by LibreOffice. The baseline covers the
-33 samples at commit `64e9a99` plus the four M20 corpus samples; six newer
-fixtures are not yet in that record. See the
+33 samples at commit `64e9a99` plus the four M20 corpus samples; three committed
+fixtures (`basic-shapes`, `comments-range`, `header-textbox`) are not yet in
+that record. See the
 [per-sample record](docs/PIXEL-BASELINE.md) for the version, exceptions, and
 failures. Pixel agreement in LibreOffice does not establish identical rendering
 in Microsoft Word.
