@@ -17,6 +17,12 @@
 >   `docs/perf-baseline.md` 的 **3.913 s / 990.4 MiB** 是更快的 reference host。
 >   README 同时标注两台机器，不把 3.9 s 当作当前唯一的实测值。
 > - 二进制 1,394,400 bytes = **1.33 MiB**，README 写 "1.3 MiB" 并给出字节数。
+> - 开工后 10:55 另一个非本批的 docs 提交 `f41cabb`
+>   （`docs: record GOVDOCS1 round-2 corpus (+130, total 810)`，只改
+>   `docs/KNOWN-SIMPLIFICATIONS.md`）进入历史，语料从 680 更新为 **810**。
+>   本批不重跑全库，按两段已记录结果合并：680 轮 596+29/55，130 轮
+>   124+5/1 → 720 干净 + 34 警告 = 754/810（93.1%），56 拒绝，0 崩溃。
+>   README 与 `docs/CI.md` 已按 810 更新；`f41cabb` 不是本批提交。
 
 ## 1. 交付总览
 
@@ -43,8 +49,9 @@
 3. Quick start / What it handles。
 4. **Platform support**：Linux、macOS、Windows CLI；Android、iOS、WebAssembly
    走 C API `doccraft_convert_buffer`，逐项标注“CI 已验证 / 工具链未在此运行”。
-5. **Quality engineering**：585 ctest、680 语料（596 干净 + 29 带警告 = 91.9%，
-   55 正确拒绝，0 崩溃）、40 样本 part 级 SHA-256 黄金门、ASan、pixelcompare。
+5. **Quality engineering**：585 ctest、810 语料（680 轮 596+29 + 130 轮
+   124+5 = 754/810，93.1%；56 拒绝，0 崩溃）、40 样本 part 级 SHA-256
+   黄金门、ASan、pixelcompare。
 6. **Measured performance**：`tests/perf/baseline.json` 五档表；脚注说明
    reference host 的 3.913 s 与 regression host 的 6.367 s 是两台机器。
 7. Visual fidelity / gallery / Architecture / Known limits / License。
@@ -58,7 +65,7 @@
 | 100 MiB 6.367 s / 996.2 MiB | `tests/perf/baseline.json` | 104,845,312 B，6.366793 s，1,020,080 KB |
 | 100 MiB 3.913 s / 990.4 MiB | `docs/perf-baseline.md` | reference host 记录 |
 | 585 ctest | `ctest -N` / 全量运行 | 585/585 |
-| 680 / 596 / 29 / 55 | `docs/KNOWN-SIMPLIFICATIONS.md` r51 记录 | 596+29=625，625/680=91.9% |
+| 810 / 754 / 56 | `docs/KNOWN-SIMPLIFICATIONS.md` r51 + M20 三扩记录 | 680 轮 596+29/55；130 轮 124+5/1；合计 720+34=754（93.1%）、56 拒绝 |
 | 40 黄金样本 | `12 corpus + 28 非加密 fixtures` | 本批实际枚举 |
 | 37 像素样本 32/4/1 | `docs/pixel-baseline.tsv` | `awk` 计数一致 |
 | 14 个 Windows 代码页 | `src/base/charset.cc` `IsWindowsCodepage` | 874/932/936/949/950/1250–1258 |
@@ -377,8 +384,9 @@ $ git status --porcelain
    （`basic-shapes`、`comments-range`、`header-textbox`）未测；另 3 个 encrypted
    fixture 不参与像素基线。补测后更新 `docs/pixel-baseline.tsv` 与
    `PIXEL-BASELINE.md`。
-5. **680 全库未在本批重跑**：本批改的是常量命名/错误措辞/include，40 样本
-   part 级零差异；README 的 92% 引用 `KNOWN-SIMPLIFICATIONS` r51 的已记录结果。
+5. **810 全库未在本批重跑**：本批改的是常量命名/错误措辞/include，40 样本
+   part 级零差异；README 的 93.1% 由两段已记录结果合并（680 轮 596+29/55，
+   130 轮 124+5/1），不是本批新跑的全库分类。
 
 ## 7. 边界与规范
 

@@ -17,7 +17,7 @@ a second push.
 
 ## Corpus gate
 
-The 680-document corpus is not in the repository: it mixes Apache POI,
+The 810-document corpus is not in the repository: it mixes Apache POI,
 LibreOffice `sw/qa`, wvWare, Aspose and GOVDOCS1 files with different licenses
 and a large footprint. `tests/poi_corpus_smoke.py` therefore reads the corpus
 from outside the tree and exits 0 with a "skipping" message when the directory

@@ -147,7 +147,7 @@ by a checklist review.
 | Gate | What it covers |
 |---|---|
 | **585 ctest entries** | Unit and end-to-end tests across all four layers, plus Python checks for ZIP structure, text consistency, API/CLI parity and degraded-input diagnostics. |
-| **680 real documents** | Apache POI, LibreOffice `sw/qa`, wvWare, Aspose and GOVDOCS1, de-duplicated by MD5. At the recorded run: 596 clean conversions + 29 with warnings = 625 (91.9%), 55 correctly rejected as damaged or encrypted, **0 crashes**. |
+| **810 real documents** | Apache POI, LibreOffice `sw/qa`, wvWare, Aspose and GOVDOCS1, de-duplicated by MD5. The 680-file run was 596 clean + 29 with warnings = 625 (91.9%) with 55 rejected; the 130-file GOVDOCS1 round 2 added 124 clean + 5 with warnings and 1 rejection. Combined: **754/810 converted (93.1%)**, 56 rejected as damaged or encrypted, **0 crashes**. |
 | **Golden gate** | The release audit converts 40 committed non-encrypted samples (12 corpus + 28 fixtures) twice; every ZIP part is SHA-256 hashed. Both runs must agree, and the aggregate manifest is compared with the pre-change snapshot. This is what made the audit's non-semantic edits safe to land. |
 | **ASan** | A CI job runs the full suite under AddressSanitizer with `ASAN_OPTIONS=detect_leaks=0`. The deterministic mutation suite in `tests/fuzz_test.cc` also runs there. |
 | **Pixel comparison** | LibreOffice renders the source DOC and the converted DOCX independently; corresponding pages are compared at 150 DPI with a 0.1% bad-pixel threshold. 37 samples are recorded: 32 PASS, 4 FAIL, 1 RENDER_ERROR. |
