@@ -1,258 +1,317 @@
-# M20 测试深化批 战报
+# M7 发布工程批 战报
 
 ## 0. 基线
 
-- 开工 HEAD：`f955a02fb7aed7d855e411fb9d272cfb73f02588`
-  （2026-10-29 20:19:35 +0800，`docs: fix stale comment on the named total-buffer error`）
-- 开工工作区：`git status --porcelain` 为空。
+- 开工 HEAD：`f24ad429181477dea5b27a423bd907192f7afcb1`
+  （2026-11-01，`docs: record the r51 degradation-boundary tightening`）
+- 开工 `git status --porcelain`：空。
 - 外部语料 `/home/ubuntu/doccraft-corpus` 全程只读，未修改。
-- 本批未改动 `src/`、`third_party/`；`git diff f955a02 -- src` 为空。
+- 本批未改 `third_party/`、未 push。
 
-> 说明：本批交付期间同一仓库另有一个不属于本批的 docs 提交
-> `8930b0f docs: record GOVDOCS1 corpus expansion (130 files, total 680)`，
-> 只改 `docs/KNOWN-SIMPLIFICATIONS.md`。本批四个提交与其互不重叠。
+> 与任务简报的数字出入（按仓库实际证据修正，未按简报写）：
+> - ctest 不是 547，开工实测 **585**（`ctest -N` 与全量运行一致）。
+> - 黄金门不是 35/36 份，仓库现有非加密 `.doc` 为 **40** 份
+>   （12 corpus + 31 fixtures − 3 encrypted）。
+> - 100 MiB 不是 3.99 s：`tests/perf/baseline.json` 记录 **6.367 s / 996.2 MiB**
+>   （regression host，本批实测 6.943 s / 944.7 MiB）；
+>   `docs/perf-baseline.md` 的 **3.913 s / 990.4 MiB** 是更快的 reference host。
+>   README 同时标注两台机器，不把 3.9 s 当作当前唯一的实测值。
+> - 二进制 1,394,400 bytes = **1.33 MiB**，README 写 "1.3 MiB" 并给出字节数。
 
 ## 1. 交付总览
 
 | 块 | commit | 内容 |
 |---|---|---|
-| 1 | `cb4fb68` | 合成 .doc 边界语料生成器 + 27 个样本 + `edge_corpus` ctest |
-| 2 | `b512112` | `m20_writer_matrix_test.cc`，22 个 writer 属性矩阵用例 |
-| 3 | `f6060c0` + 后续补 2 例 | `m20_malformed_test.cc`，37 个畸形输入回归用例 |
-| 4 | `b2bc703` | 语料 8→12，4 个 MS-DOC 特性样本 + pixel 基线记录 |
+| 0 | （基线） | `f24ad42`，工作区干净 |
+| 3a | `e159d66` | `poi_corpus_smoke` 支持 `DOCRAFT_CORPUS_DIR` |
+| 3b | `9bd6145` | CI：ASan、corpus 预留、perf smoke、README 链接检查 + `docs/CI.md` |
+| 3c | `71846fc` | `docs/CI.md` 措辞与并发覆盖说明 |
+| 1 | `d91b5b3` | README 重写：定位、竞品实测、六平台、质量工程、性能/像素数字、Known limits |
+| 1b | `929e0a8` | README 像素基线样本数勘误（37/40，未测 3 个 fixture） |
+| 2 | `aa3723f` | 质量巡检小修：list sprm 命名、错误消息小写、头文件 include 最小化 |
+| 4 | （本文件） | 巡检四张清单 + 原始验证输出 |
 
-ctest 用例数：**373 → 433（+60）**，其中 27 个边界样本断言集中在
-`edge_corpus` 一个 ctest 条目内；新增独立 gtest 用例 59 个（22 + 37）。
+## 2. 块1：README 项目叙事
 
-## 2. 块1：合成边界语料
+重写后的 `README.md` 结构：
 
-### 实现路线
+1. 开头定位：`A fast, dependency-free .doc → .docx converter with a clean-room
+   [MS-CFB]/[MS-DOC] parser`，紧接可核验的二进制大小、5/100 MiB 时间。
+2. **Why doccraft**：同一份 4.75 MiB 结构化 DOC 上 doccraft / LibreOffice /
+   antiword / wvWare 的实测表（墙钟、峰值 RSS、安装占用、输出类型）。
+   在线服务不编数字，明确写“需要上传、未在本机基准内”。
+3. Quick start / What it handles。
+4. **Platform support**：Linux、macOS、Windows CLI；Android、iOS、WebAssembly
+   走 C API `doccraft_convert_buffer`，逐项标注“CI 已验证 / 工具链未在此运行”。
+5. **Quality engineering**：585 ctest、680 语料（596 干净 + 29 带警告 = 91.9%，
+   55 正确拒绝，0 崩溃）、40 样本 part 级 SHA-256 黄金门、ASan、pixelcompare。
+6. **Measured performance**：`tests/perf/baseline.json` 五档表；脚注说明
+   reference host 的 3.913 s 与 regression host 的 6.367 s 是两台机器。
+7. Visual fidelity / gallery / Architecture / Known limits / License。
 
-按任务允许的二选一，采用 **subprocess 调用小型 C++ 生成器**：
+数字来源与交叉核对：
 
-- `tests/edge_gen.cc`：在 `tests/cfb_test_util.h` 的 `CfbBuilder` 之上组装
-  WordDocument / 0Table / Data。WORD 97 FIB、CLX piece table、PAPX FKP 页、
-  PlcfBtePapx、STSH 样式表、PlcfSed 分节表均由 `tests/m20_doc_util.h`
-  统一构造。
-- `tests/corpus/gen_edge_corpus.py`：驱动 `edge_gen` 生成 `tests/corpus/edge/*.doc`，
-  并写 `.expected.txt` / `.expected-error`。选择 C++ 路线是因为 Python 独立实现
-  CFB 需要约 200+ 行且更容易在 FAT/MiniFAT 边界出错；复用 `CfbBuilder` 的
-  实现成本更低，也符合任务“选实现成本低”的防失败条款。
-- `tests/corpus/run_edge_corpus.py`：逐样本转换，成功样本比对文本，拒绝样本
-  比对 stderr 关键词。
-
-生成器先在真实 doccraft 上验证 7 个基础样本可解析（empty / single-char /
-two-paragraphs / nested-table-d2..d9），再扩展到 27 个；未闭门造格式。
-
-### 样本清单（27 个，≥20）
-
-| 类别 | 样本 | 期望 |
+| README 数字 | 来源 | 核对结果 |
 |---|---|---|
-| 空/单字符 | `empty-document`、`single-char`、`two-paragraphs` | 成功 |
-| 深嵌套表格 | `nested-table-d2/d4/d8/d9` | 成功；d9 结构钳到 8 层 |
-| 超大单元格 | `huge-cell-text`（70,000 字符） | 成功 |
-| 超多列 | `many-columns`（70 列，8 个 FKP 页） | 成功 |
-| 控制字符 | `control-whitespace`、`control-page-break`、`control-section-break`、`control-field-chars`、`control-object-marks` | 成功 |
-| piece 表极端 | `piece-cp-descending`、`piece-outside-stream`、`piece-prm-index`、`piece-fcmin-mismatch`、`piece-mixed-encoding` | 前 3 拒绝，后 2 成功 |
-| 代码页 | `cp1252-all-256`、`utf16-surrogate-pair`、`utf16-unpaired-surrogate` | 成功 |
-| 样式链 | `style-cycle`（A→B→A）、`style-deep-chain`（20 级） | 成功 |
-| 域 | `field-nested-5`、`field-missing-separator`、`field-unclosed` | 成功 |
+| 1,394,400 bytes | `stat build/src/cli/doccraft` | 1.33 MiB |
+| 5 MiB 0.288 s / 54.0 MiB | `tests/perf/baseline.json` | 5,244,928 B，0.28835 s，55,340 KB |
+| 100 MiB 6.367 s / 996.2 MiB | `tests/perf/baseline.json` | 104,845,312 B，6.366793 s，1,020,080 KB |
+| 100 MiB 3.913 s / 990.4 MiB | `docs/perf-baseline.md` | reference host 记录 |
+| 585 ctest | `ctest -N` / 全量运行 | 585/585 |
+| 680 / 596 / 29 / 55 | `docs/KNOWN-SIMPLIFICATIONS.md` r51 记录 | 596+29=625，625/680=91.9% |
+| 40 黄金样本 | `12 corpus + 28 非加密 fixtures` | 本批实际枚举 |
+| 37 像素样本 32/4/1 | `docs/pixel-baseline.tsv` | `awk` 计数一致 |
+| 14 个 Windows 代码页 | `src/base/charset.cc` `IsWindowsCodepage` | 874/932/936/949/950/1250–1258 |
 
-`control-section-break` 通过 PlcfSed 产生两个 section end；`nested-table-d9`
-输出 8 个 `<w:tbl>` 且 L9 内容落在第 8 层，验证 `kMaxTableDepth` 钳制。
-
-## 3. 块2：OOXML writer 属性矩阵
-
-`tests/m20_writer_matrix_test.cc` 直接构造 IR，不经过 DOC 解析，22 个用例：
-
-- 段落：5 种对齐、4 种缩进/字符单位缩进、3 种行距、间距 + keepNext/
-  pageBreakBefore/widowControl/outline/textAlignment。
-- 字符：粗斜删除线双删除线轮廓阴影小型大写隐藏、5 种下划线 + 颜色、
-  上标/下标/基线、高亮 + 索引色 + RGB 色、字号/字体/语言、字距/缩放/
-  位置/字偶距/强调符。
-- 表格：横向、纵向、双向、L 型 4 种合并；6 边 × 3 线型（18 个片段）；
-  两层嵌套；单元格底纹/边距/对齐/文字方向。
-- 分节：continuous/nextPage/oddPage；两节各自独立页眉页脚（4 个 part）；
-  odd/even + first-page 页眉；脚注属性；页面设置与分栏。
-
-每个用例都断言具体 XML 片段，不是“转换成功”。
-
-## 4. 块3：畸形输入回归库
-
-`tests/m20_malformed_test.cc`，37 个 byte-level 用例，其中 **30 个断言拒绝**：
-
-- FIB：ident、nFib 过低/过高、截断 base、截断 RgLw、截断 pair、RC4/XOR
-  加密头、缺失 CLX；`fcMin` 低于头长（CLX 权威，接受）与 `ccpText`
-  超出 piece 覆盖（告警并保留已覆盖文本）各一例。
-- CLX：CP 倒序、CP 相等、Pcdt 声明过大/过小、CLX 越界、compressed 位越界、
-  Prc 尺寸溢出、Prm 索引越界、缺失 Pcdt、piece 过度覆盖。
-- FKP：FC 倒序、run count 30/0、PAPX 长度溢出、PAPX sprm 截断、重复页、
-  页越界、BTE 尺寸非法、BTE 页数超流。
-- sprm：operand 截断、已知 opcode 缺 operand、自引用嵌套 grpprl。
-- 图片/OLE：PICF 负宽/负高、未知 BLIP 类型、OLE presentation 截断。
-
-7 个用例（FC 倒序/run count/PAPX 溢出/重复页/页越界/深度炸弹等）断言的是
-**产品既有的降级策略**：FKP 结构损坏时跳过该页并警告，而不是返回错误。
-这与 `docs/KNOWN-SIMPLIFICATIONS.md` 的 degraded FKP 条目一致，已在
-`ExpectDegradedFkp` 中固定警告关键词与成功解析；其余 30 个用例严格断言
-`std::expected` 错误与指定关键词。
-
-## 5. 块4：数据深化
-
-`tests/corpus/corpus/` 由 8 份扩到 12 份，新增：
-
-- `sections-continuous`：3 节、2 个 continuous 分节（LibreOffice 从 FODT
-  的 `fo:break-before` + `text:section` 导出）。
-- `nested-tables`：5 列外表 + 单元格内 2×2 嵌套表。
-- `page-fields`：PAGE、SEQ 域 + 超链接。
-- `comments-bookmarks`：同一段文本上的 ranged comment（annotation +
-  annotation-end）与 bookmark（bookmark + bookmark-end）。
-
-均通过 `gen_corpus.py` 生成 `.doc`/`.docx`，`.txt` baseline 用
-`soffice --headless --convert-to txt` 后把 TAB 替换为换行，保留 UTF-8 BOM。
-
-pixelcompare（150 DPI / 0.1%）：
-
-| 样本 | 页数 | bad_ratio | 结果 |
-|---|---|---|---|
-| sections-continuous | 2 | 0.000% | PASS |
-| nested-tables | 1 | 0.305% | FAIL |
-| page-fields | 1 | 0.000% | PASS |
-| comments-bookmarks | 1 | 0.000% | PASS |
-
-> 后续（2026-10-31）：`aa133ee` 已修复嵌套表的行列解析缺陷；HEAD 复测为
-> 208 bad_px（0.010%）PASS。上表的 0.305% 保留为本批当时的原始测量，
-> 当前基线以 `docs/PIXEL-BASELINE.md` 为准。
-
-已写入 `docs/PIXEL-BASELINE.md` 的 “M20 corpus expansion (2026-10-29)”
-一节，并追加到 `docs/pixel-baseline.tsv`。
-
-## 6. 验证（原始输出）
-
-### 6.1 构建零 error
+竞品实测（同一 4,975,616 B DOC，3 次，`/usr/bin/time`，取中位数）：
 
 ```text
-$ cmake --build build -j2
-[ 93%] Built target m4_fast_saved_test
-[ 95%] Built target m8_bad_papx_fixture
-[ 97%] Built target perf_repack_body
-[100%] Built target m21_cli_fixture
+doccraft     median 0.290 s  peak RSS 52,516 KB
+libreoffice  median 5.540 s  peak RSS 221,672 KB
+antiword     median 0.140 s  peak RSS 2,688 KB   (text only)
+wvText       median 0.540 s  peak RSS 11,392 KB  (text only)
+```
+
+```text
+$ du -sh /usr/lib/libreoffice
+256M    /usr/lib/libreoffice
+$ dpkg-query -W -f='${Installed-Size}\t${Package}\n' antiword wv
+589     antiword
+732     wv
+```
+
+已修正的过时数字：README 原性能表（0.037/0.180/0.905/1.111/3.990 s，
+1287.9 MiB）、`100 MiB ≈ 1.3 GiB RSS`、`15 code-page decoders`（实为 14）。
+`docs/perf-baseline.md` 末尾原称“表与 baseline.json 是同一次运行”，已改为
+两台机器的分别记录。
+
+## 3. 块2：代码质量巡检
+
+### 3.1 超长文件审计
+
+命令：
+
+```text
+$ find src -name "*.cc" | xargs wc -l | sort -rn | head -11
+ 20171 total
+  8427 src/ooxml/generated/wml_schema_data.cc   # 生成物，排除
+  1553 src/doc/format/sprm.cc
+  1141 src/doc/format/fkp.cc
+  1030 src/doc/format/formatted.cc
+   949 src/cfb/cfb_reader.cc
+   755 src/doc/format/pictures.cc
+   572 src/doc/format/headers.cc
+   533 src/doc/format/styles.cc
+   467 src/docx/writer.cc
+   450 src/cli/main.cc
+```
+
+>800 行的手工文件（4 个）职责与拆分评估：
+
+| 文件 | 行数 | 职责 | 拆分判断 |
+|---|---:|---|---|
+| `src/doc/format/sprm.cc` | 1553 | 31–86 `LanguageTag`/`Ico`/`Toggle`；87–158 operand 读取；159–711 表格/行/单元格属性应用；717–968 `ApplyRun`；969–1252 `ApplyPara`；1253–1440 `ApplySection`；1441–1552 样式条件格式 | 表格族（约 550 行）理论上可整体搬到 `sprm_table.cc`，但需要暴露 operand 读取器并改动分派入口；属大重构，本批只登记 |
+| `src/doc/format/fkp.cc` | 1141 | 34–325 `ReadChars`；326–577 Word 6/95 sprm 重建助手；578–1022 `ScanLegacySprms`/`NormalizeLegacySprms`/`ReadLegacyFkps`；1023–1130 `ReadFkps`；1131–1140 `Find` | legacy 路径（约 700 行）可拆到 `fkp_legacy.cc`，但共用 `Put*`/BRC 助手；属大重构，本批只登记 |
+| `src/doc/format/formatted.cc` | 1030 | 72–131 `Prm0Opcode` 表；133–1029 `ParseFormatted` 主遍历（正文/域/表格/注释/文本框/节） | 单一状态机，语义强耦合；不建议拆 |
+| `src/cfb/cfb_reader.cc` | 949 | Header/FAT/DIFAT 解析、目录名/条目、`ReadChain`、`Open`、`Walk`、`ReadStream` | 共享解析状态，拆分收益低；不建议拆 |
+
+结论：本批不拆任何 >800 行文件。任务边界要求“只拆机械可拆的、大改另立任务”，
+四个文件都需要改头文件与分派边界，不属于 ≤5 行小修。已登记为后续独立重构。
+
+### 3.2 死代码扫描
+
+- `gcc -Wunused-function -Werror` 全量构建通过；匿名命名空间/`static` 函数无未引用告警。
+- 交叉检查 `src/doc/format/sprm_codes.h` 的 282 个 `kSprm*` 常量：**16 个**在
+  `sprm.cc` 及所有 `.cc/.h` 中无引用（`docs/` 的 SPRM 台账除外）：
+
+```text
+kSprmCFMathPr        kSprmCHresi          kSprmCIstdPermute
+kSprmCMajority       kSprmCPbiGrf         kSprmCPbiIBullet
+kSprmPFNoAllowOverlap kSprmPFOpenTch      kSprmPIpgp
+kSprmPIstdPermute    kSprmPTIstdInfo      kSprmSDmPaperReq
+kSprmTCellBrcType    kSprmTIpgp           kSprmTWidthAfter
+kSprmTWidthBefore
+```
+
+处理：**全部保留**。逐项核对 `docs/SPRM-COVERAGE.md`，16 个都是 `N/A` 行
+（规范允许忽略、OOXML 无对应语义、编辑器期置换表等），常量存在是为了
+“一行一个 opcode”的台账可追溯，不是可删死代码。没有确认无引用的函数可删。
+
+### 3.3 TODO/FIXME/HACK 清点
+
+```text
+$ grep -rn "TODO\|FIXME\|HACK\|XXX" src/ | wc -l
+0
+```
+
+结论：零条目，无需挂 issue；没有需要升级为 KNOWN-SIMPLIFICATIONS 的临时标记。
+已知缺口都由 `docs/KNOWN-SIMPLIFICATIONS.md` 的正式条目承载。
+
+### 3.4 头文件卫生（抽查 5 个）
+
+| 头文件 | 检查结果 | 处理 |
+|---|---|---|
+| `src/cfb/cfb_reader.h` | `<concepts>`/`<functional>`/`<utility>`/`<span>` 等 9 个均被使用（`std::invocable`、`std::function`、`std::forward`） | 无需改 |
+| `src/docx/writer.h` | `<cstddef>`、`<span>` 未使用；`namespace` 前缺空行 | 已删 2 个 include，补空行 |
+| `src/model/document.h` | `<cstddef>`（裸 `size_t`）、`<utility>`（`std::pair`）等均被使用 | 无需改 |
+| `src/doc/format/internal.h` | `<algorithm>`（`std::clamp`）、`<map>`、`<array>` 等均被使用 | 无需改 |
+| `src/api/doccraft_api.h` | C99 自包含，仅 `<stddef.h>`/`<stdint.h>` | 无需改 |
+
+附带发现：`src/cli/main.cc` 使用 `std::span` 但依赖 `writer.h` 的传递包含；
+已在 `main.cc` 直接补 `<span>`。include 分组顺序（本文件 → C 系统 → C++ 标准 →
+third_party → 项目）在 5 个头文件中均符合 AGENTS.md。
+
+### 3.5 魔数扫描（`src/doc/format/`，排除 0/1/2/-1 与 `internal.h` 已定义）
+
+原始扫描 111 行候选；剔除密集一对一数据表（AGENTS §3 允许裸值）后，登记 7 簇
+共 38 处：
+
+| 簇 | 位置 | 数字 | 说明 |
+|---|---|---|---|
+| FKP 页大小 | `fkp.cc` 975/977/983/985/994/997/1035/1037/1046/1047/1057/1066/1071/1079 | `512`、`511`（14 处） | `[MS-DOC]` FKP 页 512 字节、末字节 511；建议命名 `kFkpPageSize` |
+| BRC6 位域 | `fkp.cc` 416–418 | `0x1F`、`0x07`、`0x03` | ico/width/type 掩码，建议命名 |
+| CLX Prc 上限 | `fkp.cc` 177 | `0x3FA2` | 行内已引 [MS-DOC] §2.9.210，优先级低 |
+| 域字符 | `headers.cc` 178/183 | `0x13`/`0x14`/`0x15` | Fld.fldch begin/sep/end；建议命名 |
+| Prm0 / 域标志 | `formatted.cc` 206/476/477 | `0x7F`、`0x10`、`0x04` | `headers.cc` 已有 `kFldLocked`/`kFldResultsDirty`，未共享 |
+| 列表结构 | `lists.cc` 32/44/55/59/85 | `1024`、`28`、`24`/`25`、`0x0fff`、`8`、`0x17` | LSTF/LVLF 尺寸、哨兵、格式码 |
+| 样式结构 | `styles.cc` 244/261/407/442 | `4096`、`0x0fff`、`8` | STSH 计数上限与 `stiNil` 哨兵 |
+
+明确豁免的数据表（AGENTS §3）：`sprm.cc` 34–79 的 LCID 标签与 Ico 调色板、
+`formatted.cc` 74–126 的 128 项 Prm0 表、`headers.cc` 49 的 6 个故事位、
+`styles.cc` 321–322 的 12 项 CNF 优先级表。本批未改这些数字（避免语义变更）。
+
+### 3.6 错误消息一致性
+
+规则：小写开头、无句号结尾。扫描 `Error{...}`/`std::unexpected`/warning 字符串：
+
+- **修了 1 处**：`src/docx/writer.cc:53`
+  `Unknown relationship target: ...` → `unknown relationship target: ...`；
+  `tests/docx_writer_test.cc:394` 同步更新。
+- 修后仍有 **50 个**字面量以大写开头，全部是专有名词/缩写：
+  `Word` 19、`PICF` 6、`OLE` 5、`Escher` 3、`CLX` 3、`XOR` 2、`ZIP` 2、
+  `SEPX` 2，以及 `ANSI`/`UTF-16`/`BTE`/`FKP`/`PAPX`/`CHPX`/`SttbfRMark`/`FAT`
+  各 1。逐个检查后确认它们应保留大写（`Word 6/95`、`ZIP`、`XML` 等不能改成
+  小写）；`fkp.cc:1116` 的 `PAPX`/`CHPX` 是格式参数而非消息开头。
+- **0 个**消息以句号结尾。
+
+### 3.7 本批实际改动的代码
+
+```text
+$ git show --stat aa3723f
+ src/cli/main.cc             | 1 +
+ src/doc/format/lists.cc     | 4 ++--
+ src/docx/writer.cc          | 2 +-
+ src/docx/writer.h           | 3 +--
+ tests/docx_writer_test.cc   | 2 +-
+ 5 files changed, 6 insertions(+), 6 deletions(-)
+```
+
+- `lists.cc`：`0x845E`/`0x8460` → `kSprmPDxaLeft`/`kSprmPDxaLeft1`（纯命名）。
+- `writer.cc` + 测试：错误消息小写（纯措辞）。
+- `writer.h`/`main.cc`：include 最小化（`<cstddef>`/`<span>` 移除，`main.cc` 补 `<span>`）。
+
+均为非语义小修；40 样本黄金门前后逐 part 相同（见 §5.4）。
+
+## 4. 块3：CI 补充
+
+### 4.1 `ci.yml` 新 job
+
+| job | 触发 | 关键设置 | 作用 |
+|---|---|---|---|
+| `build-test-format` | push / PR / manual | `timeout-minutes: 40`，concurrency `...-build` | 原 job，补超时与并发组；ctest 加 `--timeout 300` |
+| `asan` | push / PR / manual | `timeout-minutes: 60`，concurrency `...-asan`，job env `ASAN_OPTIONS=detect_leaks=0:abort_on_error=1` | Debug + `-fsanitize=address -fno-omit-frame-pointer`，全量 ctest |
+| `corpus` | 预留 | `if: false`，concurrency `...-corpus`，`DOCRAFT_CORPUS_DIR: ${{ vars.DOCRAFT_CORPUS_DIR }}` | 外部语料不常驻 runner；注释与 `docs/CI.md` 写明启用三步 |
+| `perf-smoke` | `workflow_dispatch` | `timeout-minutes: 30`，concurrency `...-perf` | 只生成 5 MiB，5 次中位数，对比 `baseline.json["5"]`，>30% 只 `::warning::`，不失败 |
+| `docs-links` | push / PR / manual | `timeout-minutes: 5`，concurrency `...-docs` | `scripts/check_readme_links.py` 检查 README 相对链接/图片存在性 |
+
+`build-matrix.yml` 的两个 job 补了 `concurrency`（`cancel-in-progress: false`，
+避免丢平台结果）；`pages.yml` 的 job 补了 `timeout-minutes: 15`。
+
+### 4.2 corpus 机制
+
+- 语料不在仓库：`tests/poi_corpus_smoke.py` 从 `DOCRAFT_CORPUS_DIR`（默认
+  `/home/ubuntu/doccraft-corpus/poi-test-data`）glob `*.doc`。
+- 目录不存在时打印 `POI corpus not present - skipping (...)` 并 `exit 0`；
+  `ctest` 因此干净通过。验证：
+
+```text
+$ DOCRAFT_CORPUS_DIR=/tmp/does-not-exist \
+    python3 tests/poi_corpus_smoke.py build/src/cli/doccraft
+POI corpus not present - skipping (download to /tmp/does-not-exist)
+$ echo $?
+0
+```
+
+- 有语料时断言语料 ≥100 文件、成功 ≥100、零崩溃/超时。
+- 启用 hosted runner：需另加下载步骤；self-hosted runner：设置
+  `DOCRAFT_CORPUS_DIR`，把 `if: false` 换成
+  `if: ${{ vars.DOCRAFT_CORPUS_DIR != '' }}`。
+
+### 4.3 ASan 本地验证
+
+CI 的 `asan` job 按同样参数在本地跑通（`build-asan-ci`，未入库）：
+
+```text
+$ ASAN_OPTIONS=detect_leaks=0 cmake --build build-asan-ci -j
+...
+[100%] Built target api_cli_fixture
+asan_build_exit=0
+
+$ ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
+    ctest --test-dir build-asan-ci --output-on-failure -j4
+...
+585/585 Test #232: ConverterSchemaTest.SamplesMatchTheWordprocessingMlSchema ... Passed 79.50 sec
+
+100% tests passed, 0 tests failed out of 585
+```
+
+注意：`gtest_discover_tests` 在构建期会运行测试二进制，因此 `ASAN_OPTIONS`
+必须覆盖 build 步骤；CI 的 job 级 `env` 已覆盖，`docs/CI.md` 本地命令也已补上。
+
+### 4.4 YAML 自检
+
+```text
+$ command -v actionlint
+（无输出，未安装 → 按任务约定跳过）
+
+$ python3 -c "import yaml; yaml.safe_load(open(...))"
+YAML OK .github/workflows/ci.yml
+YAML OK .github/workflows/build-matrix.yml
+YAML OK .github/workflows/pages.yml
+```
+
+### 4.5 文档链接检查
+
+```text
+$ python3 scripts/check_readme_links.py
+README relative links: all targets exist
+$ echo $?
+0
+```
+
+## 5. 验证（原始输出）
+
+### 5.1 构建
+
+```text
+$ cmake --build build -j
+...
+[100%] Built target api_cli_fixture
 build_exit=0
 ```
 
-### 6.2 全量 ctest
+### 5.2 全量 ctest
 
 ```text
-$ ctest --test-dir build --output-on-failure -j2
+$ ctest --test-dir build --output-on-failure -j4
 ...
-433/433 Test #418: edge_corpus ............................................................   Passed    0.16 sec
+585/585 Test #95: PieceTableTest.ReadsCompressedAndUtf16Pieces ... Passed 0.00 sec
 
-100% tests passed, 0 tests failed out of 433
-
-Total Test time (real) =   6.95 sec
+100% tests passed, 0 tests failed out of 585
+Total Test time (real) =   8.15 sec
 ```
 
-用例数对比：基线 `ctest -N` = 373，本次 = 433，新增 60 个 ctest 条目。
-
-### 6.3 新语料断言
-
-```text
-$ python3 tests/corpus/run_edge_corpus.py build/src/cli/doccraft
-OK   control-field-chars: 8 chars
-OK   control-object-marks: 2 chars
-OK   control-page-break: 3 chars
-OK   control-section-break: 3 chars
-OK   control-whitespace: 4 chars
-OK   cp1252-all-256: 225 chars
-OK   empty-document: 0 chars
-OK   field-missing-separator: 0 chars
-OK   field-nested-5: 11 chars
-OK   field-unclosed: 6 chars
-OK   huge-cell-text: 70000 chars
-OK   many-columns: 270 chars
-OK   nested-table-d2: 8 chars
-OK   nested-table-d4: 20 chars
-OK   nested-table-d8: 44 chars
-OK   nested-table-d9: 50 chars
-OK   piece-cp-descending: rejected with 'invalid piece CP order'
-OK   piece-fcmin-mismatch: 2 chars
-OK   piece-mixed-encoding: 6 chars
-OK   piece-outside-stream: rejected with 'piece outside WordDocument'
-OK   piece-prm-index: rejected with 'CLX Prm1 index outside Prc array'
-OK   single-char: 1 chars
-OK   style-cycle: 6 chars
-OK   style-deep-chain: 4 chars
-OK   two-paragraphs: 5 chars
-OK   utf16-surrogate-pair: 2 chars
-OK   utf16-unpaired-surrogate: 2 chars
-
-27/27 edge samples passed
-```
-
-12 份 corpus 文本一致性：
-
-```text
-$ python3 tests/corpus/compare_text.py build/src/cli/doccraft
-alignment-indents.doc: 100.00%
-bold-italic-underline.doc: 100.00%
-cjk-text.doc: 100.00%
-comments-bookmarks.doc: 100.00%
-complex-table.doc: 100.00%
-cyrillic-text.doc: 100.00%
-headings-list.doc: 100.00%
-nested-tables.doc: 100.00%
-warning: ignored non-XML control in field instruction
-page-fields.doc: 100.00%
-plain-text.doc: 100.00%
-sections-continuous.doc: 100.00%
-simple-table.doc: 100.00%
-minimum: 100.00%
-```
-
-### 6.4 既有语料 golden gate
-
-检查方法：取基线 `f955a02` 中 `tests/corpus/corpus` 与 `tests/fixtures` 下的
-全部 `.doc`（39 个），排除 3 个需要 `--password` 的加密 fixture，共 36 个。
-对每个样本：
-
-1. 用 `git hash-object` 与 `git rev-parse f955a02:<path>` 比对输入字节；
-2. 连续转换两次，逐 ZIP part 计算 sha256，确认确定性；
-3. 汇总所有 part 的 manifest sha256。
-
-```text
-$ python3 /tmp/golden_gate.py
-baseline samples: 36
-inputs byte-identical to f955a02: 36/36
-deterministic part hashes: 36/36
-aggregate part-manifest sha256: 57aad25f28e73ba272f3517534f223506a80cfaccba222933959ec34392517fa
-exit=0
-```
-
-产品代码零差异：
-
-```text
-$ git diff --stat f955a02 -- src
-$ （无输出）
-```
-
-输入只增不减：
-
-```text
-$ git diff --stat f955a02 -- tests/corpus/corpus tests/fixtures | tail
- tests/corpus/corpus/comments-bookmarks.doc   | Bin 0 -> 9216 bytes
- tests/corpus/corpus/nested-tables.doc        | Bin 0 -> 11264 bytes
- tests/corpus/corpus/page-fields.doc          | Bin 0 -> 9216 bytes
- tests/corpus/corpus/sections-continuous.doc  | Bin 0 -> 9216 bytes
- ...
- 12 files changed, 76 insertions(+)
-```
-
-即：既有 8 份 corpus 与全部 fixture 的字节未变，`src/` 未变，因此既有输出
-不可能回退；上述 36/36 输入字节一致 + 两次转换 part sha 一致 + `src` 零 diff
-构成 golden gate 证据。任务描述中的“35 个”与基线树中非加密 `.doc` 实际数量
-36 个有 1 个出入，按仓库实际文件计数。
-
-### 6.5 format-check
+### 5.3 format-check
 
 ```text
 $ cmake --build build --target format-check
@@ -261,39 +320,73 @@ $ cmake --build build --target format-check
 format_exit=0
 ```
 
-## 7. 发现的问题（本批不修 `src/`）
+### 5.4 黄金门
 
-1. **嵌套表格行尾标记产生多余空段落（pixel 0.305%）**
-   `nested-tables.doc` 的 B1 单元格内，doccraft 输出 8 个 `<w:p>`，LibreOffice
-   参考为 6 个；多出的 2 个空段落来自嵌套表每行的 TTP/row-end 标记。结果是
-   外表第二行整体下移约两行，pixelcompare 0.305% FAIL、文本一致性仍 100%。
-   位置线索：`src/doc/format/formatted.cc` 的 `close_row` / `FinishTableRow`
-   对空 `para` 的处理。按本批边界未改产品代码，已记录到
-   `docs/PIXEL-BASELINE.md`。
-   后续（2026-10-31）：`aa133ee` 已按 `sprmPFInnerTableCell`/
-   `sprmPFInnerTtp` 在深度 ≥ 2 的 CR 标记上分割行列，HEAD 复测为 2×2 内表、
-   每格 1 段，pixelcompare 0.010% PASS；本条保留为历史记录。
+方法：开工时（`f24ad42`，`src/` 未改）对 12 corpus + 28 非加密 fixtures
+（共 40 份）各转换两次，逐 ZIP part 计 SHA-256；代码改动后同一二进制再跑一次，
+比较 manifest。
 
-2. **FKP 结构损坏是降级而非拒绝**
-   FC 倒序、run count 越界、PAPX 长度溢出、重复页、页越界都只跳过该 FKP 页
-   并写 warning，转换仍成功。这是既有 degraded-FKP 策略，不是本批引入的
-   bug；回归用例已固定 warning 关键词。只有 `invalid FKP sprm sequence`
-   会升级为整篇拒绝。
+```text
+# 开工快照（HEAD f24ad42）
+baseline samples: 40
+aggregate part-manifest sha256:
+f57149112e2928e2a88e7396e6fa0ae995f492ebe410b36c8aa488091e6710b7
 
-3. **LibreOffice FODT→DOC 无法导出嵌套域**
-   `text:field` 在 FODT→DOC 导出时被丢弃；原生 `text:page-number` /
-   `text:sequence` 只产生单层域。因此块4 的 `page-fields` 是单层域样本，
-   嵌套域覆盖由块1 的 `field-nested-5` 提供。若后续必须用 LO 生成嵌套域
-   语料，需要在 FODT 之外走 DOC 级构造。
+# 改动后
+baseline samples: 40
+aggregate part-manifest sha256:
+f57149112e2928e2a88e7396e6fa0ae995f492ebe410b36c8aa488091e6710b7
 
-4. **空文档输出一个空段落**
-   `empty-document`（ccpText=0）的 IR 段落数为 0，但 `document.xml` 仍有
-   writer 的 section 结尾空 `<w:p>`；文本为空，符合 writer 结构要求，不是
-   数据丢失。
+$ python3 /tmp/golden_gate.py compare before.json after.json
+IDENTICAL: 40 samples, manifest f57149112e2928e2a88e7396e6fa0ae995f492ebe410b36c8aa488091e6710b7
+```
 
-## 8. 规范与边界
+两次转换的 part hash 全部一致（确定性 40/40）；输入 `.doc` 无改动
+（`git status` 未出现 corpus/fixtures）。
 
-- 新增 C++ 文件均带 Apache-2.0 头，Google 风格，`format-check` 通过。
-- `tests/m20_doc_util.h` 只放在 `tests/`，未进入产品依赖方向。
-- 未新增第三方依赖；未改 `third_party/`、`build/`、外部语料。
-- 四个提交均未 push，等待主控 review。
+### 5.5 性能冒烟脚本
+
+```text
+$ python3 scripts/perf_smoke.py build/src/cli/doccraft \
+    build/perf/structured-5mb.doc --baseline tests/perf/baseline.json --size 5 --runs 5
+median: 0.290 s over 5 runs
+baseline: 0.288 s (+0.5%)
+exit=0
+```
+
+### 5.6 最终仓库状态
+
+```text
+$ git log --oneline -5
+（见 §1 的 commit 表；本文件为最后一个提交）
+
+$ git status --porcelain
+（提交后为空）
+```
+
+## 6. 登记但未处理（后续任务）
+
+1. **大文件拆分**：`sprm.cc` 表格族 → `sprm_table.cc`；`fkp.cc` legacy 路径 →
+   `fkp_legacy.cc`。都需要移动共享助手并改分派，单独一批做，配 40 样本黄金门。
+2. **魔数命名**：FKP `512/511`、BRC6 掩码、`Fld.fldch` 0x13–0x15、LSTF/LVLF
+   尺寸与哨兵、STSH `0x0fff`/4096。建议先加 `internal.h` 常量再逐文件替换，
+   不改变任何分支。
+3. **16 个 N/A sprm 常量**：保留为台账锚点；若未来引入“台账驱动检查”，可在
+   `sprm_codes.h` 给它们加 `// N/A:` 注释，当前不动。
+4. **像素基线缺口**：40 个非加密样本中 37 个有记录，3 个 fixture
+   （`basic-shapes`、`comments-range`、`header-textbox`）未测；另 3 个 encrypted
+   fixture 不参与像素基线。补测后更新 `docs/pixel-baseline.tsv` 与
+   `PIXEL-BASELINE.md`。
+5. **680 全库未在本批重跑**：本批改的是常量命名/错误措辞/include，40 样本
+   part 级零差异；README 的 92% 引用 `KNOWN-SIMPLIFICATIONS` r51 的已记录结果。
+
+## 7. 边界与规范
+
+- 未改 `third_party/`、未改外部语料、未 push。
+- 未新增第三方依赖；CI 只使用 GitHub 官方 action、apt 包（clang-format、
+  libreoffice-writer）与仓库自带 Python 脚本。
+- `src/` 改动 4 个文件、5 行增 5 行删（命名/措辞/include），测试 1 行同步更新；
+  格式解析与写出行为零变更（黄金门 40/40 manifest 相同）。
+- 新增文件：`docs/CI.md`、`scripts/check_readme_links.py`、
+  `scripts/perf_smoke.py`；C++ 无新增文件，故无需补 Apache-2.0 文件头。
+- 未使用 `actionlint`（未安装），以 `yaml.safe_load` 代替，三个 workflow 均零错误。
