@@ -33,9 +33,12 @@ format parsing, so the decoded character array remains the main memory cost.
 Three independent five-run medians for the final 100 MiB binary were 3.646 s,
 3.913 s and 3.441 s; the table records the second complete five-size run.
 The committed `tests/perf/baseline.json` is a later run on the regression host,
-where every size is about 1.6x slower (100 MiB: 6.367 s, 996.2 MiB RSS); use it
-for like-for-like regression comparisons on that host, not as a second absolute
-measurement of the machine described above.
+re-recorded on 2026-11-01 at `d07e9b2`, where every size is about 1.6x slower
+(100 MiB: 6.425 s, 944.6 MiB RSS); use it for like-for-like regression
+comparisons on that host, not as a second absolute measurement of the machine
+described above. The fixtures in this checkout are 0.95/4.75/18.96/49.20/94.77
+MiB (the table above used 1.00/5.00/20.00/50.24/99.99 MiB), so regenerate them
+with `tests/perf/gen_corpus.py` before comparing.
 The five fixtures do not establish a population p99, which needs a
 representative document distribution.
 

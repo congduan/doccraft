@@ -1,32 +1,32 @@
 {
   "1": {
-    "size_bytes": 1052160,
-    "wall_seconds": 0.059837,
-    "peak_rss_kb": 14316
+    "size_bytes": 999424,
+    "wall_seconds": 0.057421,
+    "peak_rss_kb": 14128
   },
   "5": {
-    "size_bytes": 5244928,
-    "wall_seconds": 0.28835,
-    "peak_rss_kb": 55340
+    "size_bytes": 4975616,
+    "wall_seconds": 0.286817,
+    "peak_rss_kb": 52640
   },
   "20": {
-    "size_bytes": 20975104,
-    "wall_seconds": 1.176241,
-    "peak_rss_kb": 208580
+    "size_bytes": 19881472,
+    "wall_seconds": 1.25624,
+    "peak_rss_kb": 197148
   },
   "50": {
-    "size_bytes": 52679680,
-    "wall_seconds": 1.26343,
-    "peak_rss_kb": 239268
+    "size_bytes": 51586560,
+    "wall_seconds": 1.273188,
+    "peak_rss_kb": 227968
   },
   "100": {
-    "size_bytes": 104845312,
-    "wall_seconds": 6.366793,
-    "peak_rss_kb": 1020080
+    "size_bytes": 99377664,
+    "wall_seconds": 6.425367,
+    "peak_rss_kb": 967284
   },
   "_meta": {
-    "recorded_at_utc": "2026-10-28T09:10:21+00:00",
-    "commit": "a1708748e2427b21d2082a27494f377bb509a090",
+    "recorded_at_utc": "2026-11-01T14:14:55+00:00",
+    "commit": "d07e9b25cc1bcda4b6d4451f96a4bf0a547a3f5a",
     "method": "clean Release build; idle machine; five conversions per size; median wall seconds and maximum peak RSS KB"
   }
 }
