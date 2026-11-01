@@ -202,7 +202,10 @@ OpResult ApplyTableDefinition(model::Table& table, model::RowProperties& row,
       for (size_t side = 0; side < kCellSideCount; side++) {
         Bytes brc = v.subspan(start + kTDefBordersOffset + side * kBrc80Size,
                               kBrc80Size);
-        if (U32(brc, 0) != kUndefinedU32 && U32(brc, 0) != 0)
+        // All-zero bytes leave the border unset. The all-ones sentinel is an
+        // explicit "no border" and has to reach TableBorder so it clears an
+        // inherited border instead of reading as unset.
+        if (U32(brc, 0) != 0)
           TableBorder(c.borders[side], brc, true);
       }
     }

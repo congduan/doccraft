@@ -493,7 +493,20 @@ void AppendBrc10(std::vector<uint8_t>& out, uint16_t v) {
 // unused byte and flags. The type and width come from the same BRC10 mapping
 // as TSetBrc10; the unused byte is zero.
 void AppendBrc80FromBrc10(std::vector<uint8_t>& out, uint16_t v) {
+  // An all-zero BRC10 means "no border specified" and stays four zero bytes,
+  // which the modern TC80 handler skips. Any other word that does not map to
+  // a line type is an explicit "no line" border: write the all-ones BRC80
+  // sentinel so it stays distinguishable from an unset border and clears a
+  // would-be inherited one instead of silently disappearing.
+  if (v == 0) {
+    out.insert(out.end(), kBrc80Size, 0);
+    return;
+  }
   const Brc10Line line = DecodeBrc10(v);
+  if (line.type == 0) {
+    out.insert(out.end(), kBrc80Size, 0xFF);
+    return;
+  }
   out.push_back(line.width);
   out.push_back(line.type);
   out.push_back(0);
@@ -504,7 +517,8 @@ void AppendBrc80FromBrc10(std::vector<uint8_t>& out, uint16_t v) {
 // merge and text-flow layout as TC80, so it is copied; the width is left zero
 // because the column grid supplies it. Each BRC10 goes through the same
 // mapping as sprmTSetBrc10 and becomes a four-byte BRC80. An all-zero BRC10
-// stays four zero bytes, which the modern TC80 handler skips.
+// stays four zero bytes, which the modern TC80 handler skips; a non-zero word
+// without a line type becomes the all-ones explicit-nil sentinel.
 void AppendTc80FromTc6(std::vector<uint8_t>& out, Bytes tc6) {
   PutU16(out, U16(tc6, 0));
   PutU16(out, 0);

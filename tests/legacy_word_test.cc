@@ -1527,8 +1527,8 @@ TEST(LegacyWord, LegacyScanMapsLegacyTableDefinitionBrc10) {
   EXPECT_EQ(out, expected);
   // The only non-zero BRC10 in the real corpus (Bug50955.doc: 0x03CA) is
   // (line1=7, gap=1, line2=2), which wvWare leaves as type 0. It still
-  // reaches the IR as a set border with width 7 and space 1 instead of being
-  // dropped.
+  // reaches the IR as a set border, but as the explicit all-ones "no border"
+  // sentinel rather than a width-7 line nobody can draw.
   out.clear();
   const std::vector<uint8_t> unrecognised = {
       0xBE, 0x10, 0x00,  // cb = 16 bytes after cb + 1.
@@ -1545,7 +1545,7 @@ TEST(LegacyWord, LegacyScanMapsLegacyTableDefinitionBrc10) {
       0x08, 0xD6, 0x1A, 0x00, 0x01,  // sprmTDefTable, cb, itc.
       0x00, 0x00, 0xD0, 0x02,        // XAS centres.
       0x00, 0x00, 0x00, 0x00,        // TC80: TCGRF, wWidth 0.
-      0x07, 0x00, 0x00, 0x01,        // top: type 0, width 7, space 1.
+      0xFF, 0xFF, 0xFF, 0xFF,        // top: explicit nil (type 0).
       0x00, 0x00, 0x00, 0x00,        // left: all zero.
       0x00, 0x00, 0x00, 0x00,        // bottom: all zero.
       0x00, 0x00, 0x00, 0x00,        // right: all zero.
@@ -1672,8 +1672,8 @@ TEST(LegacyWord, Word6TableDefinitionBrc10ReachesDocx) {
   EXPECT_EQ(second.borders[1].color, -1);
   EXPECT_TRUE(second.borders[2].set);
   EXPECT_EQ(second.borders[2].type, 0u);  // Unrecognised triple.
-  EXPECT_EQ(second.borders[2].width, 7);
-  EXPECT_EQ(second.borders[2].space, 1);
+  EXPECT_EQ(second.borders[2].width, 0);
+  EXPECT_EQ(second.borders[2].space, 0);
   EXPECT_FALSE(second.borders[3].set);
   auto zip = doccraft::docx::Write(*document);
   ASSERT_TRUE(zip) << zip.error().message;
@@ -1686,6 +1686,69 @@ TEST(LegacyWord, Word6TableDefinitionBrc10ReachesDocx) {
         "w:color=\"auto\" w:space=\"0\"/><w:bottom w:val=\"nil\"/>"
         "</w:tcBorders>"})
     EXPECT_NE(xml.find(fragment), std::string::npos) << fragment << "\n" << xml;
+}
+
+TEST(LegacyWord, LegacyScanMapsUnrecognisedBrc10ToExplicitNil) {
+  // A non-zero BRC10 that wvConvertBRC10ToBRC cannot recognise must not fall
+  // back to four zero bytes: all-zero BRC80 means "unset" and the TC80
+  // handler skips it, which would make the Word 6 value indistinguishable
+  // from an absent border. The all-ones BRC80 sentinel is the explicit "no
+  // border" value TableBorder already understands. 0x0001 is
+  // (line1=0, gap=0, line2=1), which decodes to width 0, type 0 and no
+  // flags; 0x0200 is a space-only word whose flags byte alone is non-zero.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {
+      0xBE, 0x10, 0x00,  // cb = 16 bytes after cb + 1.
+      0x01,              // itcMac = 1.
+      0x00, 0x00,        // 0.
+      0xD0, 0x02,        // 720 twips.
+      0x00, 0x00,        // TCGRF.
+      0x01, 0x00,        // top: 0x0001, non-zero but type 0.
+      0x00, 0x02,        // left: 0x0200 (space 1), type 0.
+      0x00, 0x00,        // bottom: all zero, unset.
+      0x00, 0x00,        // right: all zero, unset.
+  };
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> expected = {
+      0x08, 0xD6, 0x1A, 0x00, 0x01,  // sprmTDefTable, cb, itc.
+      0x00, 0x00, 0xD0, 0x02,        // XAS centres.
+      0x00, 0x00, 0x00, 0x00,        // TC80: TCGRF, wWidth 0.
+      0xFF, 0xFF, 0xFF, 0xFF,        // top: explicit nil.
+      0xFF, 0xFF, 0xFF, 0xFF,        // left: explicit nil.
+      0x00, 0x00, 0x00, 0x00,        // bottom: all zero (unset).
+      0x00, 0x00, 0x00, 0x00,        // right: all zero (unset).
+  };
+  EXPECT_EQ(out, expected);
+}
+
+TEST(LegacyWord, Word6UnrecognisedBrc10BecomesExplicitNil) {
+  // The same mapping seen through the IR: only an all-zero BRC10 stays
+  // unset. A non-zero word that maps to type 0 becomes a set border with no
+  // line, so the writer emits w:val="nil" instead of inheriting a border.
+  const std::vector<uint8_t> row = {
+      0xBE, 0x10, 0x00, 0x01, 0x00, 0x00, 0xD0, 0x02,  // One column.
+      0x00, 0x00,                                      // TCGRF.
+      0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // top 0x0001.
+      0x19, 0x01, 0x18, 0x01,                          // Fttp, FInTable.
+  };
+  auto document = ParseWord6(Word6TableDocument({0x18, 1}, row, 1));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  ASSERT_EQ(document->tables[0].row_properties.size(), 1u);
+  ASSERT_EQ(document->tables[0].row_properties[0].cells.size(), 1u);
+  const auto& cell = document->tables[0].row_properties[0].cells[0];
+  EXPECT_TRUE(cell.borders[0].set);
+  EXPECT_EQ(cell.borders[0].type, 0u);
+  EXPECT_EQ(cell.borders[0].width, 0);
+  EXPECT_EQ(cell.borders[0].space, 0);
+  EXPECT_FALSE(cell.borders[1].set);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tcBorders><w:top w:val=\"nil\"/></w:tcBorders>"),
+            std::string::npos)
+      << xml;
 }
 
 TEST(LegacyWord, LegacyScanStopsAfterTablePropertiesOnUnknownOpcode) {
