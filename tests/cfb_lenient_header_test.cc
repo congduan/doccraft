@@ -180,14 +180,21 @@ TEST(CfbLenientHeader, RejectsCyclicDirectoryChain) {
   EXPECT_EQ(reader.error().code, ErrorCode::kCorruptDirectory);
 }
 
-TEST(CfbLenientHeader, RejectsDirectoryChainTwoSectorsPastEnd) {
+// A directory chain that leaves the file after its first sector keeps that
+// sector (r52). Only a chain whose very first sector lies outside the file has
+// no record to anchor a recovery and stays rejected; that boundary is pinned
+// by CfbReaderTest.RejectsDirectoryChainStartingOutsideTheFile.
+TEST(CfbLenientHeader, SalvagesDirectoryChainTwoSectorsPastEnd) {
   auto bytes = ValidContainer();
   const uint32_t total = TotalSectors(bytes);
   const uint32_t dir_start = U32(bytes, 48);
   Put32(bytes, FatEntryOffset(bytes, dir_start), total + 1);
   auto reader = CfbReader::Open(bytes);
-  ASSERT_FALSE(reader.has_value());
-  EXPECT_EQ(reader.error().code, ErrorCode::kCorruptDirectory);
+  ASSERT_TRUE(reader.has_value()) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "cut short after 1 sector"));
+  auto stream = reader->ReadStream("s");
+  ASSERT_TRUE(stream.has_value()) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(100, 7));
 }
 
 // r49: when the allocation metadata in the header cannot be believed, the FAT

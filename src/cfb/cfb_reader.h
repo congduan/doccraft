@@ -149,10 +149,11 @@ class CfbReader {
   // while following a chain, so the physical state stays const-correct.
   mutable std::vector<std::string> warnings_;
   // Set by Open() when a link the tree walk actually stepped on names an entry
-  // slot past the table: the tree is truncated at that link. A name lookup then
-  // falls back to a linear scan of `entries_` so physically present streams
-  // stay readable. Bad links on records the tree never reaches do not set it;
-  // a complete tree stays authoritative for those.
+  // slot past the table, or when a directory chain was cut short after a
+  // readable prefix: the tree is truncated. A name lookup then falls back to a
+  // linear scan of `entries_` so physically present streams stay readable. Bad
+  // links on records the tree never reaches do not set it; a complete tree
+  // stays authoritative for those.
   bool directory_tree_incomplete_ = false;
 };
 

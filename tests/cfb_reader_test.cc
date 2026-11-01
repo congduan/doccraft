@@ -590,6 +590,84 @@ TEST(CfbReaderTest, ReadsDirectoryEntriesFromTrailingPartialSector) {
   }
 }
 
+// A directory FAT chain whose second ring leaves the file keeps the first
+// sector: the LibreOffice sw/qa samples ofz46457-1, ofz53457-1 and ofz18554-1
+// carry all four records (root, WordDocument, Data, 1Table) in it while the
+// next link is junk. The sectors read are real directory data, so Open uses
+// them and says how much of the chain was used; records that lived in the
+// dropped sector are gone rather than fabricated.
+TEST(CfbReaderTest, SalvagesDirectoryChainCutShortMidway) {
+  CfbBuilder builder;
+  builder.AddStream("Alpha", MakePayload(16, 0x41));
+  builder.AddStream("Beta", MakePayload(16, 0x42));
+  builder.AddStream("Gamma", MakePayload(16, 0x47));
+  builder.AddStream("Zeta", MakePayload(16, 0x5A));
+  auto bytes = builder.Build();
+  const uint32_t dir_start = Get32(bytes, 48);
+  ASSERT_EQ(Get32(bytes, FatEntryOffset(bytes, dir_start)), dir_start + 1)
+      << "expected a two-sector directory chain";
+  // The second ring names a sector far outside the file and the FAT table.
+  Put32(bytes, FatEntryOffset(bytes, dir_start), 0x1000);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "cut short after 1 sector"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "fall back to name matching"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  for (const auto& [name, fill] :
+       {std::pair{"Alpha", 0x41}, std::pair{"Beta", 0x42},
+        std::pair{"Gamma", 0x47}}) {
+    auto stream = reader->ReadStream(name);
+    ASSERT_TRUE(stream) << name << ": " << stream.error().message;
+    EXPECT_EQ(*stream, MakePayload(16, static_cast<uint8_t>(fill))) << name;
+  }
+  // Zeta's record lay in the sector the chain could not reach.
+  EXPECT_EQ(reader->ReadStream("Zeta").error().code,
+            ErrorCode::kStreamNotFound);
+}
+
+// The same cut at the head of the chain leaves no directory record at all, so
+// there is nothing to anchor a recovery: no directory bytes means no root, no
+// entries and no way to guess where the real directory sits. The container
+// stays rejected (ofz-redlining-1, ofz-trailingpara, ofz21168-1 have
+// first_dir_sector == total_sectors).
+TEST(CfbReaderTest, RejectsDirectoryChainStartingOutsideTheFile) {
+  auto bytes = CfbBuilder().AddStream("Small", MakePayload(16, 0x31)).Build();
+  Put32(bytes, 48, PhysicalSectorEnd(bytes));
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_FALSE(reader.has_value());
+  EXPECT_EQ(reader.error().code, ErrorCode::kCorruptDirectory);
+  EXPECT_NE(reader.error().message.find("directory chain starts outside"),
+            std::string::npos)
+      << reader.error().message;
+}
+
+// v4 declares its directory length in the header, so a chain cut short by a
+// junk link would otherwise trip the count check that guards a lying header.
+// The salvage above is the better diagnosis: the chain is demonstrably
+// truncated, and the count can no longer be compared.
+TEST(CfbReaderTest, SalvagesDirectoryChainCutShortInV4) {
+  CfbBuilder builder;
+  builder.SetSectorSize(4096);
+  for (int i = 0; i < 32; ++i) {
+    builder.AddStream("s" + std::to_string(i),
+                      MakePayload(1, static_cast<uint8_t>(i)));
+  }
+  auto bytes = builder.Build();
+  const uint32_t dir_start = Get32(bytes, 48);
+  ASSERT_EQ(Get32(bytes, FatEntryOffset(bytes, dir_start)), dir_start + 1)
+      << "expected a two-sector directory chain";
+  const uint32_t total = static_cast<uint32_t>(bytes.size() / 4096) - 1;
+  Put32(bytes, FatEntryOffset(bytes, dir_start), total + 1);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "cut short after 1 sector"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto stream = reader->ReadStream("s0");
+  ASSERT_TRUE(stream) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(1, 0));
+}
+
 // A container with less than one complete sector cannot hold a directory,
 // so it stays rejected even after trailing fragments are tolerated.
 TEST(CfbReaderTest, RejectsFileShorterThanOneSector) {

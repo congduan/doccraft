@@ -419,6 +419,9 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
   std::vector<uint8_t> directory;
   std::vector<uint8_t> seen(header.total_sectors, 0);
   uint32_t at = header.first_dir_sector;
+  // Set when a link the chain cannot follow ended it and the readable prefix
+  // was kept instead of rejecting the container.
+  bool truncated = false;
   while (at != kEnd) {
     // A directory FAT chain may name `total_sectors`, the sector just past the
     // last complete one. When the file ends with a physically present partial
@@ -442,7 +445,29 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
       }
       break;
     }
-    if (at >= header.total_sectors || at >= fat.size() || seen[at]) {
+    if (at >= header.total_sectors || at >= fat.size()) {
+      // The next ring cannot be read (ofz46457-1/ofz53457-1 link to sector 46
+      // with 33 sectors, ofz18554-1 has a fuzz value, ofz18414-1 links past
+      // the allocation table). Every sector read so far is real directory
+      // data, so keep that prefix and say how much of the chain was used; the
+      // name lookup below the tree then has a chance to reach the entries it
+      // holds. A chain whose first ring is already unreadable has no root to
+      // anchor the decode, so it stays rejected: guessing where the directory
+      // lives would invent structure.
+      if (directory.empty()) {
+        return std::unexpected(Fail(ErrorCode::kCorruptDirectory,
+                                    "directory chain starts outside the file"));
+      }
+      const size_t sectors = directory.size() / header.sector_size;
+      Warn(warnings, "directory chain cut short after " +
+                         std::to_string(sectors) +
+                         (sectors == 1 ? " sector" : " sectors") +
+                         "; entries read so far are used, streams fall back to "
+                         "name matching");
+      truncated = true;
+      break;
+    }
+    if (seen[at]) {
       return std::unexpected(
           Fail(ErrorCode::kCorruptDirectory, "invalid directory chain"));
     }
@@ -456,9 +481,12 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
         Fail(ErrorCode::kCorruptDirectory, "empty directory"));
   }
   // [MS-CFB] §2.2: for v4 the header field must equal the directory chain
-  // length; a mismatch means the header lies about its own structure.
+  // length; a mismatch means the header lies about its own structure. A chain
+  // that was cut short has already been diagnosed, and its length can no
+  // longer be compared with the declared one.
   const uint64_t chain_sectors = directory.size() / header.sector_size;
-  if (header.major_version == 4 && chain_sectors != header.num_dir_sectors) {
+  if (!truncated && header.major_version == 4 &&
+      chain_sectors != header.num_dir_sectors) {
     return std::unexpected(
         Fail(ErrorCode::kCorruptDirectory, "directory sector count mismatch"));
   }
