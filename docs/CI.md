@@ -8,11 +8,12 @@ Three workflows live in `.github/workflows/`:
 | `build-matrix.yml` | push, pull request, manual | Linux/GCC, macOS/Clang, Windows/MSVC (`ctest`), library-only build |
 | `pages.yml` | push to `main` when README, gallery or site generator changes, manual | build the static site and publish `gh-pages` |
 
-Every job sets `timeout-minutes` and a `concurrency` group so a stuck or
-superseded run cannot occupy a runner indefinitely. The groups use
-`cancel-in-progress: true` for pull-request and documentation jobs; the
-platform matrix keeps `cancel-in-progress: false` so an in-flight platform
-result is not discarded by a second push.
+Every CI job sets `timeout-minutes` and a `concurrency` group so a stuck or
+superseded run cannot occupy a runner indefinitely; `pages.yml` uses a
+workflow-level group instead. The CI groups use `cancel-in-progress: true` for
+pull-request and documentation jobs; the platform matrix keeps
+`cancel-in-progress: false` so an in-flight platform result is not discarded by
+a second push.
 
 ## Corpus gate
 
@@ -51,8 +52,8 @@ Without `DOCRAFT_CORPUS_DIR`, the script falls back to the development path
 The `asan` job configures a Debug build with
 `-fsanitize=address -fno-omit-frame-pointer`, links with the same sanitizer and
 runs the complete ctest suite with `ASAN_OPTIONS=detect_leaks=0`. Leak
-detection is off because the code uses `std::expected` and process-lifetime
-allocations; the job's purpose is memory safety (out-of-bounds, use-after-free,
+detection is off because the converter deliberately keeps process-lifetime
+buffers; the job's purpose is memory safety (out-of-bounds, use-after-free,
 double-free) rather than leak accounting. The deterministic mutation suite
 runs inside the same job.
 
