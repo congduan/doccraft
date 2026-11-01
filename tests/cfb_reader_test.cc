@@ -349,23 +349,58 @@ TEST(CfbReaderTest, SalvagesStreamChainEndingAtFreeSector) {
       << (reader->warnings().empty() ? "" : reader->warnings()[0]);
 }
 
-TEST(CfbReaderTest, RejectsRootSiblingWithoutThrowing) {
+// [MS-CFB] §2.6.1 gives the root entry no siblings: its left and right links
+// are NOSTREAM. The LibreOffice sw/qa samples ofz-delflyinrange-1, ofz41398-1,
+// ofz42330-1 and ofz45140-1 instead carry an in-file slot number there. The
+// link cannot reach anything the child tree does not already reach, so it is
+// ignored with one warning; the container and its streams stay usable.
+TEST(CfbReaderTest, IgnoresRootLeftSiblingLink) {
   CfbBuilder builder;
-  builder.AddStream("Small", MakePayload(1, 0x42));
+  builder.AddStream("Alpha", MakePayload(4096, 0x61));
+  builder.AddStream("Beta", MakePayload(4096, 0x62));
   auto bytes = builder.Build();
-  // Two four-byte patches: root.left points to the stream; root.child is empty.
-  Put32(bytes, 512 + 68, 1);
-  Put32(bytes, 512 + 76, 0xFFFFFFFF);
+  Put32(bytes, DirSlotOffset(bytes, 0) + 68, 1);
   bool threw = false;
   try {
     auto reader = CfbReader::Open(bytes);
-    ASSERT_FALSE(reader.has_value());
-    EXPECT_EQ(reader.error().code, ErrorCode::kCorruptDirectory);
+    ASSERT_TRUE(reader) << reader.error().message;
+    ASSERT_EQ(reader->warnings().size(), 1u);
+    EXPECT_TRUE(HasWarning(*reader, "root"));
+    EXPECT_TRUE(HasWarning(*reader, "left sibling"));
+    EXPECT_TRUE(HasWarning(*reader, "ignored"))
+        << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+    for (const auto& [name, fill] :
+         {std::pair{"Alpha", 0x61}, std::pair{"Beta", 0x62}}) {
+      auto stream = reader->ReadStream(name);
+      ASSERT_TRUE(stream) << name << ": " << stream.error().message;
+      EXPECT_EQ(*stream, MakePayload(4096, static_cast<uint8_t>(fill))) << name;
+    }
   } catch (...) {
     threw = true;
   }
 
   EXPECT_FALSE(threw);
+}
+
+TEST(CfbReaderTest, IgnoresRootRightSiblingLink) {
+  CfbBuilder builder;
+  builder.AddStream("Alpha", MakePayload(4096, 0x71));
+  builder.AddStream("Beta", MakePayload(4096, 0x72));
+  auto bytes = builder.Build();
+  Put32(bytes, DirSlotOffset(bytes, 0) + 72, 2);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "root"));
+  EXPECT_TRUE(HasWarning(*reader, "right sibling"));
+  EXPECT_TRUE(HasWarning(*reader, "ignored"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  for (const auto& [name, fill] :
+       {std::pair{"Alpha", 0x71}, std::pair{"Beta", 0x72}}) {
+    auto stream = reader->ReadStream(name);
+    ASSERT_TRUE(stream) << name << ": " << stream.error().message;
+    EXPECT_EQ(*stream, MakePayload(4096, static_cast<uint8_t>(fill))) << name;
+  }
 }
 
 TEST(CfbReaderTest, RejectsExcessiveStorageDepthWithoutThrowing) {

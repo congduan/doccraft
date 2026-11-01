@@ -692,11 +692,23 @@ std::expected<CfbReader, Error> CfbReader::Open(
     return std::unexpected(
         Fail(ErrorCode::kCorruptDirectory, "first entry is not root"));
   }
-  if (out.entries_[0].left != DirEntry::kNoFollow ||
-      out.entries_[0].right != DirEntry::kNoFollow) {
-    return std::unexpected(
-        Fail(ErrorCode::kCorruptDirectory, "root has sibling"));
-  }
+  // [MS-CFB] §2.6.1 gives the root entry no siblings, so its left and right
+  // links must be NOSTREAM. Real producers leave a slot number there instead
+  // (LibreOffice sw/qa ofz-delflyinrange-1, ofz41398-1, ofz42330-1 and
+  // ofz45140-1). A sibling of the root cannot reach any record the child tree
+  // does not, so the link is ignored with a warning rather than rejecting a
+  // container whose entries are all intact; the walk must not follow it, hence
+  // the reset to NOSTREAM.
+  const auto ignore_root_sibling = [&](const char* side, uint32_t* link) {
+    if (*link == DirEntry::kNoFollow)
+      return;
+    Warn(&out.warnings_, std::string("root entry has a ") + side +
+                             " sibling link to slot " + std::to_string(*link) +
+                             "; the root has no siblings, link ignored");
+    *link = DirEntry::kNoFollow;
+  };
+  ignore_root_sibling("left", &out.entries_[0].left);
+  ignore_root_sibling("right", &out.entries_[0].right);
   WalkReport walk;
   auto visited = out.Walk(
       [](const DirEntry&, std::string_view, bool) {
