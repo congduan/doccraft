@@ -415,7 +415,7 @@ std::expected<DirEntry, Error> ParseDirEntry(
 std::expected<std::vector<DirEntry>, Error> LoadDirectory(
     std::span<const uint8_t> bytes, const Header& header,
     const std::vector<uint32_t>& fat, std::span<const uint8_t> tail,
-    std::vector<std::string>* warnings) {
+    std::vector<std::string>* warnings, bool* chain_truncated) {
   std::vector<uint8_t> directory;
   std::vector<uint8_t> seen(header.total_sectors, 0);
   uint32_t at = header.first_dir_sector;
@@ -465,6 +465,7 @@ std::expected<std::vector<DirEntry>, Error> LoadDirectory(
                          "; entries read so far are used, streams fall back to "
                          "name matching");
       truncated = true;
+      *chain_truncated = true;
       break;
     }
     if (seen[at]) {
@@ -697,16 +698,21 @@ std::expected<CfbReader, Error> CfbReader::Open(
   const size_t usable = UsableSize(bytes.size(), header->sector_size);
   const std::span<const uint8_t> tail = bytes.subspan(usable);
   bytes = bytes.first(usable);
+  bool chain_truncated = false;
   auto tables = LoadFatTables(bytes, *header);
   if (!tables) {
     return std::unexpected(tables.error());
   }
-  auto entries = LoadDirectory(bytes, *header, tables->fat, tail, &warnings);
+  auto entries = LoadDirectory(bytes, *header, tables->fat, tail, &warnings,
+                               &chain_truncated);
   if (!entries) {
     return std::unexpected(entries.error());
   }
   CfbReader out;
   out.warnings_ = std::move(warnings);
+  // A cut directory chain leaves records the tree can no longer link to; the
+  // name fallback must stay open for the entries that were read.
+  out.directory_tree_incomplete_ = chain_truncated;
   out.major_version_ = header->major_version;
   out.sector_size_ = header->sector_size;
   out.data_ = bytes;

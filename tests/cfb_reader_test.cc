@@ -626,6 +626,39 @@ TEST(CfbReaderTest, SalvagesDirectoryChainCutShortMidway) {
             ErrorCode::kStreamNotFound);
 }
 
+// A cut chain also leaves records that the tree simply never links to, even
+// though no link is out of range: the dropped sector held the sibling that
+// used to reach them. The salvage must open the name fallback so the prefix
+// entries stay readable instead of looking like detached junk.
+TEST(CfbReaderTest, SalvagedDirectoryPrefixStaysReachableByName) {
+  CfbBuilder builder;
+  builder.AddStream("Alpha", MakePayload(16, 0x41));
+  builder.AddStream("Beta", MakePayload(16, 0x42));
+  builder.AddStream("Gamma", MakePayload(16, 0x47));
+  builder.AddStream("Zeta", MakePayload(16, 0x5A));
+  auto bytes = builder.Build();
+  const uint32_t dir_start = Get32(bytes, 48);
+  ASSERT_EQ(Get32(bytes, FatEntryOffset(bytes, dir_start)), dir_start + 1)
+      << "expected a two-sector directory chain";
+  Put32(bytes, FatEntryOffset(bytes, dir_start), 0x1000);
+  // Rewire the tree so slot 3 (Gamma) is never entered and no link dangles:
+  // root -> Beta, Beta -> Alpha, Gamma's sibling link is NOSTREAM.
+  Put32(bytes, DirSlotOffset(bytes, 0) + 76, 2);
+  Put32(bytes, DirSlotOffset(bytes, 3) + 72, 0xFFFFFFFF);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(HasWarning(*reader, "cut short after 1 sector"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  ASSERT_FALSE(HasWarning(*reader, "points past the entry table"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  auto gamma = reader->ReadStream("Gamma");
+  ASSERT_TRUE(gamma) << gamma.error().message;
+  EXPECT_EQ(*gamma, MakePayload(16, 0x47));
+  // Zeta's record was in the dropped sector.
+  EXPECT_EQ(reader->ReadStream("Zeta").error().code,
+            ErrorCode::kStreamNotFound);
+}
+
 // The same cut at the head of the chain leaves no directory record at all, so
 // there is nothing to anchor a recovery: no directory bytes means no root, no
 // entries and no way to guess where the real directory sits. The container
