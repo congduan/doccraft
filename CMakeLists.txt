@@ -57,7 +57,14 @@ if(DOCCRAFT_BUILD_TESTS)
   )
   # Prevent overriding the parent project's compiler/linker settings
   set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-  FetchContent_MakeAvailable(googletest)
+  # googletest is vendored by FetchContent and must not receive -Werror:
+  # newer clang warns about its own headers (-Wcharacter-conversion).
+  FetchContent_GetProperties(googletest)
+  if(NOT googletest_POPULATED)
+    FetchContent_Populate(googletest)
+    add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR}
+                     SYSTEM EXCLUDE_FROM_ALL)
+  endif()
 
   add_subdirectory(tests)
 endif()

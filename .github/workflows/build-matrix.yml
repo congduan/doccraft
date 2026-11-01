@@ -62,12 +62,12 @@ jobs:
 
       - name: Test
         if: matrix.ctest_exclude == ''
-        run: ctest --test-dir build --config Release --output-on-failure --timeout 300
+        run: ctest --test-dir build -C Release --output-on-failure --timeout 300
 
       - name: Test (POSIX-only cases excluded)
         if: matrix.ctest_exclude != ''
         run: >
-          ctest --test-dir build --config Release --output-on-failure
+          ctest --test-dir build -C Release --output-on-failure
           --timeout 300 -E "${{ matrix.ctest_exclude }}"
 
   # The shape WebAssembly, Android and iOS consume: libraries only, no CLI, no
