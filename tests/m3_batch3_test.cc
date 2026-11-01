@@ -176,6 +176,29 @@ std::string FixtureXml(const std::string& name) {
   return doc ? Xml(*doc) : std::string{};
 }
 
+std::expected<doccraft::model::Document, doccraft::doc::Error>
+SingleSectionWithSprms(std::vector<uint8_t> sprms) {
+  std::vector<uint8_t> word(1536), table(128);
+  word[1024] = 'A';
+  word[1025] = '\r';
+  table[0] = 2;
+  U32(table, 1, 16);
+  U32(table, 5, 0);
+  U32(table, 9, 2);
+  U32(table, 15, 0x40000000u + 2048);
+  U32(table, 64, 0);
+  U32(table, 68, 2);
+  U32(table, 74, 600);
+  U16(word, 600, sprms.size());
+  std::copy(sprms.begin(), sprms.end(), word.begin() + 602);
+  doccraft::doc::Fib fib;
+  fib.ccp_text = 2;
+  fib.fc_clx = 0;
+  fib.lcb_clx = 21;
+  fib.sed = {64, 20};
+  return doccraft::doc::ParseFormatted(word, table, fib);
+}
+
 TEST(M3Batch3, TDefTableCellWidthBorderAndMerge) {
   auto d = SyntheticTable({});
   ASSERT_TRUE(d.has_value()) << d.error().message;
@@ -545,6 +568,24 @@ TEST(M3Batch3, SectionColumnsPageNumberAndGrid) {
   EXPECT_NE(xml.find("<w:docGrid w:type=\"lines\" w:linePitch=\"360\""),
             std::string::npos);
   EXPECT_NE(xml.find("<w:textDirection w:val=\"tbRl\""), std::string::npos);
+}
+
+TEST(M3Batch3, ZeroSectionLinePitchKeepsDefaultGrid) {
+  std::vector<uint8_t> sprms;
+  Add(sprms, 0x9031, {0, 0});
+  auto d = SingleSectionWithSprms(sprms);
+  ASSERT_TRUE(d.has_value()) << d.error().message;
+  EXPECT_EQ(d->section.grid_line_pitch, -1);
+  auto xml = Xml(*d);
+  EXPECT_EQ(xml.find("<w:docGrid"), std::string::npos);
+}
+
+TEST(M3Batch3, OversizedSectionLinePitchRejectsSepx) {
+  std::vector<uint8_t> sprms;
+  Add(sprms, 0x9031, {0x00, 0x80});
+  auto d = SingleSectionWithSprms(sprms);
+  ASSERT_FALSE(d.has_value());
+  EXPECT_NE(d.error().message.find("SEPX"), std::string::npos);
 }
 
 TEST(M3Batch5, SectionModifiersPreviouslyUnasserted) {

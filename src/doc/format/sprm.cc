@@ -1372,7 +1372,11 @@ bool ApplySection(model::Section& s, uint16_t op, Bytes v) {
       s.page_format = v[0];
       break;
     case kSprmSDyaLinePitch:
-      if (U16(v, 0) < 1 || U16(v, 0) > kMaxTwips)
+      // 0 is not a meaningful line pitch; Word writers use it for "unset".
+      // Keep the model default instead of rejecting the whole document.
+      if (U16(v, 0) == 0)
+        break;
+      if (U16(v, 0) > kMaxTwips)
         return false;
       s.grid_line_pitch = U16(v, 0);
       break;
