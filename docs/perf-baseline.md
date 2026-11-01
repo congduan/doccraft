@@ -31,8 +31,11 @@ documents without an ObjectPool saved another 101 MiB. At 100 MiB, the
 profiled run reached 233.4 MiB after stream extraction and 990.3 MiB after
 format parsing, so the decoded character array remains the main memory cost.
 Three independent five-run medians for the final 100 MiB binary were 3.646 s,
-3.913 s and 3.441 s; the table and `tests/perf/baseline.json` record the
-second complete five-size run.
+3.913 s and 3.441 s; the table records the second complete five-size run.
+The committed `tests/perf/baseline.json` is a later run on the regression host,
+where every size is about 1.6x slower (100 MiB: 6.367 s, 996.2 MiB RSS); use it
+for like-for-like regression comparisons on that host, not as a second absolute
+measurement of the machine described above.
 The five fixtures do not establish a population p99, which needs a
 representative document distribution.
 
