@@ -67,10 +67,11 @@
 
 > r56 CFB 目录名尾部残缺降级 + 短 FibRgFcLcb 挽救（ofz46457-1 / ofz53457-1 由拒绝转成功，收掉本文件 r52 条目登记的遗留边界）：
 >
-> - **实证修正 r52 的字节记录**：两样本（字节级几乎相同）`WordDocument` 条目名（namelen=26）的尾随码元实测是 `0xD505`，不是 r52 条目所记的 U+D005，而且它根本不是孤立低代理——U+D505 是合法的韩语音节。真实缺陷是「名称缺 NUL 终止符」：`[MS-CFB]` §2.6.1 要求短于 64 字节的名称以 NUL 结束，LibreOffice 对缺失时丢弃最后一个声明码元读取前缀，本实现跟进。`DecodeEntryName` 现按三种尾部残缺截断保留可解码前缀并恰好告警一条（含槽位号与前缀，`directory entry name at slot N is not NUL-terminated within its declared length; using the decodable prefix '…'` / `ends with an incomplete UTF-16 sequence; …`）：①非 root、len<64 且末码元非 NUL（缺终止符，root 与 64 字节名称维持按声明长度解码，POI test-fields.doc 依赖后者）；②64 字节名称以未配对高代理结尾（无低半配对）；③尾随孤立低代理。残缺点之后仍存在可解码码元的中途损坏维持既有拒绝（防放行升级）；空前缀（首码元即残缺）维持 root 整篇拒绝 / 非 root skip-and-warn。
+> - **实证修正 r52 的字节记录**：两样本（字节级几乎相同）`WordDocument` 条目名（namelen=26）的尾随码元实测是 `0xD505`，不是 r52 条目所记的 U+D005，而且它根本不是孤立低代理——U+D505 是合法的韩语音节。真实缺陷是「名称缺 NUL 终止符」：`[MS-CFB]` §2.6.1 要求短于 64 字节的名称以 NUL 结束，LibreOffice 对缺失时丢弃最后一个声明码元读取前缀，本实现跟进。`DecodeEntryName` 现按三种尾部残缺截断保留可解码前缀并恰好告警一条（含槽位号与前缀，`directory entry name at slot N is not NUL-terminated within its declared length; using the decodable prefix '…'` / `ends with an incomplete UTF-16 sequence; …`）：①非 root、len<64 且末码元非 NUL（缺终止符；root 与 len==64 条目维持按声明长度解码，POI test-fields.doc 依赖 root 名称例外）；②64 字节名称以未配对高代理结尾（无低半配对）；③尾随孤立低代理。残缺点之后仍存在可解码码元的中途损坏维持既有拒绝（防放行升级）；空前缀（首码元即残缺）维持 root 整篇拒绝 / 非 root skip-and-warn。
 > - **文档层同批**：两样本只声明 15 个 fc/lcb pair（<34，fcClx 不可达），原 `ParseFib` 以 `truncated FIB fc/lcb pairs` 整篇拒绝；改为照读存在的行、缺失行按空 range 处理，fcClx 缺失即走既有「missing CLX Pcdt → 按 fcMin..fcMac 连续 16 位 piece 读正文」回退（两样本正文 3203 CP 可读）。`pairs * 8` 越出表的硬拒不变。
 > - **语料 810 全库对基线 397e4be**：ok 720 不变、warn 35→37、reject 55→53，恰好两个目标样本由拒绝转成功（转出后 stderr 带新告警计入 warn），无其它样本分类变化、无崩溃。
 > - **回归**：ctest 604 全绿；新增 `CfbReaderTest.DropsUnterminatedFinalNameUnit`、`TruncatesTrailingIncompleteSurrogate`、`RejectsOrphanSurrogateInsideName`、`SkipsStreamWhoseNameStartsWithOrphanSurrogate`、`RejectsRootWhoseNameStartsWithOrphanSurrogate`、`M20Malformed.FibShortFcLcbFallsBackToContiguousText`；既有 `SkipsStreamWithInvalidName`、`ToleratesRootNameWithoutNulTerminator`、`RejectsRootWithInvalidNameLength`、`FibTruncatedPairs` 保持绿。
+> - **r57 直接覆盖与措辞修正**：补齐 `CfbReaderTest.KeepsPrefixOfTrailingOrphanLowSurrogate`（无终止符形态由缺 NUL 规则保留 "AB" 前缀；带终止符形态直接走孤立低代理分支）与 `FullLengthNameKeepsFinalUnit`（len==64 的末码元 'Z' 完整保留、无名称告警），实测两者在现实现上直接通过，固定既有行为。DESIGN §6.9 的 r42 旧句改为与 r56 一致（非 root 且 len<64 降级；root 与 len==64 按声明长度解码，root 例外依据 [MS-CFB] §2.6.1），本条目「依赖后者」改为「依赖 root 名称例外」。ctest 606 全绿。
 
 ## M2
 
