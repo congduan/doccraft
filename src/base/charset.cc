@@ -110,27 +110,6 @@ constexpr uint32_t kCp1252High(uint8_t c) {
 // The ANSI code pages a .doc can name, by Windows number. 10000 (Macintosh) is
 // deliberately absent: it is not a Windows code page, only iconv knows it, and
 // the Win32 backend must not claim it.
-constexpr bool IsWindowsCodepage(uint32_t codepage) {
-  switch (codepage) {
-    case 874:
-    case 932:
-    case 936:
-    case 949:
-    case 950:
-    case 1250:
-    case 1251:
-    case 1252:
-    case 1253:
-    case 1254:
-    case 1255:
-    case 1256:
-    case 1257:
-    case 1258:
-      return true;
-    default:
-      return false;
-  }
-}
 
 #if defined(DOCCRAFT_HAVE_ICONV)
 const char* IconvName(uint32_t codepage) {
@@ -220,6 +199,28 @@ bool DecodeBackendChar(uint32_t codepage, const uint8_t* bytes, size_t len,
 // UTF-16 and AppendUtf8 re-encodes, so no table is duplicated. MB_ERR_INVALID_
 // CHARS is what makes an undefined byte or a lone lead byte fail, matching the
 // EILSEQ/EINVAL behaviour of the iconv path above.
+constexpr bool IsWindowsCodepage(uint32_t codepage) {
+  switch (codepage) {
+    case 874:
+    case 932:
+    case 936:
+    case 949:
+    case 950:
+    case 1250:
+    case 1251:
+    case 1252:
+    case 1253:
+    case 1254:
+    case 1255:
+    case 1256:
+    case 1257:
+    case 1258:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool BackendSupports(uint32_t codepage) {
   return IsWindowsCodepage(codepage);
 }
