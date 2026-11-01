@@ -113,6 +113,9 @@ class CfbReader {
     // and the slot it names.
     std::vector<uint32_t> dangling_owners;
     std::vector<uint32_t> dangling_targets;
+    // Slots whose stream entry carries a child link. A stream has no children
+    // ([MS-CFB] §2.6.4), so the walk ignores the link and Open() reports it.
+    std::vector<uint32_t> stream_children;
     std::vector<uint8_t> reached;  // 1 for every slot the walk entered
   };
 

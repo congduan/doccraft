@@ -752,6 +752,16 @@ std::expected<CfbReader, Error> CfbReader::Open(
   if (!visited) {
     return std::unexpected(visited.error());
   }
+  // A stream owns no child tree, so the walk left every stream child link
+  // untaken. Report each one; the records it names stay reachable through the
+  // ordinary sibling links, and a lookup keeps the complete tree authoritative.
+  for (uint32_t slot : walk.stream_children) {
+    Warn(&out.warnings_, "stream '" + out.entries_[slot].name + "' (slot " +
+                             std::to_string(slot) +
+                             ") has a child link to slot " +
+                             std::to_string(out.entries_[slot].child) +
+                             "; a stream has no children, link ignored");
+  }
   // A link the walk stepped on is where the tree ends: drop it, warn once per
   // damaged entry (slot and name, its links merged) and open the name-only
   // salvage. Sorting keeps the warning order stable.
@@ -911,8 +921,14 @@ std::expected<void, Error> CfbReader::Walk(const Visitor& visitor,
       if (entry.child != DirEntry::kNoFollow) {
         if (entry.type != EntryType::kRoot &&
             entry.type != EntryType::kStorage) {
-          return std::unexpected(
-              Error{ErrorCode::kCorruptDirectory, "stream has children"});
+          // [MS-CFB] §2.6.4: only the root and storages own a child tree; a
+          // stream has none. Real producers leave a fuzz value in the field
+          // (LibreOffice sw/qa ofz41398-1, ofz42330-1, ofz-delflyinrange-1).
+          // Following it would reach nothing a stream can own and could close
+          // a cycle, so ignore the link; Open() reports it once per stream.
+          if (report != nullptr)
+            report->stream_children.push_back(task.index);
+          continue;
         }
         tasks.push_back(
             {entry.child, task.index, task.depth + 1, false, task.index});

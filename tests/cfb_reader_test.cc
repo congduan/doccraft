@@ -403,6 +403,51 @@ TEST(CfbReaderTest, IgnoresRootRightSiblingLink) {
   }
 }
 
+// [MS-CFB] §2.6.4 gives a stream entry no children: its child link is
+// NOSTREAM. The LibreOffice sw/qa samples ofz41398-1, ofz42330-1 and
+// ofz-delflyinrange-1 leave a fuzz value there (0xFFFF007F, past the entry
+// table). A stream cannot reach a child, so the link is ignored with one
+// warning naming the stream and the container stays usable.
+TEST(CfbReaderTest, IgnoresStreamChildLink) {
+  CfbBuilder builder;
+  builder.AddStream("Alpha", MakePayload(4096, 0x61));
+  builder.AddStream("Beta", MakePayload(4096, 0x62));
+  auto bytes = builder.Build();
+  Put32(bytes, DirSlotOffset(bytes, 1) + 76, 0xFFFF007Fu);
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "Alpha"))
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  EXPECT_TRUE(HasWarning(*reader, "child link")) << reader->warnings()[0];
+  EXPECT_TRUE(HasWarning(*reader, "ignored")) << reader->warnings()[0];
+  for (const auto& [name, fill] :
+       {std::pair{"Alpha", 0x61}, std::pair{"Beta", 0x62}}) {
+    auto stream = reader->ReadStream(name);
+    ASSERT_TRUE(stream) << name << ": " << stream.error().message;
+    EXPECT_EQ(*stream, MakePayload(4096, static_cast<uint8_t>(fill))) << name;
+  }
+  // Reading streams walks the tree again; the warning must not repeat.
+  EXPECT_EQ(reader->warnings().size(), 1u);
+}
+
+// An in-range garbage child would close a cycle if the walk followed it, and
+// would hide the records below it either way. It is ignored like any other
+// stream child link.
+TEST(CfbReaderTest, IgnoresStreamChildLinkCycle) {
+  CfbBuilder builder;
+  builder.AddStream("Alpha", MakePayload(4096, 0x63));
+  auto bytes = builder.Build();
+  Put32(bytes, DirSlotOffset(bytes, 1) + 76, 1);  // the stream itself
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  ASSERT_EQ(reader->warnings().size(), 1u);
+  EXPECT_TRUE(HasWarning(*reader, "Alpha")) << reader->warnings()[0];
+  auto stream = reader->ReadStream("Alpha");
+  ASSERT_TRUE(stream) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(4096, 0x63));
+}
+
 TEST(CfbReaderTest, RejectsExcessiveStorageDepthWithoutThrowing) {
   CfbBuilder builder;
   std::string path;
