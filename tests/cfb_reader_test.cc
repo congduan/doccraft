@@ -898,6 +898,49 @@ TEST(CfbReaderTest, DropsUnterminatedFinalNameUnit) {
   EXPECT_EQ(*word, MakePayload(4096, 0x5A));
 }
 
+// A name whose final declared unit is an orphan low surrogate is a trailing
+// incomplete sequence: keep the decodable prefix instead of rejecting it.
+// The brief's shape (non-root, len < 64, no NUL terminator in the declared
+// length) is handled by the missing-NUL rule before the surrogate scan, so
+// the first case pins that observable outcome; the second puts the NUL back
+// so the low-surrogate branch itself runs.
+TEST(CfbReaderTest, KeepsPrefixOfTrailingOrphanLowSurrogate) {
+  {
+    auto bytes = CfbBuilder().AddStream("AB", MakePayload(16, 0x41)).Build();
+    // Builder wrote "AB\0" with len=6; replace the terminator slot with an
+    // orphan low surrogate and keep len=6, so there is no terminator.
+    Put16(bytes, DirSlotOffset(bytes, 1) + 4, 0xDC00);
+    auto reader = CfbReader::Open(bytes);
+    ASSERT_TRUE(reader) << reader.error().message;
+    ASSERT_EQ(reader->warnings().size(), 1u);
+    EXPECT_TRUE(HasWarning(*reader, "slot 1")) << reader->warnings()[0];
+    EXPECT_TRUE(HasWarning(*reader, "not NUL-terminated"))
+        << reader->warnings()[0];
+    EXPECT_TRUE(HasWarning(*reader, "'AB'")) << reader->warnings()[0];
+    auto stream = reader->ReadStream("AB");
+    ASSERT_TRUE(stream) << stream.error().message;
+    EXPECT_EQ(*stream, MakePayload(16, 0x41));
+  }
+  {
+    auto bytes = CfbBuilder().AddStream("AB", MakePayload(16, 0x42)).Build();
+    // "AB" + orphan low surrogate + terminator: len=8, so the declared name
+    // ends with the surrogate and the missing-NUL rule does not fire.
+    Put16(bytes, DirSlotOffset(bytes, 1) + 4, 0xDC00);
+    Put16(bytes, DirSlotOffset(bytes, 1) + 6, 0x0000);
+    Put16(bytes, DirSlotOffset(bytes, 1) + 64, 8);
+    auto reader = CfbReader::Open(bytes);
+    ASSERT_TRUE(reader) << reader.error().message;
+    ASSERT_EQ(reader->warnings().size(), 1u);
+    EXPECT_TRUE(HasWarning(*reader, "slot 1")) << reader->warnings()[0];
+    EXPECT_TRUE(HasWarning(*reader, "incomplete UTF-16"))
+        << reader->warnings()[0];
+    EXPECT_TRUE(HasWarning(*reader, "'AB'")) << reader->warnings()[0];
+    auto stream = reader->ReadStream("AB");
+    ASSERT_TRUE(stream) << stream.error().message;
+    EXPECT_EQ(*stream, MakePayload(16, 0x42));
+  }
+}
+
 // A high surrogate that runs to the end of a full 64-byte name cannot be
 // paired; the decodable prefix is kept instead of rejecting the entry. This
 // exercises the surrogate branch directly (len == 64 leaves no terminator
@@ -917,6 +960,26 @@ TEST(CfbReaderTest, TruncatesTrailingIncompleteSurrogate) {
   auto stream = reader->ReadStream(name);
   ASSERT_TRUE(stream) << stream.error().message;
   EXPECT_EQ(*stream, MakePayload(16, 0x61));
+}
+
+// A full 64-byte name has no terminator slot; its final unit is part of the
+// name and must not be dropped by the len < 64 rule.
+TEST(CfbReaderTest, FullLengthNameKeepsFinalUnit) {
+  const std::string name(31, 'a');
+  auto bytes = CfbBuilder().AddStream(name, MakePayload(16, 0x62)).Build();
+  const size_t at = DirSlotOffset(bytes, 1);
+  // Builder wrote 31 'a' units plus a NUL with len=64; overwrite the NUL with
+  // 'Z' so the declared 32-unit name ends in a normal character.
+  Put16(bytes, at + 62, 'Z');
+  auto reader = CfbReader::Open(bytes);
+  ASSERT_TRUE(reader) << reader.error().message;
+  EXPECT_TRUE(reader->warnings().empty())
+      << (reader->warnings().empty() ? "" : reader->warnings()[0]);
+  const std::string full = name + "Z";
+  auto stream = reader->ReadStream(full);
+  ASSERT_TRUE(stream) << stream.error().message;
+  EXPECT_EQ(*stream, MakePayload(16, 0x62));
+  EXPECT_FALSE(reader->ReadStream(name));
 }
 
 // Only a trailing incomplete sequence is relaxed: an orphan surrogate with a
