@@ -1469,7 +1469,8 @@ TEST(LegacyWord, LegacyScanMapsLegacyTableDefinition) {
   // (wvGetTC_internal); TC6 is a two-byte TCGRF followed by four two-byte
   // BRC10 borders. The modern sprmTDefTable needs 20-byte TC80 cells, so the
   // scan rebuilds the operand with zero cell widths (the column grid supplies
-  // the width) and zero borders when no BRC10 is set.
+  // the width) and maps each BRC10 to a four-byte BRC80; an all-zero BRC10
+  // word stays four zero bytes, as this sample asserts.
   std::vector<uint8_t> out;
   const std::vector<uint8_t> raw = {
       0xBE, 0x1C, 0x00,                       // cb = 27 bytes after cb + 1.
@@ -1489,6 +1490,67 @@ TEST(LegacyWord, LegacyScanMapsLegacyTableDefinition) {
   expected.insert(expected.end(), 16, 0);  // Four zero BRC80s.
   expected.insert(expected.end(), 20, 0);  // TC80 2, all defaults.
   EXPECT_EQ(out, expected);
+}
+
+TEST(LegacyWord, LegacyScanMapsLegacyTableDefinitionBrc10) {
+  // The TC6 BRC10 borders go through the same wvConvertBRC10ToBRC mapping as
+  // sprmTSetBrc10 (0xC7), but a TC80 cell carries four-byte BRC80 values, not
+  // the eight-byte Brc of TSetBrcOperand: BRC80 is width, type, unused,
+  // flags. The line-1 width still doubles as the width and an unrecognised
+  // triple is type 0.
+  std::vector<uint8_t> out;
+  const std::vector<uint8_t> raw = {
+      0xBE, 0x1C, 0x00,                       // cb = 27 bytes after cb + 1.
+      0x02,                                   // itcMac = 2.
+      0x00, 0x00,                             // 0.
+      0xD0, 0x02,                             // 720 twips.
+      0xA0, 0x05,                             // 1440 twips.
+      0x03, 0x00,                             // TC6 1: horzMerge first.
+      0x40, 0x00,                             // top: (1,0,0) single.
+      0x00, 0x01,                             // left: (4,0,0) double.
+      0xC0, 0x01,                             // bottom: (7,0,0) hairline.
+      0x00, 0x00,                             // right: no border.
+      0x00, 0x00, 0,    0, 0, 0, 0, 0, 0, 0,  // TC6 2: no merge, no borders.
+  };
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(raw, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  std::vector<uint8_t> expected = {
+      0x08, 0xD6, 0x30, 0x00, 0x02,        // Modern sprmTDefTable, cb, itc.
+      0x00, 0x00, 0xD0, 0x02, 0xA0, 0x05,  // XAS centres.
+      0x03, 0x00, 0x00, 0x00,              // TC80 1: TCGRF, wWidth 0.
+      0x01, 0x01, 0x00, 0x00,              // top: single, width 1.
+      0x04, 0x03, 0x00, 0x00,              // left: double, width 4.
+      0x07, 0x05, 0x00, 0x00,              // bottom: hairline, width 7.
+      0x00, 0x00, 0x00, 0x00,              // right: all zero (unset).
+  };
+  expected.insert(expected.end(), 20, 0);  // TC80 2, all defaults.
+  EXPECT_EQ(out, expected);
+  // The only non-zero BRC10 in the real corpus (Bug50955.doc: 0x03CA) is
+  // (line1=7, gap=1, line2=2), which wvWare leaves as type 0. It still
+  // reaches the IR as a set border with width 7 and space 1 instead of being
+  // dropped.
+  out.clear();
+  const std::vector<uint8_t> unrecognised = {
+      0xBE, 0x10, 0x00,  // cb = 16 bytes after cb + 1.
+      0x01,              // itcMac = 1.
+      0x00, 0x00,        // 0.
+      0xD0, 0x02,        // 720 twips.
+      0x00, 0x00,        // TCGRF.
+      0xCA, 0x03,        // top: 0x03CA, the Bug50955 value.
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  };
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(unrecognised, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> unrecognised_expected = {
+      0x08, 0xD6, 0x1A, 0x00, 0x01,  // sprmTDefTable, cb, itc.
+      0x00, 0x00, 0xD0, 0x02,        // XAS centres.
+      0x00, 0x00, 0x00, 0x00,        // TC80: TCGRF, wWidth 0.
+      0x07, 0x00, 0x00, 0x01,        // top: type 0, width 7, space 1.
+      0x00, 0x00, 0x00, 0x00,        // left: all zero.
+      0x00, 0x00, 0x00, 0x00,        // bottom: all zero.
+      0x00, 0x00, 0x00, 0x00,        // right: all zero.
+  };
+  EXPECT_EQ(out, unrecognised_expected);
 }
 
 TEST(LegacyWord, LegacyScanKeepsGridWhenLegacyCellsAreShort) {
@@ -1568,6 +1630,61 @@ TEST(LegacyWord, Word6TableBordersGridAndShadingReachDocx) {
        {"<w:tblBorders>", "<w:gridCol w:w=\"720\"/>",
         "<w:shd w:val=\"solid\" w:fill=\"FFFFFF\" w:color=\"auto\"/>",
         "<w:shd w:val=\"clear\" w:fill=\"0000FF\" w:color=\"000000\"/>"})
+    EXPECT_NE(xml.find(fragment), std::string::npos) << fragment << "\n" << xml;
+}
+
+TEST(LegacyWord, Word6TableDefinitionBrc10ReachesDocx) {
+  // TC6 cells carry four BRC10 borders before the modern TC80 form. The map
+  // is the same one sprmTSetBrc10 uses, so a single line stays single, a
+  // four-wide line becomes double and a seven-wide line becomes a hairline;
+  // an unrecognised triple keeps type 0 ("nil") but is no longer dropped.
+  // The 0x03CA value is the one Bug50955.doc actually stores.
+  const std::vector<uint8_t> row = {
+      0xBE, 0x1C, 0x00, 0x02, 0x00, 0x00, 0xD0, 0x02,
+      0xA0, 0x05, 0x00, 0x00,                          // TC6 1: no merge.
+      0x40, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,  // 1,0,4,0.
+      0x00, 0x00,                                      // TC6 2: no merge.
+      0x00, 0x00, 0xC0, 0x01, 0xCA, 0x03, 0x00, 0x00,  // 0,7,0x03CA,0.
+      0x19, 0x01, 0x18, 0x01,  // sprmPFTtp, sprmPFInTable.
+  };
+  auto document = ParseWord6(Word6TableDocument({0x18, 1}, row));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 2u);
+  const auto& first = table.row_properties[0].cells[0];
+  EXPECT_TRUE(first.borders[0].set);
+  EXPECT_EQ(first.borders[0].type, 1u);
+  EXPECT_EQ(first.borders[0].width, 1);
+  EXPECT_EQ(first.borders[0].color, -1);
+  EXPECT_EQ(first.borders[0].space, 0);
+  EXPECT_FALSE(first.borders[1].set);
+  EXPECT_TRUE(first.borders[2].set);
+  EXPECT_EQ(first.borders[2].type, 3u);
+  EXPECT_EQ(first.borders[2].width, 4);
+  EXPECT_FALSE(first.borders[3].set);
+  const auto& second = table.row_properties[0].cells[1];
+  EXPECT_FALSE(second.borders[0].set);
+  EXPECT_TRUE(second.borders[1].set);
+  EXPECT_EQ(second.borders[1].type, 5u);  // Hairline.
+  EXPECT_EQ(second.borders[1].width, 7);
+  EXPECT_EQ(second.borders[1].color, -1);
+  EXPECT_TRUE(second.borders[2].set);
+  EXPECT_EQ(second.borders[2].type, 0u);  // Unrecognised triple.
+  EXPECT_EQ(second.borders[2].width, 7);
+  EXPECT_EQ(second.borders[2].space, 1);
+  EXPECT_FALSE(second.borders[3].set);
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  for (const char* fragment :
+       {"<w:tcBorders><w:top w:val=\"single\" w:sz=\"2\" "
+        "w:color=\"auto\" w:space=\"0\"/><w:bottom w:val=\"double\" "
+        "w:sz=\"4\" w:color=\"auto\" w:space=\"0\"/></w:tcBorders>",
+        "<w:tcBorders><w:left w:val=\"hairline\" w:sz=\"7\" "
+        "w:color=\"auto\" w:space=\"0\"/><w:bottom w:val=\"nil\"/>"
+        "</w:tcBorders>"})
     EXPECT_NE(xml.find(fragment), std::string::npos) << fragment << "\n" << xml;
 }
 

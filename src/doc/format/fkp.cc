@@ -367,7 +367,9 @@ std::optional<size_t> ChgTabsOperandSize(Bytes raw, size_t p) {
 // sprmTDefTableShd is a cb followed by two-byte SHD palette pairs.
 constexpr size_t kLegacyTableBordersSize = 12;
 constexpr size_t kLegacyBrc6Size = 2;
+constexpr size_t kLegacyBrc10Size = 2;
 constexpr size_t kLegacyTc6Size = 10;
+constexpr size_t kLegacyTc6BordersOffset = 2;
 constexpr size_t kLegacyTc6BorderCount = 4;
 // sprmTTlp/sprmTSetBrc/sprmTSetBrc10/sprmTSetShd are fixed-width legacy
 // operands. The two border forms are itcFirst, itcLim, sides and a two-byte
@@ -431,7 +433,13 @@ void AppendBrc6(std::vector<uint8_t>& out, uint16_t v) {
 // special values recognisable instead of dropping them to a width-less line.
 // wvWare marks those two special cases uncertain; the mapping is kept because
 // the alternative (type 0) erases the border entirely.
-void AppendBrc10(std::vector<uint8_t>& out, uint16_t v) {
+struct Brc10Line {
+  uint8_t width;
+  uint8_t type;
+  uint8_t flags;
+};
+
+Brc10Line DecodeBrc10(uint16_t v) {
   const unsigned line2 = v & kLegacyBrcWidthMask;
   const unsigned gap = (v >> kLegacyBrc10GapShift) & kLegacyBrcWidthMask;
   const unsigned line1 = (v >> kLegacyBrc10Line1Shift) & kLegacyBrcWidthMask;
@@ -462,29 +470,48 @@ void AppendBrc10(std::vector<uint8_t>& out, uint16_t v) {
   } else if (line1 == 1 && gap == 1 && line2 == 1) {
     type = 3;  // Two single lines read as a double line.
   }
-  // BRC10 has no palette index; ico 0 ("auto") maps to -1, Word's COLORREF
-  // value for an unset colour.
-  PutU32(out, static_cast<uint32_t>(Ico(0)));
-  out.push_back(static_cast<uint8_t>(line1));
-  out.push_back(static_cast<uint8_t>(type));
   uint8_t flags =
       static_cast<uint8_t>((v >> kLegacyBrc10SpaceShift) & kBrcSpaceMask);
   if ((v >> kLegacyBrc10ShadowShift) & 1)
     flags |= kBrcShadow;
-  out.push_back(flags);
+  return {static_cast<uint8_t>(line1), static_cast<uint8_t>(type), flags};
+}
+
+// Modern eight-byte Brc as used by TSetBrcOperand: COLORREF, width, type,
+// flags and a reserved byte. BRC10 has no palette index; ico 0 ("auto") maps
+// to -1, Word's COLORREF value for an unset colour.
+void AppendBrc10(std::vector<uint8_t>& out, uint16_t v) {
+  const Brc10Line line = DecodeBrc10(v);
+  PutU32(out, static_cast<uint32_t>(Ico(0)));
+  out.push_back(line.width);
+  out.push_back(line.type);
+  out.push_back(line.flags);
   out.push_back(0);
+}
+
+// Four-byte BRC80 as used by the TC80 cells of sprmTDefTable: width, type, one
+// unused byte and flags. The type and width come from the same BRC10 mapping
+// as TSetBrc10; the unused byte is zero.
+void AppendBrc80FromBrc10(std::vector<uint8_t>& out, uint16_t v) {
+  const Brc10Line line = DecodeBrc10(v);
+  out.push_back(line.width);
+  out.push_back(line.type);
+  out.push_back(0);
+  out.push_back(line.flags);
 }
 
 // TC6: two-byte TCGRF, then four two-byte BRC10 borders. TCGRF has the same
 // merge and text-flow layout as TC80, so it is copied; the width is left zero
-// because the column grid supplies it. The BRC10 borders are not converted:
-// the corpus carries no one-to-one case (the only non-zero word is 0x03CA, a
-// two-line hairline) and wvWare's own mapping is marked uncertain.
+// because the column grid supplies it. Each BRC10 goes through the same
+// mapping as sprmTSetBrc10 and becomes a four-byte BRC80. An all-zero BRC10
+// stays four zero bytes, which the modern TC80 handler skips.
 void AppendTc80FromTc6(std::vector<uint8_t>& out, Bytes tc6) {
   PutU16(out, U16(tc6, 0));
   PutU16(out, 0);
-  for (size_t i = 0; i < kLegacyTc6BorderCount; i++)
-    PutU32(out, 0);
+  for (size_t i = 0; i < kLegacyTc6BorderCount; i++) {
+    const size_t offset = kLegacyTc6BordersOffset + i * kLegacyBrc10Size;
+    AppendBrc80FromBrc10(out, U16(tc6, offset));
+  }
 }
 
 bool LegacyTableBordersAllZero(Bytes v) {
