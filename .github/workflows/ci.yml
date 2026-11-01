@@ -3,10 +3,18 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build-test-format:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-build
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - name: Install format checker
@@ -16,10 +24,97 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 2
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --timeout 300
       - name: Format check
         run: cmake --build build --target format-check
 
-  # Performance measurements need a stable, dedicated large runner. When one
-  # is available, add a separate manual job using tests/perf/gen_corpus.py and
-  # tests/perf/run_perf.py; do not gate ordinary PRs on shared-runner timings.
+  # AddressSanitizer: the same suite as the release job, with bounds and
+  # lifetime checks on. Leak detection is off because the converter keeps
+  # process-lifetime buffers on purpose; this job is about memory safety.
+  asan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-asan
+      cancel-in-progress: true
+    env:
+      ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build-asan
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+      - name: Build
+        run: cmake --build build-asan --parallel 2
+      - name: Test under ASan
+        run: ctest --test-dir build-asan --output-on-failure --timeout 600
+
+  # Reserved corpus gate. The 680-document corpus is not in the repository
+  # (size and licensing), so ubuntu-latest cannot run this job. Enable it on a
+  # runner that has the corpus:
+  #   1. put the Apache POI .doc files in a directory;
+  #   2. set DOCRAFT_CORPUS_DIR to that directory (repository variable, or
+  #      export it for a self-hosted runner);
+  #   3. replace `if: false` with
+  #      `if: ${{ vars.DOCRAFT_CORPUS_DIR != '' }}`.
+  # tests/poi_corpus_smoke.py exits 0 with a "skipping" line when the directory
+  # is absent, so the ordinary jobs stay green without it. See docs/CI.md.
+  corpus:
+    if: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-corpus
+      cancel-in-progress: true
+    env:
+      DOCRAFT_CORPUS_DIR: ${{ vars.DOCRAFT_CORPUS_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Corpus smoke
+        run: >
+          ctest --test-dir build --output-on-failure --timeout 600
+          -R "poi_corpus_smoke|corpus_text_consistency"
+
+  # Manual performance smoke: 5 MiB only, five runs, advisory comparison with
+  # tests/perf/baseline.json. A result more than 30% slower warns but does not
+  # fail the job; shared-runner timings are not a gate. See docs/CI.md.
+  perf-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-perf
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LibreOffice (generates the DOC fixture)
+        run: sudo apt-get update && sudo apt-get install -y libreoffice-writer
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build converter
+        run: cmake --build build --parallel 2 --target doccraft
+      - name: Generate 5 MiB fixture
+        run: python3 tests/perf/gen_corpus.py --sizes 5
+      - name: Measure against baseline
+        run: >
+          python3 scripts/perf_smoke.py
+          build/src/cli/doccraft build/perf/structured-5mb.doc
+          --baseline tests/perf/baseline.json --size 5 --runs 5
+
+  docs-links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-docs
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative links in README
+        run: python3 scripts/check_readme_links.py

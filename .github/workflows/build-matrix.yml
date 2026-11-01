@@ -16,6 +16,11 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
+    # Do not cancel an in-flight platform run on a second push: the point of
+    # the matrix is to see every platform finish.
+    concurrency:
+      group: matrix-${{ github.ref }}-${{ matrix.name }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -73,6 +78,9 @@ jobs:
     name: linux-library-only
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: matrix-${{ github.ref }}-library-only
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
