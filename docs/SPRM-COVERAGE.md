@@ -398,9 +398,16 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > `skipped section N: ...; default section properties used`；表外 opcode 自 r66 起
 > 按同一 `{0, L_VAR}` 规则越过并告警一次
 > （`LegacyWord.Word6UnmappedSectionSprmSkipsAndWarns`、
-> `LegacyWord.Word6UnmappedHeaderSepxSkipsAndWarns`），仅截断仍降级
+> `LegacyWord.Word6UnmappedHeaderSepxSkipsAndWarns`、
+> `LegacyWord.Word6UnmappedSectionSprmReportsOnlyFirstSkip`、
+> `LegacyWord.Word6UnmappedSectionSprmZeroCbStepsOverOneByte`、
+> `LegacyWord.Word6UnmappedSectionSprmOperandCannotSetStoryBits`）。r66 后仍降级为该节默认属性
+> （并告警 `skipped section N: ...; default section properties used`）的只有两类：
+> 操作数截断与 SEPX 帧越出 WordDocument
 > （`LegacyWord.Word6TruncatedSectionSprmUsesDefaultProperties`、
-> `LegacyWord.Word6SepxFramePastPayloadKeepsOtherSections`）。
+> `LegacyWord.Word6SepxFramePastPayloadKeepsOtherSections`）；已映射 sprm 经
+> `ApplyLegacySectionSprm` 校验失败（`invalid SEPX sprm`）仍整篇硬拒绝
+> （`LegacyWord.Word6UnmappedSectionSprmSkipThenMappedFailureRejects`）。
 > ChgTabs 家族（`0x0F`/`0x17`）的 cb 为 `0xFF` 时：`0x17` 不按 256 字节消费，
 > 而是按操作数自带的删除项数（4B/项：位置数组与 rgdxaClose 半径数组并列）与插入项数（3B/项）重算长度，只消费不
 > 翻译，计数越界同样停止；`0x0F` 则直接停止扫描并警告（PChgTabsPapxOperand
