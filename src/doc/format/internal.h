@@ -454,6 +454,18 @@ bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 std::expected<std::vector<Bytes>, Error> ReadLegacySepxPayloads(
     Bytes word, Bytes plc, size_t sections, std::vector<std::string>* warnings);
 
+// Frames the SEPX that starts at `fc`: a 16-bit length prefix followed by that
+// many bytes. A few Word 6 writers store fcSepx one byte too high; that offset
+// is corrected with a warning. ReadSections applies the frame per section so
+// one unreadable SEPX only loses its own properties.
+std::expected<Bytes, Error> FrameLegacySepx(Bytes word, uint32_t fc,
+                                            std::vector<std::string>* warnings);
+
+// Error text for a Word 6/95 SEPX whose operand length runs past the payload.
+// ReadSections degrades exactly this damage to default section properties; an
+// opcode outside the legacy width table stays a document-level error.
+inline constexpr char kLegacySepxTruncated[] = "truncated Word 6/95 SEPX";
+
 void ReadLists(model::Document& doc, Bytes table, const Fib& fib);
 
 model::Run InheritedRun(const model::Document& doc, int style);

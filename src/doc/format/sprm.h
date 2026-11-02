@@ -119,21 +119,21 @@ std::expected<void, Error> WalkLegacySepx(Bytes raw, F fn) {
         break;
       case LegacySprmWidth::kVar:
         if (p >= raw.size())
-          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+          return std::unexpected(Error{kLegacySepxTruncated});
         size = static_cast<size_t>(raw[p]) + 1 + spec->size;
         break;
       case LegacySprmWidth::kVar2: {
         if (raw.size() - p < 2)
-          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+          return std::unexpected(Error{kLegacySepxTruncated});
         const size_t count = U16(raw, p);
         if (!count)
-          return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+          return std::unexpected(Error{kLegacySepxTruncated});
         size = count + 1;
         break;
       }
     }
     if (size > raw.size() - p)
-      return std::unexpected(Error{"truncated Word 6/95 SEPX"});
+      return std::unexpected(Error{kLegacySepxTruncated});
     fn(code, raw.subspan(p, size));
     p += size;
   }

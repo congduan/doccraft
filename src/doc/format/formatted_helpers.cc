@@ -28,10 +28,10 @@ using detail::ApplySection;
 using detail::ApplyTable;
 using detail::Bytes;
 using detail::FormatRange;
+using detail::FrameLegacySepx;
 using detail::kSprmTDefTable;
 using detail::kSprmTDefTableObsolete;
 using detail::kUndefinedU32;
-using detail::ReadLegacySepxPayloads;
 using detail::U16;
 using detail::U32;
 using detail::Valid;
@@ -105,16 +105,6 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
       return std::unexpected(Error{"invalid SED PLC"});
     Bytes b = source.subspan(fib.sed.offset, fib.sed.size);
     size_t n = (b.size() - 4) / 16;
-    // Word 6/95 SEPX payloads use the one-byte sprm table. Frame them all up
-    // front so a damaged SEPX rejects the document before any section property
-    // is applied, matching the header reader's error semantics.
-    std::vector<Bytes> legacy_payloads;
-    if (fib.legacy) {
-      auto payloads = ReadLegacySepxPayloads(word, b, n, nullptr);
-      if (!payloads)
-        return std::unexpected(payloads.error());
-      legacy_payloads = std::move(*payloads);
-    }
     uint32_t previous = 0;
     for (size_t i = 0; i < n; i++) {
       uint32_t end = U32(b, 4 * (i + 1));
@@ -132,16 +122,38 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
       }
       previous = end;
       if (fib.legacy) {
+        size_t pos = 4 * (n + 1) + 12 * i;
+        uint32_t fc = U32(b, pos + 2);
         model::Section section;
-        bool valid = true;
-        auto walked =
-            WalkLegacySepx(legacy_payloads[i], [&](uint8_t code, Bytes v) {
+        if (fc != kUndefinedU32) {
+          auto payload = FrameLegacySepx(word, fc, warnings);
+          if (!payload) {
+            // A damaged SEPX frame loses only this section's properties
+            // (ofz21385-1); the section itself and every later section stay.
+            if (warnings) {
+              warnings->push_back("skipped section " + std::to_string(i) +
+                                  ": " + payload.error().message +
+                                  "; default section properties used");
+            }
+          } else {
+            bool valid = true;
+            auto walked = WalkLegacySepx(*payload, [&](uint8_t code, Bytes v) {
               valid &= ApplyLegacySectionSprm(section, code, v);
             });
-        if (!walked)
-          return std::unexpected(walked.error());
-        if (!valid)
-          return std::unexpected(Error{"invalid SEPX sprm"});
+            if (!walked) {
+              if (walked.error().message != detail::kLegacySepxTruncated)
+                return std::unexpected(walked.error());
+              if (warnings) {
+                warnings->push_back("skipped section " + std::to_string(i) +
+                                    ": " + walked.error().message +
+                                    "; default section properties used");
+              }
+              section = model::Section{};
+            } else if (!valid) {
+              return std::unexpected(Error{"invalid SEPX sprm"});
+            }
+          }
+        }
         sections.emplace_back(end, std::move(section));
         continue;
       }

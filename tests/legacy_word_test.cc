@@ -2233,13 +2233,57 @@ TEST(LegacyWord, Word6UnsupportedSectionSprmRejectsDocument) {
   EXPECT_EQ(document.error().message, "unsupported Word 6/95 SEPX sprm");
 }
 
-TEST(LegacyWord, Word6TruncatedSectionSprmRejectsDocument) {
+TEST(LegacyWord, Word6TruncatedSectionSprmUsesDefaultProperties) {
   auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
   sample.section_sprms = {{0xA4, 0x01}};  // SXaPage needs two operand bytes.
   auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
   auto document = ParseWord6(word);
-  ASSERT_FALSE(document);
-  EXPECT_EQ(document.error().message, "truncated Word 6/95 SEPX");
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 12240);
+  bool warned = false;
+  for (const auto& warning : document->warnings)
+    warned |= warning.find("skipped section 0") != std::string::npos;
+  EXPECT_TRUE(warned);
+}
+
+TEST(LegacyWord, Word6TruncatedSectionSepxKeepsOtherSections) {
+  auto sample = HeaderSample({"ONE\r", "TWO\r"}, {0x02, 0x02}, {3, 5});
+  sample.section_sprms = {{0xA4, 0x84, 0x2E}, {0xA4, 0x01}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65,
+                                  "A\r\x0c"
+                                  "B\r",
+                                  sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section_breaks.size(), 1u);
+  EXPECT_EQ(document->section_breaks[0].second.width, 11908);
+  EXPECT_EQ(document->section.width, 12240);
+  bool warned = false;
+  for (const auto& warning : document->warnings)
+    warned |= warning.find("skipped section 1") != std::string::npos;
+  EXPECT_TRUE(warned);
+}
+
+TEST(LegacyWord, Word6SepxFramePastPayloadKeepsOtherSections) {
+  // The second SED's SEPX length prefix claims more bytes than remain in
+  // WordDocument. That section keeps default properties; the first is intact.
+  auto sample = HeaderSample({"ONE\r", "TWO\r"}, {0x02, 0x02}, {3, 5});
+  sample.section_sprms = {{0xA4, 0x84, 0x2E}, {}};
+  constexpr size_t kSecondSepx = 700;  // kSepx (660) + 40.
+  auto word = Word6HeaderDocument(0xA5DC, 0x65,
+                                  "A\r\x0c"
+                                  "B\r",
+                                  sample);
+  Put16(word, kSecondSepx, 0xFFFF);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section_breaks.size(), 1u);
+  EXPECT_EQ(document->section_breaks[0].second.width, 11908);
+  EXPECT_EQ(document->section.width, 12240);
+  bool warned = false;
+  for (const auto& warning : document->warnings)
+    warned |= warning.find("skipped section 1") != std::string::npos;
+  EXPECT_TRUE(warned);
 }
 
 TEST(LegacyWord, Word6WordLevelStoryBitsSkipLeadingPlcEntries) {

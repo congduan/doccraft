@@ -388,7 +388,11 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > 消费 `sprmSGprfIhdt`/`sprmSFTitlePage`。`sprm_codes.h` 的 `kLegacySprmSpecs` 逐行转写 LO
 > `GetWW6SprmSearcher` 的完整宽度表：已映射项按上表宽度翻译；表内定长或变长
 > 但未映射的 opcode 按宽度整项跳过，后续修饰继续解析；表外 opcode 或操作数
-> 截断仍停止该组并警告（无法确定宽度时不能把操作数误当 opcode）。
+> 截断仍停止该组并警告（无法确定宽度时不能把操作数误当 opcode）。节属性路径
+> （`ReadSections`）自 r58 起把 SEPX 帧越界或操作数截断降级为该节默认属性并告警
+> `skipped section N: ...; default section properties used`，表外 opcode 仍整篇拒绝
+> （`LegacyWord.Word6TruncatedSectionSprmUsesDefaultProperties`、
+> `LegacyWord.Word6SepxFramePastPayloadKeepsOtherSections`）。
 > ChgTabs 家族（`0x0F`/`0x17`）的 cb 为 `0xFF` 时：`0x17` 不按 256 字节消费，
 > 而是按操作数自带的删除项数（4B/项：位置数组与 rgdxaClose 半径数组并列）与插入项数（3B/项）重算长度，只消费不
 > 翻译，计数越界同样停止；`0x0F` 则直接停止扫描并警告（PChgTabsPapxOperand

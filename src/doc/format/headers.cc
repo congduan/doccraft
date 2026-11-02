@@ -117,6 +117,31 @@ std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
 
 }  // namespace
 
+std::expected<Bytes, Error> FrameLegacySepx(
+    Bytes word, uint32_t fc, std::vector<std::string>* warnings) {
+  auto frame = [&](uint32_t at) -> std::expected<Bytes, Error> {
+    if (at > word.size() || word.size() - at < 2)
+      return std::unexpected(Error{"Word 6/95 SEPX outside WordDocument"});
+    const size_t len = U16(word, at);
+    if (len > kMaxSepxSize || len > word.size() - at - 2)
+      return std::unexpected(Error{kLegacySepxTruncated});
+    return word.subspan(at + 2, len);
+  };
+  auto raw = frame(fc);
+  if (!raw && fc > 0) {
+    // A few Word 6 writers store fcSepx one byte past the length prefix; when
+    // that frame is impossible, retry the preceding byte before giving up.
+    auto shifted = frame(fc - 1);
+    if (shifted) {
+      if (warnings)
+        warnings->push_back(
+            "corrected Word 6/95 SEPX offset: stored one byte too high");
+      return shifted;
+    }
+  }
+  return raw;
+}
+
 std::expected<std::vector<Bytes>, Error> ReadLegacySepxPayloads(
     Bytes word, Bytes plc, size_t sections,
     std::vector<std::string>* warnings) {
@@ -128,26 +153,7 @@ std::expected<std::vector<Bytes>, Error> ReadLegacySepxPayloads(
     const uint32_t fc = U32(plc, pos + 2);
     if (fc == kUndefinedU32)
       continue;
-    // A few Word 6 writers store fcSepx one byte past the length prefix; when
-    // that frame is impossible, retry the preceding byte before giving up.
-    auto frame = [&](uint32_t at) -> std::expected<Bytes, Error> {
-      if (at > word.size() || word.size() - at < 2)
-        return std::unexpected(Error{"Word 6/95 SEPX outside WordDocument"});
-      const size_t len = U16(word, at);
-      if (len > kMaxSepxSize || len > word.size() - at - 2)
-        return std::unexpected(Error{"truncated Word 6/95 SEPX"});
-      return word.subspan(at + 2, len);
-    };
-    auto raw = frame(fc);
-    if (!raw && fc > 0) {
-      auto shifted = frame(fc - 1);
-      if (shifted) {
-        raw = shifted;
-        if (warnings)
-          warnings->push_back(
-              "corrected Word 6/95 SEPX offset: stored one byte too high");
-      }
-    }
+    auto raw = FrameLegacySepx(word, fc, warnings);
     if (!raw)
       return std::unexpected(raw.error());
     out[i] = *raw;
