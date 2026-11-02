@@ -75,11 +75,12 @@ std::vector<std::string> TableCells(const std::string& xml) {
   return cells;
 }
 
-// Builds a Word 6/95 document whose only CHPX range references a 66-byte PICF
-// at `pic` declaring `payload` bytes of MFPF anisotropic metafile behind it.
+// Builds a Word 6/95 document whose only CHPX range references a PICF with a
+// `header`-byte header at `pic` declaring `payload` bytes of MFPF anisotropic
+// metafile behind it. Word 6/95 writes cbHeader 58; 66 stays available for the
+// synthetic header the older tests pinned.
 std::vector<uint8_t> Word6PictureDocument(size_t size, size_t pic,
-                                          size_t payload) {
-  constexpr size_t kHeader = 66;
+                                          size_t payload, size_t header = 66) {
   constexpr size_t kPicfTypeOffset = 6;
   constexpr size_t kPicfGoalOffset = 28;
   constexpr size_t kPicfScaleOffset = 32;
@@ -106,8 +107,8 @@ std::vector<uint8_t> Word6PictureDocument(size_t size, size_t pic,
   word[1526] = 4;
   Put32(word, 1527, static_cast<uint32_t>(pic));
   word[1535] = 1;
-  Put32(word, pic, kHeader + payload);
-  Put16(word, pic + 4, kHeader);
+  Put32(word, pic, static_cast<uint32_t>(header + payload));
+  Put16(word, pic + 4, static_cast<uint16_t>(header));
   Put16(word, pic + kPicfTypeOffset, 8);  // MFPF anisotropic metafile.
   Put16(word, pic + kPicfGoalOffset, 1440);
   Put16(word, pic + kPicfGoalOffset + 2, 720);
@@ -141,6 +142,122 @@ TEST(LegacyWord, Word6PicfMetafileBecomesMediaPart) {
       Part(*zip, "word/media/image1.wmf"),
       std::string(reinterpret_cast<const char*>(word.data() + kPic + kHeader),
                   kWmf));
+}
+
+TEST(LegacyWord, Word6Picf58HeaderBecomesMediaPart) {
+  // Real Word 6/95 writes cbHeader 58 (WW8_PIC_SHORT 0x2E plus four 2-byte
+  // BRCs and the two origin words), not the 66 the synthetic test pinned.
+  constexpr size_t kPic = 2200;
+  constexpr size_t kHeader = 58;
+  constexpr size_t kWmf = 18;
+  auto word = Word6PictureDocument(2560, kPic, kWmf, kHeader);
+  Put16(word, kPic + kHeader, 1);      // WMF memory metafile.
+  Put16(word, kPic + kHeader + 2, 9);  // Header size in words.
+  Put16(word, kPic + kHeader + 4, 0x0300);
+  Put32(word, kPic + kHeader + 6, 9);
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto parsed = doccraft::doc::ParseFormatted(word, word, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->images.size(), 1u);
+  EXPECT_EQ(parsed->images[0].format, doccraft::model::ImageFormat::kWmf);
+  EXPECT_EQ(parsed->images[0].width, 1440);
+  EXPECT_EQ(parsed->images[0].height, 720);
+  ASSERT_EQ(parsed->paragraphs[0].runs.size(), 1u);
+  EXPECT_EQ(parsed->paragraphs[0].runs[0].image_index, 0);
+  auto zip = doccraft::docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_EQ(
+      Part(*zip, "word/media/image1.wmf"),
+      std::string(reinterpret_cast<const char*>(word.data() + kPic + kHeader),
+                  kWmf));
+}
+
+TEST(LegacyWord, Word6Picf58HeaderIgnoresTrailingWmfPadding) {
+  // Word 6/95 pads the picture payload inside lcb: the WMF size field can be
+  // shorter than lcb - cbHeader. LibreOffice reads the WMF by its own size and
+  // ignores the tail, so the media part must stop at the declared WMF size.
+  constexpr size_t kPic = 2200;
+  constexpr size_t kHeader = 58;
+  constexpr size_t kWmf = 18;
+  constexpr size_t kPadding = 6;
+  auto word = Word6PictureDocument(2560, kPic, kWmf + kPadding, kHeader);
+  Put16(word, kPic + kHeader, 1);
+  Put16(word, kPic + kHeader + 2, 9);
+  Put16(word, kPic + kHeader + 4, 0x0300);
+  Put32(word, kPic + kHeader + 6, 9);  // Declares 18 bytes, not 24.
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto parsed = doccraft::doc::ParseFormatted(word, word, *fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->images.size(), 1u);
+  EXPECT_EQ(parsed->images[0].bytes.size(), kWmf);
+  auto zip = doccraft::docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_EQ(
+      Part(*zip, "word/media/image1.wmf"),
+      std::string(reinterpret_cast<const char*>(word.data() + kPic + kHeader),
+                  kWmf));
+}
+
+TEST(LegacyWord, Word6PicfHeaderBelowWord6SizeRejected) {
+  // cbHeader < 58 cannot hold the WW8_PIC_SHORT + BRC + origin fields the
+  // Word 6/95 reader relies on; the synthetic 66-byte minimum was wrong, but
+  // the lower bound itself must stay.
+  std::vector<uint8_t> word(200, 0);
+  Put32(word, 0, 100);
+  Put16(word, 4, 57);
+  Put16(word, 6, 8);
+  Put16(word, 28, 1440);
+  Put16(word, 30, 720);
+  Put16(word, 32, 1000);
+  Put16(word, 34, 1000);
+  auto image = doccraft::doc::ReadLegacyPicture(word, 0);
+  ASSERT_FALSE(image);
+  EXPECT_EQ(image.error().message, "invalid Word 6/95 PICF length");
+}
+
+TEST(LegacyWord, Word6PicfLengthGuardsStayStrict) {
+  // lcb must exceed the header and stay inside WordDocument.
+  std::vector<uint8_t> empty_payload(100, 0);
+  Put32(empty_payload, 0, 58);
+  Put16(empty_payload, 4, 58);
+  Put16(empty_payload, 6, 8);
+  Put16(empty_payload, 28, 1440);
+  Put16(empty_payload, 30, 720);
+  Put16(empty_payload, 32, 1000);
+  Put16(empty_payload, 34, 1000);
+  auto no_payload = doccraft::doc::ReadLegacyPicture(empty_payload, 0);
+  ASSERT_FALSE(no_payload);
+  EXPECT_EQ(no_payload.error().message, "invalid Word 6/95 PICF length");
+
+  std::vector<uint8_t> past_end(100, 0);
+  Put32(past_end, 0, 200);
+  Put16(past_end, 4, 58);
+  Put16(past_end, 6, 8);
+  Put16(past_end, 28, 1440);
+  Put16(past_end, 30, 720);
+  Put16(past_end, 32, 1000);
+  Put16(past_end, 34, 1000);
+  auto beyond = doccraft::doc::ReadLegacyPicture(past_end, 0);
+  ASSERT_FALSE(beyond);
+  EXPECT_EQ(beyond.error().message, "invalid Word 6/95 PICF length");
+}
+
+TEST(LegacyWord, Word6PicfTruncatedWmfStillRejected) {
+  // The WMF size field must fit in the payload; padding is tolerated but a
+  // short payload is not.
+  constexpr size_t kPic = 2200;
+  constexpr size_t kHeader = 58;
+  constexpr size_t kWmf = 18;
+  auto word = Word6PictureDocument(2560, kPic, kWmf, kHeader);
+  Put16(word, kPic + kHeader, 1);
+  Put16(word, kPic + kHeader + 2, 9);
+  Put16(word, kPic + kHeader + 4, 0x0300);
+  Put32(word, kPic + kHeader + 6, 20);  // Declares 40 bytes, only 18 present.
+  auto image = doccraft::doc::ReadLegacyPicture(word, kPic);
+  ASSERT_FALSE(image);
+  EXPECT_EQ(image.error().message, "invalid Word 6/95 WMF payload");
 }
 
 TEST(LegacyWord, Word6BitmapPicfReportsUnsupportedType) {

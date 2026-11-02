@@ -181,8 +181,10 @@ std::expected<model::Image, Error> ReadLegacyPicture(Bytes word,
                                                      uint32_t offset,
                                                      size_t budget) {
   // Word 6/95 stores PICF in WordDocument. Its header omits the Word 97
-  // cProps word, and the payload is a direct metafile or bitmap.
-  constexpr size_t kLegacyPicfHeaderSize = 66;
+  // cProps word: LibreOffice reads WW8_PIC_SHORT (0x2E) plus four 2-byte BRCs
+  // and the two origin words for version 6/7, i.e. cbHeader 58, and only
+  // sanity-checks lcb >= 58 before using cbHeader as the payload offset.
+  constexpr size_t kLegacyPicfHeaderSize = 58;
   constexpr uint16_t kLegacyBitmapType = 99;
   constexpr uint16_t kWmfAnisotropicType = 8;
   if (offset > word.size() || word.size() - offset < kLegacyPicfHeaderSize)
@@ -212,16 +214,22 @@ std::expected<model::Image, Error> ReadLegacyPicture(Bytes word,
       (U16(payload, 0) != 1 && U16(payload, 0) != 2) ||
       U16(payload, 2) != detail::kWmfHeaderWords ||
       (U16(payload, 4) != detail::kWmfVersion1 &&
-       U16(payload, 4) != detail::kWmfVersion3) ||
-      static_cast<uint64_t>(U32(payload, 6)) * 2 != payload.size())
+       U16(payload, 4) != detail::kWmfVersion3))
     return std::unexpected(Error{"invalid Word 6/95 WMF payload"});
+  // lcb may include zero padding after the metafile. Word 6/95 and
+  // LibreOffice take the payload length from the WMF header's own size field,
+  // so accept a shorter declared size but never a declared size past lcb.
+  const uint64_t wmf_size = static_cast<uint64_t>(U32(payload, 6)) * 2;
+  if (wmf_size < detail::kWmfHeaderBytes || wmf_size > payload.size())
+    return std::unexpected(Error{"invalid Word 6/95 WMF payload"});
+  Bytes wmf = payload.first(static_cast<size_t>(wmf_size));
   model::Image image;
   image.format = model::ImageFormat::kWmf;
   image.width = std::clamp(goal_width * scale_width / detail::kPicfScaleUnit, 1,
                            static_cast<int>(detail::kMaxTwips));
   image.height = std::clamp(goal_height * scale_height / detail::kPicfScaleUnit,
                             1, static_cast<int>(detail::kMaxTwips));
-  image.bytes.assign(payload.begin(), payload.end());
+  image.bytes.assign(wmf.begin(), wmf.end());
   return image;
 }
 
