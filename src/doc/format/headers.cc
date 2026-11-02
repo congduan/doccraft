@@ -77,12 +77,17 @@ std::expected<LegacyStoryFlags, Error> ReadLegacySepx(Bytes raw) {
 }
 
 // Reads the section story flags in document order. A damaged or missing
-// Plcfsed yields no stories; the caller turns that into a warning.
+// Plcfsed yields no stories; the caller turns that into a warning. Word 6/95
+// stores stories in SED order, so every original entry is walked: entries whose
+// section was dropped for a bad CP still consume their story slots with their
+// own flags (or the default bits when their SEPX cannot be read).
 std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
-    Bytes word, const Fib& fib, size_t sections,
-    std::vector<std::string>* warnings) {
-  std::vector<LegacyStoryFlags> out(sections);
-  if (!sections)
+    Bytes word, const Fib& fib, const ParsedSections& parsed, size_t sections,
+    std::vector<std::string>* warnings, LegacySepxCorrections* corrected) {
+  // Without a SED PLC the surviving sections are the whole story table.
+  const size_t entries = parsed.sed_count ? parsed.sed_count : sections;
+  std::vector<LegacyStoryFlags> out(entries);
+  if (!entries)
     return out;
   if (!fib.sed.size) {
     // A missing section table would otherwise drop every header and footer
@@ -99,17 +104,36 @@ std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
     return std::unexpected(Error{"invalid Word 6/95 SED PLC"});
   Bytes plc = word.subspan(fib.sed.offset, fib.sed.size);
   const size_t count = (plc.size() - 4) / 16;
-  if (count != sections)
+  if (count != entries)
     return std::unexpected(Error{"header section count mismatch"});
-  auto payloads = ReadLegacySepxPayloads(word, plc, count, warnings);
-  if (!payloads)
-    return std::unexpected(payloads.error());
-  for (size_t i = 0; i < count; ++i) {
-    if ((*payloads)[i].empty())
+  // A dropped entry's SEPX is still readable in the usual truncation case, so
+  // its real story bits keep the PlcHdd cursor aligned for later sections.
+  // With no SED PLC every section is a survivor.
+  std::vector<bool> survives(entries, parsed.sed_count == 0);
+  for (size_t index : parsed.sed_indices)
+    if (index < entries)
+      survives[index] = true;
+  for (size_t i = 0; i < entries; ++i) {
+    const size_t pos = 4 * (entries + 1) + 12 * i;
+    if (pos + 12 > plc.size())
+      return std::unexpected(Error{"invalid Word 6/95 SED PLC"});
+    const uint32_t fc = U32(plc, pos + 2);
+    if (fc == kUndefinedU32)
       continue;
-    auto flags = ReadLegacySepx((*payloads)[i]);
-    if (!flags)
-      return std::unexpected(flags.error());
+    auto raw = FrameLegacySepx(word, fc, warnings, corrected);
+    if (!raw) {
+      if (survives[i])
+        return std::unexpected(raw.error());
+      out[i].stories = kLegacyDefaultStoryFlags;
+      continue;
+    }
+    auto flags = ReadLegacySepx(*raw);
+    if (!flags) {
+      if (survives[i])
+        return std::unexpected(flags.error());
+      out[i].stories = kLegacyDefaultStoryFlags;
+      continue;
+    }
     out[i] = *flags;
   }
   return out;
@@ -117,8 +141,9 @@ std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
 
 }  // namespace
 
-std::expected<Bytes, Error> FrameLegacySepx(
-    Bytes word, uint32_t fc, std::vector<std::string>* warnings) {
+std::expected<Bytes, Error> FrameLegacySepx(Bytes word, uint32_t fc,
+                                            std::vector<std::string>* warnings,
+                                            LegacySepxCorrections* corrected) {
   auto frame = [&](uint32_t at) -> std::expected<Bytes, Error> {
     if (at > word.size() || word.size() - at < 2)
       return std::unexpected(Error{"Word 6/95 SEPX outside WordDocument"});
@@ -133,32 +158,17 @@ std::expected<Bytes, Error> FrameLegacySepx(
     // that frame is impossible, retry the preceding byte before giving up.
     auto shifted = frame(fc - 1);
     if (shifted) {
-      if (warnings)
-        warnings->push_back(
-            "corrected Word 6/95 SEPX offset: stored one byte too high");
+      // The section and header readers both frame this SED entry; report the
+      // correction once per stored offset.
+      if (!corrected || corrected->insert(fc).second) {
+        if (warnings)
+          warnings->push_back(
+              "corrected Word 6/95 SEPX offset: stored one byte too high");
+      }
       return shifted;
     }
   }
   return raw;
-}
-
-std::expected<std::vector<Bytes>, Error> ReadLegacySepxPayloads(
-    Bytes word, Bytes plc, size_t sections,
-    std::vector<std::string>* warnings) {
-  std::vector<Bytes> out(sections);
-  for (size_t i = 0; i < sections; ++i) {
-    const size_t pos = 4 * (sections + 1) + 12 * i;
-    if (pos + 12 > plc.size())
-      return std::unexpected(Error{"invalid Word 6/95 SED PLC"});
-    const uint32_t fc = U32(plc, pos + 2);
-    if (fc == kUndefinedU32)
-      continue;
-    auto raw = FrameLegacySepx(word, fc, warnings);
-    if (!raw)
-      return std::unexpected(raw.error());
-    out[i] = *raw;
-  }
-  return out;
 }
 
 std::expected<std::map<uint32_t, uint8_t>, Error> ReadStoryFieldStatus(
@@ -415,7 +425,8 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
 std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     model::Document& doc, Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    size_t sections, const BookmarkMarks& bookmarks) {
+    size_t sections, const ParsedSections& parsed,
+    const BookmarkMarks& bookmarks, LegacySepxCorrections* corrected) {
   std::vector<SectionHeaders> out(sections);
   if (sections == 0 || !fib.ccp_hdd || !fib.headers.size) {
     return out;
@@ -451,9 +462,21 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
   Bytes plc = plc_source.subspan(fib.headers.offset, fib.headers.size);
   const size_t available = plc.size() / 4 - 1;
   if (fib.legacy) {
-    auto flags = ReadLegacyStoryFlags(word, fib, sections, &doc.warnings);
+    auto flags = ReadLegacyStoryFlags(word, fib, parsed, sections,
+                                      &doc.warnings, corrected);
     if (!flags)
       return std::unexpected(flags.error());
+    // Stories are stored in SED order. Dropped entries still consume their
+    // slots so later sections keep their own stories; only survivors attach.
+    const size_t sed_count = parsed.sed_count ? parsed.sed_count : sections;
+    std::vector<size_t> out_index(sed_count, sections);
+    if (parsed.sed_count) {
+      for (size_t i = 0; i < parsed.sed_indices.size(); ++i)
+        out_index[parsed.sed_indices[i]] = i;
+    } else {
+      for (size_t i = 0; i < sections; ++i)
+        out_index[i] = i;
+    }
     size_t index = 0;
     bool facing_pages = false;
     if (fib.dop.size && Valid(word, fib.dop) && fib.dop.size >= 2) {
@@ -467,10 +490,10 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
           "legacy document properties truncated; header/footer story skip "
           "count defaults to 0");
     }
-    for (size_t section = 0; section < sections; ++section) {
+    for (size_t sed = 0; sed < sed_count; ++sed) {
       for (size_t story = 0; story < kStoryCount; ++story) {
         const uint8_t bit = kLegacyStoryFlags[story];
-        if (!((*flags)[section].stories & bit))
+        if (!((*flags)[sed].stories & bit))
           continue;
         if (index >= available) {
           return std::unexpected(
@@ -485,10 +508,10 @@ std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
         // Even stories are used only when the document enables facing pages;
         // first-page stories only when the section enables a title page.
         const bool enabled = (story == 0 || story == 2) ? facing_pages
-                             : story >= 4 ? (*flags)[section].title_page
+                             : story >= 4 ? (*flags)[sed].title_page
                                           : true;
-        if (enabled) {
-          out[section][story] =
+        if (enabled && out_index[sed] < sections) {
+          out[out_index[sed]][story] =
               ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base,
                                   first, last, &field_status, nullptr);
         }

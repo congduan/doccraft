@@ -39,6 +39,9 @@ void Put32(std::vector<uint8_t>& b, size_t p, uint32_t v) {
   Put16(b, p + 2, static_cast<uint16_t>(v >> 16));
 }
 
+size_t CountWarnings(const std::vector<std::string>& warnings,
+                     const std::string& needle);
+
 std::string Part(const std::vector<uint8_t>& bytes, const char* name) {
   mz_zip_archive zip = {};
   if (!mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0))
@@ -2240,10 +2243,13 @@ TEST(LegacyWord, Word6TruncatedSectionSprmUsesDefaultProperties) {
   auto document = ParseWord6(word);
   ASSERT_TRUE(document) << document.error().message;
   EXPECT_EQ(document->section.width, 12240);
-  bool warned = false;
-  for (const auto& warning : document->warnings)
-    warned |= warning.find("skipped section 0") != std::string::npos;
-  EXPECT_TRUE(warned);
+  EXPECT_EQ(document->section.height, 15840);
+  EXPECT_EQ(document->section.left, 1134);
+  EXPECT_EQ(document->section.columns, 1);
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "skipped section 0: truncated Word 6/95 SEPX; "
+                          "default section properties used"),
+            1u);
 }
 
 TEST(LegacyWord, Word6TruncatedSectionSepxKeepsOtherSections) {
@@ -2349,6 +2355,70 @@ size_t Count(const std::string& text, const std::string& needle) {
     at += needle.size();
   }
   return hits;
+}
+
+TEST(LegacyWord, Word6DamagedSectionCpKeepsSurvivingHeaderStories) {
+  // A truncated Plcfsed repeats the previous CP. ReadSections drops the
+  // damaged entry, so the surviving section count is smaller than the SED
+  // count; the header reader must still walk the original SED order and attach
+  // the first section's header.
+  auto sample = HeaderSample({"HDR\r", "SEC\r"}, {0x02, 0x02}, {3, 3});
+  auto word = Word6HeaderDocument(0xA5DC, 0x65,
+                                  "A\r\x0c"
+                                  "B\r",
+                                  sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "skipped section 1: CP 3 does not follow CP 3; "
+                          "section dropped"),
+            1u);
+  EXPECT_EQ(CountWarnings(document->warnings, "skipped header stories"), 0u);
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "HDR");
+}
+
+TEST(LegacyWord, Word6DroppedFirstSectionKeepsLaterHeaderStory) {
+  // The first SED entry is damaged and dropped. Its header story still
+  // occupies the first PlcHdd slot, so the surviving second section must take
+  // the second entry instead of shifting onto the first section's header.
+  auto sample = HeaderSample({"HDR\r", "SEC\r"}, {0x02, 0x02}, {0, 3});
+  auto word = Word6HeaderDocument(0xA5DC, 0x65,
+                                  "A\r\x0c"
+                                  "B\r",
+                                  sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "skipped section 0: CP 0 does not follow CP 0; "
+                          "section dropped"),
+            1u);
+  EXPECT_EQ(CountWarnings(document->warnings, "skipped header stories"), 0u);
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "SEC");
+}
+
+TEST(LegacyWord, Word6SepxOffsetCorrectionWarnsOnce) {
+  // Both the section-property reader and the header reader see the same
+  // one-byte-high fcSepx. The correction warning is keyed by the stored offset
+  // so it appears once, and the header is still read through the corrected
+  // frame.
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  constexpr size_t kSed = 600;
+  constexpr size_t kSepx = 660;
+  // fcSepx points one byte past the length prefix. Framing at 661 reads the
+  // payload byte as the low half of a 16-bit length (0x9900), which exceeds
+  // kMaxSepxSize, so the reader falls back to 660.
+  Put32(word, kSed + 4 * 2 + 2, static_cast<uint32_t>(kSepx + 1));
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "corrected Word 6/95 SEPX offset: stored one byte "
+                          "too high"),
+            1u);
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "HDR");
 }
 
 // Builds a Word 6/95 document with body "A\x02\r" and one footnote body

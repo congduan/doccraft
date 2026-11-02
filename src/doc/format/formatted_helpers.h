@@ -41,9 +41,14 @@ struct FieldFrame {
   bool page = false;
 };
 
-std::expected<std::vector<std::pair<uint32_t, model::Section>>, Error>
-ReadSections(detail::Bytes word, detail::Bytes table, const Fib& fib,
-             std::vector<std::string>* warnings = nullptr);
+// Reads the section descriptor PLC (SED) and the SEPX of each section. The
+// result keeps the original SED index of every surviving section, because
+// Word 6/95 header stories are stored in SED order even when an entry's CP is
+// damaged and the section itself is dropped.
+std::expected<detail::ParsedSections, Error> ReadSections(
+    detail::Bytes word, detail::Bytes table, const Fib& fib,
+    std::vector<std::string>* warnings = nullptr,
+    detail::LegacySepxCorrections* corrected = nullptr);
 void ApplyFieldInstruction(const std::string& instruction,
                            std::string* hyperlink, bool* page_field);
 void ApplyParagraphSprms(model::Paragraph& para, const detail::FormatRange* pap,

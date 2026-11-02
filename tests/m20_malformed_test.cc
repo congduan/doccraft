@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -448,23 +449,44 @@ TEST(M20Malformed, SectionSeparatorOutsideWordDocumentUsesDefaults) {
   EXPECT_TRUE(warned);
 }
 
+// Appends a two-byte sprmSXaPage SEPX to WordDocument and returns its fc, so a
+// test can give one SED entry properties that differ from the defaults.
+size_t AddPageWidthSepx(DocStreams& s, uint16_t width) {
+  const size_t fc = doccraft::test::AlignUp(s.word.size(), 2);
+  s.word.resize(fc + 6, 0);
+  Put16(s.word, fc, 4);
+  s.word[fc + 2] = 0x1F;  // sprmSXaPage (0xB01F), low byte first.
+  s.word[fc + 3] = 0xB0;
+  Put16(s.word, fc + 4, width);
+  return fc;
+}
+
+// Points SED entry `index` of a Plcfsed with `count` entries at `fc`.
+void SetSedSepx(std::vector<uint8_t>& table, size_t sed, size_t count,
+                size_t index, uint32_t fc) {
+  Put32(table, sed + 4 * (count + 1) + 12 * index + 2, fc);
+}
+
 TEST(M20Malformed, SectionCpEqualSkipsDamagedEntry) {
   // ofz34749-1 shape: a truncated Plcfsed ends with a CP that does not
   // advance. The entry that repeats the previous CP is dropped; the earlier
-  // section survives.
+  // section keeps its own SEPX properties.
   DocSpec spec;
   spec.text = {'A', '\x0c', 'B', '\r'};
   spec.section_ends = {2, 2};
   DocStreams s = doccraft::test::BuildDocStreams(spec);
+  const size_t fc = AddPageWidthSepx(s, 11908);
+  SetSedSepx(s.table, Get32(s.word, 154 + 6 * 8), 2, 0,
+             static_cast<uint32_t>(fc));
   auto fib = doccraft::doc::ParseFib(s.word);
   ASSERT_TRUE(fib) << fib.error().message;
   auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
   ASSERT_TRUE(document) << document.error().message;
-  bool warned = false;
-  for (const auto& warning : document->warnings) {
-    warned |= warning.find("skipped section 1") != std::string::npos;
-  }
-  EXPECT_TRUE(warned);
+  EXPECT_EQ(std::count(document->warnings.begin(), document->warnings.end(),
+                       std::string("skipped section 1: CP 2 does not follow "
+                                   "CP 2; section dropped")),
+            1);
+  EXPECT_EQ(document->section.width, 11908);
   // Only the first boundary survived, so the 0x0c stays a page break.
   EXPECT_TRUE(document->section_breaks.empty());
 }
@@ -474,15 +496,45 @@ TEST(M20Malformed, SectionCpBackslideSkipsDamagedEntry) {
   spec.text = {'A', '\x0c', 'B', '\r'};
   spec.section_ends = {4, 2};
   DocStreams s = doccraft::test::BuildDocStreams(spec);
+  const size_t fc = AddPageWidthSepx(s, 11908);
+  SetSedSepx(s.table, Get32(s.word, 154 + 6 * 8), 2, 0,
+             static_cast<uint32_t>(fc));
   auto fib = doccraft::doc::ParseFib(s.word);
   ASSERT_TRUE(fib) << fib.error().message;
   auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
   ASSERT_TRUE(document) << document.error().message;
-  bool warned = false;
-  for (const auto& warning : document->warnings) {
-    warned |= warning.find("skipped section 1") != std::string::npos;
-  }
-  EXPECT_TRUE(warned);
+  EXPECT_EQ(std::count(document->warnings.begin(), document->warnings.end(),
+                       std::string("skipped section 1: CP 2 does not follow "
+                                   "CP 4; section dropped")),
+            1);
+  EXPECT_EQ(document->section.width, 11908);
+}
+
+TEST(M20Malformed, SectionCpFirstEntryDamagedKeepsLaterSection) {
+  // Entry 0 repeats the starting CP and is dropped; entry 1 is valid, so its
+  // properties survive and the surviving boundary stays strictly increasing.
+  DocSpec spec;
+  spec.text = {'A', '\x0c', 'B', '\r'};
+  spec.section_ends = {0, 4};
+  DocStreams s = doccraft::test::BuildDocStreams(spec);
+  const size_t fc = AddPageWidthSepx(s, 11908);
+  SetSedSepx(s.table, Get32(s.word, 154 + 6 * 8), 2, 1,
+             static_cast<uint32_t>(fc));
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(std::count(document->warnings.begin(), document->warnings.end(),
+                       std::string("skipped section 0: CP 0 does not follow "
+                                   "CP 0; section dropped")),
+            1);
+  EXPECT_EQ(document->section.width, 11908);
+  EXPECT_TRUE(document->section_breaks.empty());
+  // The only boundary left is the document end, so the 0x0c is a page break.
+  bool page_break = false;
+  for (const auto& run : document->paragraphs[0].runs)
+    page_break = page_break || run.break_type == 1;
+  EXPECT_TRUE(page_break);
 }
 
 TEST(M20Malformed, SectionCpsAllDamagedLeavesNoSections) {
@@ -498,11 +550,10 @@ TEST(M20Malformed, SectionCpsAllDamagedLeavesNoSections) {
   EXPECT_EQ(document->section.width, 12240);
   EXPECT_EQ(document->section.height, 15840);
   EXPECT_TRUE(document->section_breaks.empty());
-  bool warned = false;
-  for (const auto& warning : document->warnings) {
-    warned |= warning.find("skipped section 0") != std::string::npos;
-  }
-  EXPECT_TRUE(warned);
+  EXPECT_EQ(std::count(document->warnings.begin(), document->warnings.end(),
+                       std::string("skipped section 0: CP 0 does not follow "
+                                   "CP 0; section dropped")),
+            1);
 }
 
 TEST(M20Malformed, CorruptMainFieldPlcWarnsAndKeepsBody) {

@@ -19,8 +19,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "base/binary.h"
@@ -448,18 +450,30 @@ enum class LegacySprmScan { kComplete, kPartial, kStopped };
 LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 
-// Word 6/95 section SEPX payloads in SED order; an empty span marks a section
-// whose SED has no fcSepx. Shared by the section-property and header readers so
-// both apply the same one-byte-offset correction.
-std::expected<std::vector<Bytes>, Error> ReadLegacySepxPayloads(
-    Bytes word, Bytes plc, size_t sections, std::vector<std::string>* warnings);
+// Stored fcSepx values whose one-byte-high offset was already corrected. The
+// section-property and header readers both frame the same SED entries, so they
+// share this set to warn once per offset instead of once per reader.
+using LegacySepxCorrections = std::set<uint32_t>;
 
 // Frames the SEPX that starts at `fc`: a 16-bit length prefix followed by that
 // many bytes. A few Word 6 writers store fcSepx one byte too high; that offset
-// is corrected with a warning. ReadSections applies the frame per section so
-// one unreadable SEPX only loses its own properties.
-std::expected<Bytes, Error> FrameLegacySepx(Bytes word, uint32_t fc,
-                                            std::vector<std::string>* warnings);
+// is corrected with a warning, recorded in `corrected` (when non-null) so the
+// same stored offset is only reported once. ReadSections applies the frame per
+// section so one unreadable SEPX only loses its own properties.
+std::expected<Bytes, Error> FrameLegacySepx(
+    Bytes word, uint32_t fc, std::vector<std::string>* warnings,
+    LegacySepxCorrections* corrected = nullptr);
+
+// Surviving Plcfsed entries plus the mapping back to their original indices.
+// `sed_indices[i]` is the SED entry of `sections[i]`; `sed_count` is the number
+// of entries in the PLC before damaged ones were dropped. Word 6/95 header
+// stories are stored in SED order, so the header reader walks all `sed_count`
+// entries while attaching only the surviving ones.
+struct ParsedSections {
+  std::vector<std::pair<uint32_t, model::Section>> sections;
+  std::vector<size_t> sed_indices;
+  size_t sed_count = 0;
+};
 
 // Error text for a Word 6/95 SEPX whose operand length runs past the payload.
 // ReadSections degrades exactly this damage to default section properties; an
@@ -582,7 +596,8 @@ using SectionHeaders = std::array<std::vector<model::Paragraph>, 6>;
 std::expected<std::vector<SectionHeaders>, Error> ReadHeaders(
     model::Document& doc, Bytes word, Bytes table, const Fib& fib,
     const std::vector<FormatRange>& chpx, const std::vector<FormatRange>& papx,
-    size_t sections, const BookmarkMarks& bookmarks);
+    size_t sections, const ParsedSections& parsed,
+    const BookmarkMarks& bookmarks, LegacySepxCorrections* corrected = nullptr);
 }  // namespace doccraft::doc::detail
 
 namespace doccraft::doc {

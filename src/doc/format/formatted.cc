@@ -217,11 +217,13 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
     });
   };
   ReadLists(doc, table, fib);
-  auto sections_result = ReadSections(word, table, fib, &doc.warnings);
+  detail::LegacySepxCorrections sepx_corrections;
+  auto sections_result =
+      ReadSections(word, table, fib, &doc.warnings, &sepx_corrections);
   if (!sections_result)
     return std::unexpected(sections_result.error());
   std::vector<std::pair<uint32_t, model::Section>> sections =
-      std::move(*sections_result);
+      std::move(sections_result->sections);
   const size_t declared_sections = sections.size();
   if (!sections.empty())
     doc.section = sections.back().second;
@@ -930,7 +932,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
           ? declared_sections
           : (doc.section_breaks.empty() ? 1 : doc.section_breaks.size() + 1);
   auto headers = ReadHeaders(doc, word, table, fib, *chpx, *papx, section_count,
-                             *bookmarks);
+                             *sections_result, *bookmarks, &sepx_corrections);
   if (!headers) {
     doc.warnings.push_back("skipped header stories: " +
                            headers.error().message);

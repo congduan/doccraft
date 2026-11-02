@@ -32,6 +32,8 @@ using detail::FrameLegacySepx;
 using detail::kSprmTDefTable;
 using detail::kSprmTDefTableObsolete;
 using detail::kUndefinedU32;
+using detail::LegacySepxCorrections;
+using detail::ParsedSections;
 using detail::U16;
 using detail::U32;
 using detail::Valid;
@@ -94,10 +96,10 @@ bool ApplyLegacySectionSprm(model::Section& section, uint8_t code, Bytes v) {
 }  // namespace
 
 // Reads the section descriptor PLC (SED) and the SEPX of each section.
-std::expected<std::vector<std::pair<uint32_t, model::Section>>, Error>
-ReadSections(Bytes word, Bytes table, const Fib& fib,
-             std::vector<std::string>* warnings) {
-  std::vector<std::pair<uint32_t, model::Section>> sections;
+std::expected<ParsedSections, Error> ReadSections(
+    Bytes word, Bytes table, const Fib& fib, std::vector<std::string>* warnings,
+    LegacySepxCorrections* corrected) {
+  ParsedSections out;
   if (fib.sed.size) {
     // Word 6/95 keeps Plcfsed in WordDocument; Word 97+ uses the table stream.
     Bytes source = fib.legacy ? word : table;
@@ -105,6 +107,7 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
       return std::unexpected(Error{"invalid SED PLC"});
     Bytes b = source.subspan(fib.sed.offset, fib.sed.size);
     size_t n = (b.size() - 4) / 16;
+    out.sed_count = n;
     uint32_t previous = 0;
     for (size_t i = 0; i < n; i++) {
       uint32_t end = U32(b, 4 * (i + 1));
@@ -126,7 +129,7 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
         uint32_t fc = U32(b, pos + 2);
         model::Section section;
         if (fc != kUndefinedU32) {
-          auto payload = FrameLegacySepx(word, fc, warnings);
+          auto payload = FrameLegacySepx(word, fc, warnings, corrected);
           if (!payload) {
             // A damaged SEPX frame loses only this section's properties
             // (ofz21385-1); the section itself and every later section stay.
@@ -154,7 +157,8 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
             }
           }
         }
-        sections.emplace_back(end, std::move(section));
+        out.sections.emplace_back(end, std::move(section));
+        out.sed_indices.push_back(i);
         continue;
       }
       size_t pos = 4 * (n + 1) + 12 * i;
@@ -172,7 +176,8 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
                                 std::to_string(word.size()) +
                                 " bytes); default section properties used");
           }
-          sections.emplace_back(end, model::Section{});
+          out.sections.emplace_back(end, model::Section{});
+          out.sed_indices.push_back(i);
           continue;
         }
         size_t len = U16(word, fc);
@@ -183,7 +188,8 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
                                 " is truncated; default section "
                                 "properties used");
           }
-          sections.emplace_back(end, model::Section{});
+          out.sections.emplace_back(end, model::Section{});
+          out.sed_indices.push_back(i);
           continue;
         }
         bool valid = true;
@@ -194,10 +200,11 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
             !valid)
           return std::unexpected(Error{"invalid SEPX sprm"});
       }
-      sections.emplace_back(end, std::move(section));
+      out.sections.emplace_back(end, std::move(section));
+      out.sed_indices.push_back(i);
     }
   }
-  return sections;
+  return out;
 }
 
 // Extracts the HYPERLINK target and detects PAGE fields from a field
