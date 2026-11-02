@@ -419,15 +419,19 @@ std::vector<model::Paragraph> ReadStoryParagraphs(
   if (!para.runs.empty()) {
     out.push_back(std::move(para));
   }
-  bool has_text = false;
+  // A story with an empty field result (`\x13 instr \x14\x15`) has no text but
+  // still owns fldChar markers; dropping it would also drop its header part and
+  // the matching settings (e.g. evenAndOddHeaders). Only text and field markers
+  // count as content; bookmark and comment markers keep their old policy.
+  bool has_content = false;
   for (const auto& paragraph : out) {
     for (const auto& run : paragraph.runs) {
-      if (!run.text.empty()) {
-        has_text = true;
+      if (!run.text.empty() || run.field_char >= 0) {
+        has_content = true;
       }
     }
   }
-  if (!has_text) {
+  if (!has_content) {
     out.clear();
   }
   return out;

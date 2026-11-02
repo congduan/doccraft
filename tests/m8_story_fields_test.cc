@@ -1314,3 +1314,76 @@ TEST(M15StoryPlc, OversizedCommentInitialsWarnAndKeepComment) {
   ASSERT_EQ(parsed->warnings.size(), 1u);
   EXPECT_EQ(parsed->warnings[0], "skipped invalid comment initials: id 1");
 }
+
+// A story whose only content is a field with an empty result (`\x13 instr
+// \x14\x15`) still owns a header part: the begin/separate/end markers are
+// content even though every run's text is empty.
+TEST(M8StoryFields, EmptyResultHeaderFieldKeepsStoryPart) {
+  const std::string header_text = "\x13 ABC \x14\x15\r\r";
+  Synthetic s = Build("Body\r", "", header_text, "", "");
+  s.fib.headers = PutHeaderPlc(s, 0, s.fib.ccp_hdd);
+  s.fib.fields_hdr = PutFieldPlc(s, header_text, 0);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->section.headers[0].size(), 1u);
+  const auto& runs = parsed->section.headers[0][0].runs;
+  ASSERT_EQ(runs.size(), 4u);
+  EXPECT_EQ(runs[0].field_char, model::kFieldCharBegin);
+  EXPECT_EQ(runs[1].instr_text, " ABC ");
+  EXPECT_EQ(runs[2].field_char, model::kFieldCharSeparate);
+  EXPECT_EQ(runs[3].field_char, model::kFieldCharEnd);
+
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string header = Part(*zip, "word/header1.xml");
+  ASSERT_FALSE(header.empty());
+  EXPECT_NE(header.find("<w:fldChar w:fldCharType=\"begin\"/>"),
+            std::string::npos);
+  EXPECT_NE(header.find("<w:instrText xml:space=\"preserve\"> ABC "
+                        "</w:instrText>"),
+            std::string::npos);
+  EXPECT_NE(header.find("<w:fldChar w:fldCharType=\"separate\"/>"),
+            std::string::npos);
+  EXPECT_NE(header.find("<w:fldChar w:fldCharType=\"end\"/>"),
+            std::string::npos);
+  EXPECT_NE(Part(*zip, "word/document.xml").find("<w:headerReference"),
+            std::string::npos);
+}
+
+// The even header is what drives evenAndOddHeaders; keeping the field-only
+// story also keeps the settings part, which the has-text policy used to drop.
+TEST(M8StoryFields, EmptyResultEvenHeaderKeepsEvenAndOddSettings) {
+  const std::string header_text = "\x13 ABC \x14\x15\r\r";
+  Synthetic s = Build("Body\r", "", header_text, "", "");
+  s.fib.headers = PutHeaderPlc(s, 0, s.fib.ccp_hdd);
+  s.fib.fields_hdr = PutFieldPlc(s, header_text, 0);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->section.headers[0].size(), 1u);
+  // The writer derives the settings part from the IR flag alone.
+  parsed->section.odd_even_different = true;
+
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string settings = Part(*zip, "word/settings.xml");
+  ASSERT_FALSE(settings.empty());
+  EXPECT_NE(settings.find("<w:evenAndOddHeaders/>"), std::string::npos);
+  EXPECT_NE(Part(*zip, "word/header1.xml").find("w:fldChar"),
+            std::string::npos);
+}
+
+// The relaxation is limited to field markers: a story of bare paragraph marks
+// is still dropped, so an empty header keeps producing no part at all.
+TEST(M8StoryFields, BlankHeaderStoryStillDropped) {
+  Synthetic s = Build("Body\r", "", "\r\r", "", "");
+  s.fib.headers = PutHeaderPlc(s, 0, s.fib.ccp_hdd);
+  auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->section.headers[0].empty());
+
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_TRUE(Part(*zip, "word/header1.xml").empty());
+  EXPECT_EQ(Part(*zip, "word/document.xml").find("<w:headerReference"),
+            std::string::npos);
+}
