@@ -212,14 +212,48 @@ void WriteStyle(pugi::xml_node styles, const model::Document& document,
   }
 }
 
+// Text that names no style or run formatting inherits w:docDefaults. Word 97
+// seeds that from Normal, whose built-in defaults are Times New Roman 12pt.
+// Prefer the sheet's Normal (or its first paragraph style, which is the
+// localized Normal in Word 6/95 sheets) so localized and custom documents keep
+// their own font and size.
+model::Run DefaultRun(const model::Document& document) {
+  model::Run run;
+  run.font = "Times New Roman";
+  run.size = 24;
+  const model::Style* base = nullptr;
+  for (const auto& style : document.styles) {
+    if (style.type == 1 && style.name == "Normal") {
+      base = &style;
+      break;
+    }
+  }
+  if (base == nullptr) {
+    for (const auto& style : document.styles) {
+      if (style.type == 1) {
+        base = &style;
+        break;
+      }
+    }
+  }
+  if (base == nullptr) {
+    return run;
+  }
+  if (!base->resolved_run.font.empty()) {
+    run.font = base->resolved_run.font;
+  }
+  if (base->resolved_run.size > 0) {
+    run.size = base->resolved_run.size;
+  }
+  return run;
+}
+
 pugi::xml_document WriteStyles(const model::Document& document) {
   pugi::xml_document styles;
   auto sr = styles.append_child("w:styles");
   Attr(sr, "xmlns:w", kWordmlNamespace);
   auto defaults = sr.append_child("w:docDefaults");
-  model::Run default_run;
-  default_run.font = "Liberation Serif";
-  default_run.size = 24;
+  model::Run default_run = DefaultRun(document);
   auto run_defaults = defaults.append_child("w:rPrDefault");
   RunPr(run_defaults, default_run, &document);
   Value(run_defaults.child("w:rPr"), "w:kern", 2);
@@ -303,4 +337,3 @@ pugi::xml_document WriteNumbering(const model::Document& document) {
   }
   return numbering;
 }
-

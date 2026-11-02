@@ -27,7 +27,9 @@
 #include "doc/fib.h"
 #include "doc/format.h"
 #include "doc/format/internal.h"
+#include "doc/format/sprm_codes.h"
 #include "docx/writer.h"
+#include "third_party/pugixml/pugixml.hpp"
 
 namespace {
 using namespace doccraft;
@@ -124,10 +126,12 @@ std::vector<uint8_t> BuildStsh(const std::vector<Std>& styles) {
   return out;
 }
 
-std::vector<model::Style> Read(const std::vector<uint8_t>& stsh) {
+std::vector<model::Style> Read(const std::vector<uint8_t>& stsh,
+                               const std::vector<std::string>& fonts = {
+                                   "Fixture Font"}) {
   return doc::detail::ReadStyles(
       Bytes(stsh), doc::Fib::Range{0, static_cast<uint32_t>(stsh.size())},
-      {"Fixture Font"});
+      fonts);
 }
 
 std::string Part(const model::Document& d, const char* name) {
@@ -146,6 +150,29 @@ std::string Part(const model::Document& d, const char* name) {
   }
   mz_zip_reader_end(&z);
   return xml;
+}
+
+// The run properties written into w:docDefaults/w:rPrDefault. Word applies
+// them to text that names no style or run formatting of its own.
+struct DocDefaults {
+  std::string font, size, kern;
+};
+
+DocDefaults ReadDocDefaults(const model::Document& d) {
+  DocDefaults out;
+  pugi::xml_document xml;
+  const std::string text = Part(d, "word/styles.xml");
+  if (!xml.load_string(text.c_str())) {
+    return out;
+  }
+  auto rpr = xml.child("w:styles")
+                 .child("w:docDefaults")
+                 .child("w:rPrDefault")
+                 .child("w:rPr");
+  out.font = rpr.child("w:rFonts").attribute("w:ascii").value();
+  out.size = rpr.child("w:sz").attribute("w:val").value();
+  out.kern = rpr.child("w:kern").attribute("w:val").value();
+  return out;
 }
 }  // namespace
 
@@ -760,4 +787,60 @@ TEST(M3Styles, CyclicBaseChainResolvesTabsDeterministically) {
   d.styles = first;
   const std::string xml = Part(d, "word/styles.xml");
   EXPECT_NE(xml.find("<w:tabs>"), std::string::npos);
+}
+
+TEST(M3Styles, DocDefaultsFallBackToWordDefaults) {
+  // No STSH at all (Bug33519 shape): Word 97's built-in Normal is Times New
+  // Roman 12pt, not the host's LibreOffice default.
+  model::Document d;
+  const DocDefaults defaults = ReadDocDefaults(d);
+  EXPECT_EQ(defaults.font, "Times New Roman");
+  EXPECT_EQ(defaults.size, "24");
+  EXPECT_EQ(defaults.kern, "2");
+}
+
+TEST(M3Styles, DocDefaultsFollowNormalRun) {
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back({0, 0});
+  normal.blocks.push_back(Sprms({
+      Prl(doc::detail::kSprmCRgFtc0, {0, 0}),
+      Prl(doc::detail::kSprmCHps, {28, 0}),
+  }));
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}), {"Foo Bar"});
+  const DocDefaults defaults = ReadDocDefaults(d);
+  EXPECT_EQ(defaults.font, "Foo Bar");
+  EXPECT_EQ(defaults.size, "28");
+  EXPECT_EQ(defaults.kern, "2");
+}
+
+TEST(M3Styles, DocDefaultsIgnoreUnsetNormalRun) {
+  // A Normal style exists but carries no font or size: fall back per field.
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back({0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+  const DocDefaults defaults = ReadDocDefaults(d);
+  EXPECT_EQ(defaults.font, "Times New Roman");
+  EXPECT_EQ(defaults.size, "24");
+  EXPECT_EQ(defaults.kern, "2");
+}
+
+TEST(M3Styles, DocDefaultsUseFirstParagraphStyleWithoutNormal) {
+  // Localized Word 6/95 sheets name Normal "Обычный" (Bug50955) or another
+  // localized word; the first paragraph style is the sheet's default then.
+  Std body;
+  body.name = "Body";
+  body.blocks.push_back({0, 0});
+  body.blocks.push_back(Sprms({
+      Prl(doc::detail::kSprmCRgFtc0, {0, 0}),
+      Prl(doc::detail::kSprmCHps, {28, 0}),
+  }));
+  model::Document d;
+  d.styles = Read(BuildStsh({body}), {"Foo Bar"});
+  const DocDefaults defaults = ReadDocDefaults(d);
+  EXPECT_EQ(defaults.font, "Foo Bar");
+  EXPECT_EQ(defaults.size, "28");
 }
