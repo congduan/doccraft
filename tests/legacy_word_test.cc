@@ -767,6 +767,76 @@ TEST(LegacyWord, LegacyScanDistinguishesSkipFromStop) {
             doccraft::doc::detail::LegacySprmScan::kComplete);
 }
 
+TEST(LegacyWord, LegacyScanReportsStoppingOpcode) {
+  // A stop must name the opcode that has no usable width, plus its offset in
+  // the grpprl, so a real document's warning can be matched against the Word
+  // 6/95 tables instead of only stating that something failed.
+  doccraft::doc::detail::LegacySprmStop stop;
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x55, 1, 0xF0, 0xAA}, out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(stop.opcode, 0xF0);
+  EXPECT_EQ(stop.offset, 2u);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kUnknownOpcode);
+  // A known opcode whose operand runs past the grpprl reports the same
+  // opcode with the truncation reason, not the unknown-opcode one.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x55, 1, 0xB9}, out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(stop.opcode, 0xB9);
+  EXPECT_EQ(stop.offset, 2u);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kTruncatedOperand);
+  // sprmPChgTabsPapx with cb = 0xFF is neither unknown nor short: its width
+  // is undefined, which is a third reason.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x0F, 0xFF, 0x00, 0x00}, out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(stop.opcode, 0x0F);
+  EXPECT_EQ(stop.offset, 0u);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kUnboundedOperand);
+}
+
+TEST(LegacyWord, Word6FkpWarningNamesStoppingOpcode) {
+  // The paragraph's BX carries style 0 and then `55 01 F0 AA`, so the unknown
+  // 0xF0 sits two bytes into the grpprl; the warning must say so.
+  auto document = ParseWord6(Word6PapxDocument({0x55, 1, 0xF0, 0xAA}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  int found = 0;
+  for (const auto& warning : document->warnings) {
+    if (warning.find("Word 6/95 FKP contains unsupported sprms") != 0)
+      continue;
+    ++found;
+    EXPECT_NE(warning.find("opcode 0xf0"), std::string::npos) << warning;
+    EXPECT_NE(warning.find("offset 0x02"), std::string::npos) << warning;
+    EXPECT_NE(warning.find("unknown opcode"), std::string::npos) << warning;
+  }
+  EXPECT_EQ(found, 1);
+}
+
+TEST(LegacyWord, Word6FkpWarningKeepsFirstStopOpcode) {
+  // Two ranges in the same PAPX page stop on different opcodes. The warning
+  // stays deduplicated, but it must describe the first stop rather than the
+  // last one the reader happened to walk.
+  auto document = ParseWord6(Word6TableDocument({0xF0, 0xAA}, {0xF1, 0xBB}));
+  ASSERT_TRUE(document) << document.error().message;
+  int found = 0;
+  for (const auto& warning : document->warnings) {
+    if (warning.find("Word 6/95 FKP contains unsupported sprms") != 0)
+      continue;
+    ++found;
+    EXPECT_NE(warning.find("opcode 0xf0"), std::string::npos) << warning;
+    EXPECT_EQ(warning.find("opcode 0xf1"), std::string::npos) << warning;
+  }
+  EXPECT_EQ(found, 1);
+}
+
 TEST(LegacyWord, LegacyScanStopsWhenMappedSprmLacksLengthByte) {
   std::vector<uint8_t> out;
   // sprmPChgTabsPapx (0x0F) is mapped and takes a cb byte, but the stream ends
@@ -848,10 +918,16 @@ TEST(LegacyWord, LegacyScanStopsOnPapxChgTabsExtendedCb) {
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->paragraphs.size(), 1u);
   EXPECT_TRUE(document->paragraphs[0].tabs.empty());
-  bool warned = false;
+  std::string stop_warning;
   for (const auto& warning : document->warnings)
-    warned = warned || warning == "Word 6/95 FKP contains unsupported sprms";
-  EXPECT_TRUE(warned);
+    if (warning.find("Word 6/95 FKP contains unsupported sprms") == 0)
+      stop_warning = warning;
+  // The stop is the unbounded sprmPChgTabsPapx form, and the warning says so.
+  ASSERT_FALSE(stop_warning.empty());
+  EXPECT_NE(stop_warning.find("opcode 0x0f"), std::string::npos)
+      << stop_warning;
+  EXPECT_NE(stop_warning.find("no width rule"), std::string::npos)
+      << stop_warning;
 }
 
 TEST(LegacyWord, LegacyScanMapsEastAsianParagraphFlags) {
@@ -912,7 +988,9 @@ TEST(LegacyWord, LegacyScanConsumesTableShadingWithoutExtraFixedByte) {
   ASSERT_EQ(document->paragraphs.size(), 1u);
   EXPECT_EQ(document->paragraphs[0].align, 2);
   for (const auto& warning : document->warnings)
-    EXPECT_NE(warning, "Word 6/95 FKP contains unsupported sprms");
+    EXPECT_EQ(warning.find("Word 6/95 FKP contains unsupported sprms"),
+              std::string::npos)
+        << warning;
 }
 
 TEST(LegacyWord, LegacyScanMapsTableProperties) {
@@ -1093,7 +1171,9 @@ TEST(LegacyWord, Word6TableWidthAndInsertReachDocx) {
   ASSERT_EQ(table.rows.size(), 1u);
   EXPECT_EQ(table.rows[0].size(), 3u);
   for (const auto& warning : document->warnings)
-    EXPECT_NE(warning, "Word 6/95 FKP contains unsupported sprms");
+    EXPECT_EQ(warning.find("Word 6/95 FKP contains unsupported sprms"),
+              std::string::npos)
+        << warning;
   auto zip = doccraft::docx::Write(*document);
   ASSERT_TRUE(zip) << zip.error().message;
   const std::string xml = Part(*zip, "word/document.xml");
@@ -1765,10 +1845,16 @@ TEST(LegacyWord, LegacyScanStopsAfterTablePropertiesOnUnknownOpcode) {
   auto document =
       ParseWord6(Word6PapxDocumentWithRoom({0xB9, 1, 0xBA, 1, 0xF0, 0xAA}));
   ASSERT_TRUE(document) << document.error().message;
-  bool warned = false;
+  std::string stop_warning;
   for (const auto& warning : document->warnings)
-    warned = warned || warning == "Word 6/95 FKP contains unsupported sprms";
-  EXPECT_TRUE(warned);
+    if (warning.find("Word 6/95 FKP contains unsupported sprms") == 0)
+      stop_warning = warning;
+  // 0xF0 follows the two mapped table sprms, so it sits at grpprl offset 4.
+  ASSERT_FALSE(stop_warning.empty());
+  EXPECT_NE(stop_warning.find("opcode 0xf0"), std::string::npos)
+      << stop_warning;
+  EXPECT_NE(stop_warning.find("offset 0x04"), std::string::npos)
+      << stop_warning;
 }
 
 TEST(LegacyWord, Word6TableCellBorderShadingReachDocx) {

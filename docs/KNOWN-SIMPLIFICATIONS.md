@@ -125,6 +125,8 @@
 
 - M14 实测四份 Word 6/95 STSHI 的 cbStshi 仅为 14/14/14/18 字节，没有所假设的尾部 212 字节 CHP。固定字段后可读取标准字体索引：`Bug50955.doc` 为 0（FFN 中的 Times New Roman Cyr），`Bug51944.doc` 为 1/4/1（ASCII/东亚/其他），前者的 Normal 字体已回填为 Times New Roman Cyr，后者的 ASCII 字体已回填为 Times New Roman。当前 IR 的 Run 只有单一字体名，不能保留东亚字体 `新細明體`；这些 STSHI 中也没有默认字号，LibreOffice 为这两份文件合成的 Normal 20 半点字号仍不输出。未硬编码内置字号；待取得可靠的默认字号来源及多字体槽模型后处理。
 
+- r60 Word 6/95 unsupported-sprm 告警带定位：`ScanLegacySprms` 增加可选 `LegacySprmStop*` 出参，停扫时回填 opcode、grpprl 内字节偏移与原因（表外 opcode / 操作数截断 / 无宽度规则），`ReadLegacyFkps` 的告警改为 `Word 6/95 FKP contains unsupported sprms (opcode 0xNN at grpprl offset 0xNN, FKP page N: <reason>)`。每张 FKP 表仍只发一条（`warned` 去重），以首个停扫为准。成功路径与 DOCX 输出不变：`ofz21385-1.doc` 改前/改后 ZIP 各 part SHA-256 相同（整文件字节因 zip 时间戳本就不可复现）。现存唯一样本 `ofz21385-1.doc` 的两条告警均为 `opcode 0x01`（CHPX 页 409、grpprl 偏移 0x09；PAPX 页 432、偏移 0x2d），`0x01` 不在 `kLegacySprmSpecs` 中；这是缺失映射还是前序操作数误读造成的错位，待下一轮按该偏移定位。SEPX 的拒绝路径 `unsupported Word 6/95 SEPX sprm` 未改动。测试：`LegacyWord.LegacyScanReportsStoppingOpcode`、`LegacyWord.Word6FkpWarningNamesStoppingOpcode`、`LegacyWord.Word6FkpWarningKeepsFirstStopOpcode`。
+
 ## M6 设计取舍
 
 - §2.1 原定「加密原语用成熟实现、密码学不自造」已反转为按 RFC 6229、RFC 1321、FIPS 180-4 自实现并以标准向量钉死：RC4/MD5/SHA-1 各 <150 行，引 OpenSSL 会破坏单二进制零运行时依赖的发布承诺。

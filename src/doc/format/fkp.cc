@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <optional>
@@ -616,10 +617,24 @@ enum class LegacyTableTransform {
 // table knows, so a harmless modifier can no longer discard every later
 // property. An opcode outside the table (or a truncated operand) still stops
 // the scan: without a width its operand bytes could be mistaken for opcodes.
-LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
+// `stop`, when given, receives the opcode, offset and reason of that first
+// stop so the caller can name it in a warning.
+LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out,
+                               LegacySprmStop* stop) {
   bool partial = false;
   for (size_t p = 0; p < raw.size();) {
     const uint8_t code = raw[p++];
+    // Offset of the opcode inside the grpprl, reported when the scan stops.
+    const size_t opcode_at = p - 1;
+    // Records why the scan cannot continue past `code` before returning.
+    const auto fail = [&](LegacySprmStop::Reason reason) {
+      if (stop) {
+        stop->opcode = code;
+        stop->offset = opcode_at;
+        stop->reason = reason;
+      }
+      return LegacySprmScan::kStopped;
+    };
     if (code == 0)
       continue;  // PAPX word alignment.
     size_t size = 0;
@@ -661,7 +676,7 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         // `0F 07 01 0000 01 30FD 00`, one deleted position in two bytes.
         const std::optional<size_t> operand = ChgTabsOperandSize(raw, p);
         if (!operand)
-          return LegacySprmScan::kStopped;
+          return fail(LegacySprmStop::Reason::kTruncatedOperand);
         size = *operand;
         if (raw[p] == kChgTabsExtendedCb) {
           // Only sprmPChgTabs documents the count-based ChgTabsOperand;
@@ -671,7 +686,7 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
           // entries, which would let the FKP reader slice later bytes as
           // opcodes. The stop raises the existing unsupported-sprm warning.
           if (code == kLegacySprmPChgTabsPapx)
-            return LegacySprmScan::kStopped;
+            return fail(LegacySprmStop::Reason::kUnboundedOperand);
           // Consume the resolved width and drop the modifier rather than hand
           // a misaligned operand to the modern reader.
           partial = true;
@@ -768,11 +783,11 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
       case kLegacySprmTDefTable:
         modern = kSprmTDefTable;
         if (raw.size() - p < 2)
-          return LegacySprmScan::kStopped;
+          return fail(LegacySprmStop::Reason::kTruncatedOperand);
         {
           const size_t count = U16(raw, p);
           if (!count)
-            return LegacySprmScan::kStopped;
+            return fail(LegacySprmStop::Reason::kUnboundedOperand);
           size = count + 1;  // Two-byte count, then count - 1 bytes.
         }
         transform = LegacyTableTransform::kDefinition;
@@ -783,7 +798,7 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
         // whole number of cells, so consume the modifier and drop it instead
         // of handing the modern reader an operand it would reject.
         if (p >= raw.size())
-          return LegacySprmScan::kStopped;
+          return fail(LegacySprmStop::Reason::kTruncatedOperand);
         size = static_cast<size_t>(raw[p]) + 1;
         if (raw[p] % kShd80Size) {
           modern = 0;
@@ -926,23 +941,23 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
     if (!mapped) {
       const LegacySprmSpec* spec = FindLegacySprmSpec(code);
       if (!spec)
-        return LegacySprmScan::kStopped;
+        return fail(LegacySprmStop::Reason::kUnknownOpcode);
       switch (spec->width) {
         case LegacySprmWidth::kFix:
           size = spec->size;
           break;
         case LegacySprmWidth::kVar:
           if (p >= raw.size())
-            return LegacySprmScan::kStopped;
+            return fail(LegacySprmStop::Reason::kTruncatedOperand);
           size = static_cast<size_t>(raw[p]) + 1 + spec->size;
           break;
         case LegacySprmWidth::kVar2:
           if (raw.size() - p < 2)
-            return LegacySprmScan::kStopped;
+            return fail(LegacySprmStop::Reason::kTruncatedOperand);
           {
             const size_t count = U16(raw, p);
             if (!count)
-              return LegacySprmScan::kStopped;
+              return fail(LegacySprmStop::Reason::kUnboundedOperand);
             size = count + 1;  // Two-byte count prefix, then count - 1 bytes.
           }
           break;
@@ -950,7 +965,7 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
       partial = true;
     }
     if (size > raw.size() - p)
-      return LegacySprmScan::kStopped;
+      return fail(LegacySprmStop::Reason::kTruncatedOperand);
     Bytes operand = raw.subspan(p, size);
     // Rebuild the legacy table operands into the modern byte layout before
     // they reach the shared handlers. `rebuilt` outlives the append below.
@@ -1004,6 +1019,37 @@ bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out) {
   return ScanLegacySprms(raw, out) == LegacySprmScan::kComplete;
 }
 
+namespace {
+
+// Renders a small value as `0xNN` for the one-line legacy-sprm warning.
+std::string HexValue(size_t value) {
+  char text[2 * sizeof(size_t) + 3];
+  std::snprintf(text, sizeof(text), "0x%02zx", value);
+  return text;
+}
+
+// Names the entry that stopped the legacy scan, so a real document's warning
+// can be matched against [MS-DOC] and the LibreOffice/wvWare width tables
+// without re-instrumenting the parser.
+std::string LegacySprmStopWarning(const LegacySprmStop& stop, size_t page) {
+  const char* reason = "unknown opcode";
+  switch (stop.reason) {
+    case LegacySprmStop::Reason::kUnknownOpcode:
+      break;
+    case LegacySprmStop::Reason::kTruncatedOperand:
+      reason = "truncated operand";
+      break;
+    case LegacySprmStop::Reason::kUnboundedOperand:
+      reason = "no width rule";
+      break;
+  }
+  return "Word 6/95 FKP contains unsupported sprms (opcode " +
+         HexValue(stop.opcode) + " at grpprl offset " + HexValue(stop.offset) +
+         ", FKP page " + std::to_string(page) + ": " + reason + ")";
+}
+
+}  // namespace
+
 std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
     Bytes word, Fib::Range r, bool para, std::vector<std::string>* warnings) {
   std::vector<FormatRange> out;
@@ -1042,10 +1088,11 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
           range.style = U16(f, start);
           start += 2;
         }
+        LegacySprmStop stop;
         if (ScanLegacySprms(f.subspan(start, length - (para ? 2 : 0)),
-                            range.sprms) == LegacySprmScan::kStopped &&
+                            range.sprms, &stop) == LegacySprmScan::kStopped &&
             !warned && warnings) {
-          warnings->push_back("Word 6/95 FKP contains unsupported sprms");
+          warnings->push_back(LegacySprmStopWarning(stop, pn));
           warned = true;
         }
       }

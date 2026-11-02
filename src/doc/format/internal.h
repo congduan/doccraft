@@ -447,7 +447,22 @@ std::vector<model::Style> ReadLegacyStyles(
 // operand was truncated), so the rest of the grpprl was discarded; kPartial
 // means every opcode was stepped over but at least one is not mapped.
 enum class LegacySprmScan { kComplete, kPartial, kStopped };
-LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out);
+
+// Describes the entry that made ScanLegacySprms stop: its opcode, its byte
+// offset from the start of the grpprl, and why no width was available.
+struct LegacySprmStop {
+  enum class Reason {
+    kUnknownOpcode,     // No entry in kLegacySprmSpecs and no explicit case.
+    kTruncatedOperand,  // The grpprl ends before the operand does.
+    kUnboundedOperand   // The width rule itself cannot be applied.
+  };
+  uint8_t opcode = 0;
+  size_t offset = 0;
+  Reason reason = Reason::kUnknownOpcode;
+};
+
+LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out,
+                               LegacySprmStop* stop = nullptr);
 bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 
 // Stored fcSepx values whose one-byte-high offset was already corrected. The
