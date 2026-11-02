@@ -2774,6 +2774,70 @@ TEST(LegacyWord, Word6UnmappedSectionSprmTruncatedOperandUsesDefaults) {
   EXPECT_EQ(CountWarnings(document->warnings, "unmapped sprms"), 0u);
 }
 
+TEST(LegacyWord, Word6UnmappedSectionSprmReportsOnlyFirstSkip) {
+  // Two opcodes outside the table: only the first is reported and only its
+  // offset/byte count appears, matching the FKP "one warning per group" rule.
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {
+      {0xF0, 0x01, 0xAA, 0xF1, 0x02, 0x01, 0x02, 0xA4, 0x84, 0x2E}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 11908);
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "Word 6/95 SEPX contains unmapped sprms (opcode "
+                          "0xf0 at SEPX offset 0x02: 2 operand byte(s) "
+                          "skipped)"),
+            1u);
+  EXPECT_EQ(CountWarnings(document->warnings, "0xf1"), 0u);
+  EXPECT_EQ(CountWarnings(document->warnings, "unmapped sprms"), 1u);
+}
+
+TEST(LegacyWord, Word6UnmappedSectionSprmZeroCbStepsOverOneByte) {
+  // cb = 0 still consumes the cb byte itself, so the SXaPage right after it is
+  // read as an opcode rather than as operand data.
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {{0xF0, 0x00, 0xA4, 0x84, 0x2E}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 11908);
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "opcode 0xf0 at SEPX offset 0x02: 1 operand "
+                          "byte(s) skipped"),
+            1u);
+}
+
+TEST(LegacyWord, Word6UnmappedSectionSprmSkipThenMappedFailureRejects) {
+  // Stepping over an unmapped opcode never softens the mapped-sprm checks: an
+  // out-of-range SCcolumns after the skip still rejects the whole document.
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {{0xF0, 0x01, 0xAA, 0x90, 0xFF, 0xFF}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_FALSE(document);
+  EXPECT_EQ(document.error().message, "invalid SEPX sprm");
+}
+
+TEST(LegacyWord, Word6UnmappedSectionSprmOperandCannotSetStoryBits) {
+  // The skipped operand spells 0x99 0x0F (sprmSGprfIhdt) and 0x8F 0x01
+  // (sprmSFTitlePage); the fallback must swallow both, leaving the section's
+  // real 0x99 0x02 and title-page flag untouched.
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {{0xF0, 0x04, 0x99, 0x0F, 0x8F, 0x01}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "HDR");
+  EXPECT_TRUE(document->section.headers[0].empty());
+  EXPECT_FALSE(document->section.first_page_different);
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "opcode 0xf0 at SEPX offset 0x02: 5 operand "
+                          "byte(s) skipped"),
+            1u);
+}
+
 TEST(LegacyWord, Word6TruncatedSectionSprmUsesDefaultProperties) {
   auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
   sample.section_sprms = {{0xA4, 0x01}};  // SXaPage needs two operand bytes.
