@@ -386,7 +386,8 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > `WalkLegacySepx` 逐项回调，`formatted_helpers.cc` 的
 > `ApplyLegacySectionSprm` 把节 opcode 映到现代 `ApplySection`；页眉读取仍只
 > 消费 `sprmSGprfIhdt`/`sprmSFTitlePage`。`sprm_codes.h` 的 `kLegacySprmSpecs` 逐行转写 LO
-> `GetWW6SprmSearcher` 的完整宽度表：已映射项按上表宽度翻译；表内定长或变长
+> `GetWW6SprmSearcher` 的完整宽度表（`0x01` 与 `0x35`–`0x3A` 的宽度取自
+> [MS-DOC] 2.9.215 的 Prm0 isprm，LO 表缺这几行）：已映射项按上表宽度翻译；表内定长或变长
 > 但未映射的 opcode 按宽度整项跳过，后续修饰继续解析；表外 opcode 或操作数
 > 截断仍停止该组并警告（无法确定宽度时不能把操作数误当 opcode）。节属性路径
 > （`ReadSections`）自 r58 起把 SEPX 帧越界或操作数截断降级为该节默认属性并告警
@@ -402,6 +403,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 
 | 旧版 opcode | sprm | 现代去向 | 备注 |
 |---|---|---|---|
+| `0x01` | sprmPStyle | —（按宽度跳过） | 2B（istd）；[MS-DOC] 2.9.215（Prm0 isprm）与旧版一字节空间同编号，r16 的逐行转写漏了此行；r61 补录后 `ofz21385-1.doc` 的 `opcode 0x01` 停扫告警消除；`LegacyWord.LegacyScanSkipsSprmPStyle`、`LegacyWord.Word6PapxSprmPStyleNoStopWarning` |
 | `0x05` | sprmPJc | sprmPJc80 | 1B |
 | `0x07`/`0x08`/`0x09` | sprmPFKeep/KeepFollow/PageBreakBefore | 同名 | 1B |
 | `0x0F` | sprmPChgTabsPapx | sprmPChgTabsPapx (0xC60D) | 变长，按 cb 消费避免错位；删除项 2B/项（`080_080742.doc` 实测），删除位置输出 `w:tab w:val="clear"`；cb=0xFF 时停止扫描并警告（PChgTabsPapxOperand 定义 cb<255，扩展形态无依据）；`LegacyWord.Word6ChgTabsPapxReachesDocx`、`LegacyWord.Word6ChgTabsClearOnlyReachesDocx`、`LegacyWord.LegacyScanStopsOnPapxChgTabsExtendedCb` |
