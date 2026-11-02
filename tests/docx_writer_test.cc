@@ -28,6 +28,7 @@
 #include "doc/format.h"
 #include "docx/internal.h"
 #include "docx/writer.h"
+#include "third_party/pugixml/pugixml.hpp"
 
 namespace {
 using namespace doccraft;
@@ -488,9 +489,43 @@ TEST(DocxWriterRelations, HeaderAndFooterRelsNeverTypeCommentsAsFooter) {
 
   auto zip = docx::Write(document);
   ASSERT_TRUE(zip) << zip.error().message;
-  const std::string docrels = Part(*zip, "word/_rels/document.xml.rels");
-  EXPECT_NE(docrels.find("relationships/comments\" Target=\"comments.xml\""),
-            std::string::npos);
+  constexpr const char* kRelBase =
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+  auto relationships = [&](const std::string& name) {
+    pugi::xml_document rels;
+    const std::string bytes = Part(*zip, name.c_str());
+    EXPECT_TRUE(rels.load_buffer(bytes.data(), bytes.size())) << name;
+    std::vector<std::pair<std::string, std::string>> pairs;
+    for (pugi::xml_node rel :
+         rels.child("Relationships").children("Relationship"))
+      pairs.emplace_back(rel.attribute("Target").value(),
+                         rel.attribute("Type").value());
+    return pairs;
+  };
+  const std::string comments_type = std::string(kRelBase) + "comments";
+  const std::string header_type = std::string(kRelBase) + "header";
+  const std::string footer_type = std::string(kRelBase) + "footer";
+  bool document_comments = false;
+  bool linked_header = false;
+  bool linked_footer = false;
+  for (const auto& [target, type] :
+       relationships("word/_rels/document.xml.rels")) {
+    if (target == "comments.xml") {
+      document_comments = true;
+      EXPECT_EQ(type, comments_type);
+    }
+    if (target.starts_with("header")) {
+      linked_header = true;
+      EXPECT_EQ(type, header_type) << target;
+    }
+    if (target.starts_with("footer")) {
+      linked_footer = true;
+      EXPECT_EQ(type, footer_type) << target;
+    }
+  }
+  EXPECT_TRUE(document_comments);
+  EXPECT_TRUE(linked_header);
+  EXPECT_TRUE(linked_footer);
   size_t story_rels = 0;
   for (const std::string& name : PartNames(*zip)) {
     if (!name.ends_with(".rels") || name == "word/_rels/document.xml.rels")
@@ -499,11 +534,27 @@ TEST(DocxWriterRelations, HeaderAndFooterRelsNeverTypeCommentsAsFooter) {
         name.find("/footer") == std::string::npos)
       continue;
     ++story_rels;
-    const std::string rels = Part(*zip, name.c_str());
-    EXPECT_EQ(rels.find("relationships/footer\" Target=\"comments.xml\""),
-              std::string::npos)
-        << name;
-    EXPECT_EQ(rels.find("Target=\"comments.xml\""), std::string::npos) << name;
+    bool story_image = false;
+    for (const auto& [target, type] : relationships(name)) {
+      // A story must type comments.xml as comments, never as header or footer:
+      // the target, not the source, decides the relationship type.
+      if (target == "comments.xml") {
+        EXPECT_EQ(type, comments_type) << name;
+      }
+      EXPECT_FALSE((type == header_type || type == footer_type) &&
+                   target == "comments.xml")
+          << name;
+      const std::string expected = target == "comments.xml"       ? "comments"
+                                   : target.starts_with("header") ? "header"
+                                   : target.starts_with("footer") ? "footer"
+                                   : target.starts_with("media/") ? "image"
+                                                                  : "";
+      ASSERT_FALSE(expected.empty()) << name << " " << target;
+      EXPECT_EQ(type, std::string(kRelBase) + expected)
+          << name << " " << target;
+      story_image = story_image || target.starts_with("media/");
+    }
+    EXPECT_TRUE(story_image) << name;
   }
   EXPECT_EQ(story_rels, 2u);
 }

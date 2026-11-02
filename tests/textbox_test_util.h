@@ -21,11 +21,10 @@
 #include <string>
 #include <vector>
 
-#include "miniz.h"
-
 #include "base/binary.h"
 #include "doc/fib.h"
 #include "doc/format/internal.h"
+#include "third_party/miniz/miniz.h"
 
 // Helpers shared by the textbox/bookmark/field suites, which patch
 // WordDocument/Table streams in place and inspect the written package.
