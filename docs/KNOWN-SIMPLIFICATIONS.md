@@ -218,7 +218,7 @@
 - 非正文故事的字段接入：页眉/页脚（`PlcfFldHdr`，FIB pair 17 0 基）、脚注（`PlcfFldFtn`，pair 18）、尾注（`PlcfFldEdn`，pair 48）、批注（`PlcfFldAtn`，pair 19）各自读到「字段开始绝对 CP → grffldEnd 字节」映射，页眉用一张全区域映射按故事区间自动归属各节。M11 再接入正文文本框（`fcPlcfFldTxbx`，pair 57）与页眉内文本框（`fcPlcffldHdrTxbx`，pair 59），各自 PLC 的 CP 从各自文本框文档起点计。域层次来自文本中的 `0x13`/`0x14`/`0x15`，PLC 只补充 `fldLock`/`dirty` 标志。`fcPlcfFldMcr`（pair 20）按规范「undefined and MUST be ignored」不读。
 - 故事字段 PLC 的降级策略：条目 CP 非严格递增、越过本故事 ccp、fldch 种类非法或尺寸不满足 `(size-4) mod 6 == 0` 时，整张 PLC 跳过并输出警告（`skipped <故事> field PLC: …`），该故事退化为「有域层次、无锁/脏标志」，正文与故事正文不受影响；正文 `PlcfFldMom` 自 r50 起采用同一降级策略：解析失败时警告 `skipped main field PLC: …` 并继续，域层次仍由 `\x13`/`\x14`/`\x15` 文本标记给出，只丢失 `w:fldLock`/`w:dirty` 标志。
 - 锁定域的输出与正文逐字节同构：`w:fldLock` 写在 begin/separate/end 三个标记上；锁定 HYPERLINK 的结果 run 仍包在 `w:hyperlink` 里（沿用正文既有行为）。页眉/页脚/脚注/尾注/批注部件复用 `WriteParagraph`，无独立的域输出逻辑。
-- 仅含空结果域（例如 `\x13 PAGE \x14\x15`）的页眉没有文本 run；既有的 has-text 策略会丢弃该故事部件，若文档只靠此类页眉使用奇偶页设置，`settings.xml` 中的 `evenAndOddHeaders` 也不会输出。
+- 仅含空结果域的页眉故事自 r67 起按域标记保留：通用复杂域（例如 `\x13 ABC \x14\x15`）会输出 begin/separate/end，故事部件与 `evenAndOddHeaders` 不再丢失（`M8StoryFields.EmptyResultHeaderFieldKeepsStoryPart`、`M8StoryFields.EmptyResultEvenHeaderKeepsEvenAndOddSettings`）。顶层未锁定的 PAGE / HYPERLINK 域映射为简单域、不产生域标记，空结果时故事仍按「无内容」丢弃；若文档只靠此类页眉使用奇偶页设置，`settings.xml` 中的 `evenAndOddHeaders` 仍不会输出（裸段落标记的空故事同样丢弃，`M8StoryFields.BlankHeaderStoryStillDropped`）。
 - 页眉/页脚、脚注/尾注和批注故事的超链接关系已按源部件写入各自的 `_rels/<部件名>.rels`，各部件的 rId 独立编号。解析器尚不产生这些非正文故事的图片/OLE run；writer 层对 IR 中已有的图片/OLE run 可按部件写关系，并已声明所需 DrawingML/VML 命名空间。没有关系的部件不生成空关系文件。
 
 ## OOXML schema 校验器（`src/ooxml/`）
