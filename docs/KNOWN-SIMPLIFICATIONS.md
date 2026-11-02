@@ -84,7 +84,7 @@
 - `fComplex=1`（增量保存）文档按最终 CLX piece 表读取正文，Prm0 与 Prm1/Prc 字符及段落修饰现也应用于页眉、脚注、批注和文本框故事；piece 上的 `sprmPItap` 已参与正文表格深度判定。Prm0 中仅修订元数据用途的 `sprmPFNumRMIns` 不映射。真实样本的版式 golden 尚未通过，§6.1 保持 ◐。
 - 真实 fast-saved 批量对拍（LibreOffice UTF-8 文本，源 `.doc` vs 转换 `.docx`）：Apache POI 的 `Bug33519.doc` 表格结构现按段落结束符 PAPX 判定，避免旧 FC 文字片段误关表；`fastsavedmix.doc`、`rasp.doc`、`o_kurs.doc`、`ob_is.doc`、`samplefastsaved.doc` 的既有文本差异与版式 golden 限制仍需逐项复核。`Bug50955.doc`、`Bug51944.doc` 已由 Word 6/95 分支读取；`Bug60942.doc` 的 CFB 链长超限，`word_with_embeded.doc` 缺 CLX Pcdt，仍拒绝。`o_kurs.doc` 复制到 fixtures 用于可重用文本框 PLC 尾项及 XML 控制字符回归。
 - IR 仅包含段落、文本 run 和特殊控制码位置。`0x07` 单元格/行结束与 `0x0B` 换行在最小 DOCX 中写为换行，不重建表格；列表编号、样式、页眉脚注等留待后续里程碑。
-- 当前最小写出为达到语料 `plain-text.doc` 的像素验收，使用其默认字体（Liberation Serif，12pt）及 Letter 页面 1134 twip 页边距。尚未从 DOC 属性读取字体、字号和页面设置，因此其他语料的版式不保证一致。
+- `w:docDefaults/w:rPrDefault` 现从 STSH 的 Normal 样式（缺失时取首个段落样式）的 resolved 字族/字号派生，单个字段为空时按字段回退 Word 97 语义默认 Times New Roman 12pt；无任何段落样式（如无样式表的 `Bug33519.doc`）时整体使用回退值，`w:kern val="2"` 固定保留。仍不输出 `w:pPrDefault`，也不写 theme 字体（`w:asciiTheme`/`w:hAnsiTheme`）与东亚/复杂文种默认字体，因此主题字体文档的默认版式仍可能偏差。页面设置已从 SEP 读取（见 docs/DESIGN.md §6.4），不再属于本欠账。
 - 文本一致率测试把连续表格控制码折叠为单个换行，并剥除 LibreOffice TXT 导出中根据编号属性生成的 `•` 列表标记。这些标记不在 M2 抽取的主文本中；不计此差异时五份语料内容均为 100%。
 - 8-bit（compressed）piece 按 `FibBase.lid` 推导出的 ANSI 代码页解码（`src/base/charset.cc`）。两条残留限制：其一，解码依赖 iconv（glibc 内置 / libiconv），编译期未找到时退化为 CP1252，仅 cp1252 能正确解码；其二，LID 表中未列出的语言一律按 1252 处理（例如 cp1253 之外的希腊文变体、OEM 代码页）。DBCS 文本按规范总是存为 UTF-16 piece，所以压缩 piece 只需要代码页的单字节映射；若遇到违规的 DBCS 双字节序列，能解出时按两字节消费，否则该字节记为 U+FFFD。
 - 语料已加入 `cjk-text`（中/日）与 `cyrillic-text`（俄文）两份真实 `.doc`，但它们的正文按规范存为 UTF-16 piece，验证的是 Unicode 文本链路而不是代码页路径；8-bit 代码页路径仍只有单测（`CharsetTest.*`、`PieceTableTest.DecodesCompressedPiecesInDocumentCodepage`）覆盖。
