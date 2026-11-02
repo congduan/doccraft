@@ -395,7 +395,10 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 > `Word 6/95 FKP contains unmapped sprms (opcode 0xNN at grpprl offset 0xNN,
 > FKP page N: N operand byte(s) skipped)`；操作数截断仍停止该组并警告。节属性路径
 > （`ReadSections`）自 r58 起把 SEPX 帧越界或操作数截断降级为该节默认属性并告警
-> `skipped section N: ...; default section properties used`，表外 opcode 仍整篇拒绝
+> `skipped section N: ...; default section properties used`；表外 opcode 自 r66 起
+> 按同一 `{0, L_VAR}` 规则越过并告警一次
+> （`LegacyWord.Word6UnmappedSectionSprmSkipsAndWarns`、
+> `LegacyWord.Word6UnmappedHeaderSepxSkipsAndWarns`），仅截断仍降级
 > （`LegacyWord.Word6TruncatedSectionSprmUsesDefaultProperties`、
 > `LegacyWord.Word6SepxFramePastPayloadKeepsOtherSections`）。
 > ChgTabs 家族（`0x0F`/`0x17`）的 cb 为 `0xFF` 时：`0x17` 不按 256 字节消费，
