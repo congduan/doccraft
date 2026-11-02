@@ -118,8 +118,18 @@ ReadSections(Bytes word, Bytes table, const Fib& fib,
     uint32_t previous = 0;
     for (size_t i = 0; i < n; i++) {
       uint32_t end = U32(b, 4 * (i + 1));
-      if (end <= previous)
-        return std::unexpected(Error{"invalid section CP order"});
+      if (end <= previous) {
+        // A truncated Plcfsed often ends with a CP that does not advance
+        // (ofz34749-1). Drop only the affected entry so the sections that did
+        // parse keep their properties; `previous` stays at the last accepted
+        // CP so the surviving boundaries remain strictly increasing.
+        if (warnings) {
+          warnings->push_back("skipped section " + std::to_string(i) + ": CP " +
+                              std::to_string(end) + " does not follow CP " +
+                              std::to_string(previous) + "; section dropped");
+        }
+        continue;
+      }
       previous = end;
       if (fib.legacy) {
         model::Section section;

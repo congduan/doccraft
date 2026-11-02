@@ -448,6 +448,63 @@ TEST(M20Malformed, SectionSeparatorOutsideWordDocumentUsesDefaults) {
   EXPECT_TRUE(warned);
 }
 
+TEST(M20Malformed, SectionCpEqualSkipsDamagedEntry) {
+  // ofz34749-1 shape: a truncated Plcfsed ends with a CP that does not
+  // advance. The entry that repeats the previous CP is dropped; the earlier
+  // section survives.
+  DocSpec spec;
+  spec.text = {'A', '\x0c', 'B', '\r'};
+  spec.section_ends = {2, 2};
+  DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("skipped section 1") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+  // Only the first boundary survived, so the 0x0c stays a page break.
+  EXPECT_TRUE(document->section_breaks.empty());
+}
+
+TEST(M20Malformed, SectionCpBackslideSkipsDamagedEntry) {
+  DocSpec spec;
+  spec.text = {'A', '\x0c', 'B', '\r'};
+  spec.section_ends = {4, 2};
+  DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("skipped section 1") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
+TEST(M20Malformed, SectionCpsAllDamagedLeavesNoSections) {
+  // Every entry is bad: behave like a document without a SED PLC (no
+  // section table), i.e. keep the default Section.
+  DocSpec spec = TextSpec();
+  spec.section_ends = {0};
+  DocStreams s = doccraft::test::BuildDocStreams(spec);
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 12240);
+  EXPECT_EQ(document->section.height, 15840);
+  EXPECT_TRUE(document->section_breaks.empty());
+  bool warned = false;
+  for (const auto& warning : document->warnings) {
+    warned |= warning.find("skipped section 0") != std::string::npos;
+  }
+  EXPECT_TRUE(warned);
+}
+
 TEST(M20Malformed, CorruptMainFieldPlcWarnsAndKeepsBody) {
   DocStreams s = doccraft::test::BuildDocStreams(TextSpec());
   const size_t at = doccraft::test::AlignUp(s.table.size(), 4);

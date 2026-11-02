@@ -73,6 +73,11 @@
 > - **回归**：ctest 604 全绿；新增 `CfbReaderTest.DropsUnterminatedFinalNameUnit`、`TruncatesTrailingIncompleteSurrogate`、`RejectsOrphanSurrogateInsideName`、`SkipsStreamWhoseNameStartsWithOrphanSurrogate`、`RejectsRootWhoseNameStartsWithOrphanSurrogate`、`M20Malformed.FibShortFcLcbFallsBackToContiguousText`；既有 `SkipsStreamWithInvalidName`、`ToleratesRootNameWithoutNulTerminator`、`RejectsRootWithInvalidNameLength`、`FibTruncatedPairs` 保持绿。
 > - **r57 直接覆盖与措辞修正**：补齐 `CfbReaderTest.KeepsPrefixOfTrailingOrphanLowSurrogate`（无终止符形态由缺 NUL 规则保留 "AB" 前缀；带终止符形态直接走孤立低代理分支）与 `FullLengthNameKeepsFinalUnit`（len==64 的末码元 'Z' 完整保留、无名称告警），实测两者在现实现上直接通过，固定既有行为。DESIGN §6.9 的 r42 旧句改为与 r56 一致（非 root 且 len<64 降级；root 与 len==64 按声明长度解码，root 例外依据 [MS-CFB] §2.6.1），本条目「依赖后者」改为「依赖 root 名称例外」。ctest 606 全绿。
 
+> r58 两处节级降级（LibreOffice sw/qa 截断样本）：
+>
+> - **SED PLC 的 CP 非递增**：`ReadSections` 原先对 `end <= previous` 整篇拒绝（`invalid section CP order`）。截断的 Plcfsed 常以重复或回退的 CP 结尾（`ofz34749-1` 的 PLC 只有一条 CP=0 的条目），现跳过该条目并告警 `skipped section N: CP E does not follow CP P; section dropped`；`previous` 保持最后一个被接受条目的 CP，存活节的边界仍严格递增。单测：`M20Malformed.SectionCpEqualSkipsDamagedEntry`、`SectionCpBackslideSkipsDamagedEntry`、`SectionCpsAllDamagedLeavesNoSections`。
+> - **残余缺口**：① CP 全坏时无节，节属性与页眉故事全部落默认（与无 SED PLC 相同），不尝试从文本重建节边界；② 现代路径的内联图片解码错误（`invalid PICF header or length` 等）仍是整篇拒绝——`ofz34749-1` 越过节解析后停在此处（`rc=1`），本轮未放宽。
+
 ## M2
 
 - `fComplex=1`（增量保存）文档按最终 CLX piece 表读取正文，Prm0 与 Prm1/Prc 字符及段落修饰现也应用于页眉、脚注、批注和文本框故事；piece 上的 `sprmPItap` 已参与正文表格深度判定。Prm0 中仅修订元数据用途的 `sprmPFNumRMIns` 不映射。真实样本的版式 golden 尚未通过，§6.1 保持 ◐。
