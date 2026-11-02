@@ -181,6 +181,20 @@ target_link_libraries(m5_inline_images_test PRIVATE doccraft_cfb doccraft_doc do
 target_compile_definitions(m5_inline_images_test PRIVATE DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(m5_inline_images_test)
 
+add_executable(m18_bookmarks_test m18_bookmarks_test.cc)
+target_link_libraries(m18_bookmarks_test PRIVATE doccraft_cfb doccraft_doc
+  doccraft_docx gtest_main)
+target_compile_definitions(m18_bookmarks_test PRIVATE
+  DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(m18_bookmarks_test)
+
+add_executable(m11_textbox_fields_test m11_textbox_fields_test.cc)
+target_link_libraries(m11_textbox_fields_test PRIVATE doccraft_cfb
+  doccraft_doc doccraft_docx gtest_main)
+target_compile_definitions(m11_textbox_fields_test PRIVATE
+  DOCCRAFT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(m11_textbox_fields_test)
+
 add_executable(m4_textbox_test m4_textbox_test.cc)
 target_link_libraries(m4_textbox_test PRIVATE doccraft_cfb doccraft_doc
   doccraft_docx gtest_main)
