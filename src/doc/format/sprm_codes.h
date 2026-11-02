@@ -144,8 +144,9 @@ inline constexpr uint8_t kLegacySprmCPicLocation = 0x44;
 
 // Word 6/95 one-byte sprm operand widths. Transcribed row for row from
 // LibreOffice sw/source/filter/ww8/ww8scan.cxx (GetWW6SprmSearcher), whose
-// opcodes come from sw/source/filter/ww8/sprmids.hxx namespace v6. 0x35..0x3A
-// are absent there; their widths come from [MS-DOC] 2.9.215 (Prm0), which
+// opcodes come from sw/source/filter/ww8/sprmids.hxx namespace v6. 0x01
+// (sprmPStyle, a two-byte istd) and 0x35..0x3A are absent from that
+// transcription; their widths come from [MS-DOC] 2.9.215 (Prm0 isprm), which
 // numbers the same one-byte space. The table lets the FKP translator step over
 // opcodes whose semantics it does not map: a known width never turns an
 // operand byte into a bogus opcode.
@@ -169,6 +170,7 @@ struct LegacySprmSpec {
 
 inline constexpr LegacySprmSpec kLegacySprmSpecs[] = {
     {0x00, 0, LegacySprmWidth::kFix},   // default sprm (skipped)
+    {0x01, 2, LegacySprmWidth::kFix},   // sprmPStyle (two-byte istd)
     {0x02, 2, LegacySprmWidth::kFix},   // sprmPIstd
     {0x03, 3, LegacySprmWidth::kVar},   // sprmPIstdPermute
     {0x04, 1, LegacySprmWidth::kFix},   // sprmPIncLv1

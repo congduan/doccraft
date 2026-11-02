@@ -816,6 +816,13 @@ TEST(LegacyWord, Word6FkpWarningNamesStoppingOpcode) {
     EXPECT_NE(warning.find("opcode 0xf0"), std::string::npos) << warning;
     EXPECT_NE(warning.find("offset 0x02"), std::string::npos) << warning;
     EXPECT_NE(warning.find("unknown opcode"), std::string::npos) << warning;
+    // The PAPX FKP lives on page 3, and the fields must stay in this order so
+    // a reader can grep the page and the offset together.
+    EXPECT_NE(warning.find("FKP page 3"), std::string::npos) << warning;
+    EXPECT_EQ(warning,
+              "Word 6/95 FKP contains unsupported sprms (opcode 0xf0 at "
+              "grpprl offset 0x02, FKP page 3: unknown opcode)")
+        << warning;
   }
   EXPECT_EQ(found, 1);
 }
@@ -835,6 +842,41 @@ TEST(LegacyWord, Word6FkpWarningKeepsFirstStopOpcode) {
     EXPECT_EQ(warning.find("opcode 0xf1"), std::string::npos) << warning;
   }
   EXPECT_EQ(found, 1);
+}
+
+TEST(LegacyWord, LegacyScanSkipsSprmPStyle) {
+  // 0x01 is sprmPStyle ([MS-DOC] 2.9.215, a two-byte istd), not an unknown
+  // opcode. It was only missing from the width table, so the scanner must step
+  // over it, keep the bold that follows and still stop on a real gap.
+  doccraft::doc::detail::LegacySprmStop stop;
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x01, 0x09, 0x00, 0x55, 0x01, 0xF0, 0xAA},
+                out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(out, (std::vector<uint8_t>{0x35, 0x08, 0x01}));
+  EXPECT_EQ(stop.opcode, 0xF0);
+  EXPECT_EQ(stop.offset, 5u);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kUnknownOpcode);
+}
+
+TEST(LegacyWord, Word6PapxSprmPStyleNoStopWarning) {
+  // A Word 6/95 PAPX can carry 0x01 (sprmPStyle) ahead of its visible
+  // modifiers. Now that the width is known the whole grpprl is consumed: the
+  // sprmPJc that follows still reaches the paragraph and no stop warning
+  // names the FKP page.
+  auto document = ParseWord6(
+      Word6PapxDocumentWithRoom({0x01, 0x09, 0x00, 0x05, 0x02, 0x00}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].align, 2);
+  for (const auto& warning : document->warnings) {
+    EXPECT_EQ(warning.find("Word 6/95 FKP contains unsupported sprms"),
+              std::string::npos)
+        << warning;
+    EXPECT_EQ(warning.find("FKP page"), std::string::npos) << warning;
+  }
 }
 
 TEST(LegacyWord, LegacyScanStopsWhenMappedSprmLacksLengthByte) {
