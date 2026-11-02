@@ -62,6 +62,20 @@ size_t PartCount(const std::vector<uint8_t>& archive, const char* name) {
   return count;
 }
 
+std::vector<std::string> PartNames(const std::vector<uint8_t>& archive) {
+  mz_zip_archive zip = {};
+  std::vector<std::string> names;
+  if (!mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
+    return names;
+  for (mz_uint i = 0; i < mz_zip_reader_get_num_files(&zip); ++i) {
+    mz_zip_archive_file_stat stat = {};
+    if (mz_zip_reader_file_stat(&zip, i, &stat))
+      names.emplace_back(stat.m_filename);
+  }
+  mz_zip_reader_end(&zip);
+  return names;
+}
+
 TEST(M6WriterBuffer, SerializedPartsLimitReturnsError) {
   model::Document document;
   document.paragraphs.push_back({});
@@ -154,7 +168,8 @@ TEST(M6WriterBuffer, SinglePartLimitReturnsNamedSize) {
   ASSERT_FALSE(zip);
   EXPECT_EQ(zip.error().message,
             "writer part limit exceeded: word/document.xml (" +
-                std::to_string(actual_bytes) + " bytes)");
+                std::to_string(actual_bytes) + " bytes > " +
+                std::to_string(kPartLimit) + " limit)");
 }
 
 TEST(M6WriterBuffer, LastSectionHeaderPartLimitReturnsError) {
@@ -174,7 +189,8 @@ TEST(M6WriterBuffer, LastSectionHeaderPartLimitReturnsError) {
   ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized header";
   EXPECT_EQ(zip.error().message,
             "writer part limit exceeded: word/header1.xml (" +
-                std::to_string(header_bytes) + " bytes)");
+                std::to_string(header_bytes) + " bytes > " +
+                std::to_string(header_bytes - 1) + " limit)");
 }
 
 TEST(M6WriterBuffer, CommentImagePartLimitReturnsError) {
@@ -200,7 +216,8 @@ TEST(M6WriterBuffer, CommentImagePartLimitReturnsError) {
   ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized comment image";
   EXPECT_EQ(zip.error().message,
             "writer part limit exceeded: word/media/image1.png (" +
-                std::to_string(image_bytes) + " bytes)");
+                std::to_string(image_bytes) + " bytes > " +
+                std::to_string(image_bytes - 1) + " limit)");
 }
 
 TEST(M6WriterBuffer, DoubleLimitReportsNamedPartFirst) {
@@ -221,7 +238,30 @@ TEST(M6WriterBuffer, DoubleLimitReportsNamedPartFirst) {
   ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized document";
   EXPECT_EQ(zip.error().message,
             "writer part limit exceeded: word/document.xml (" +
-                std::to_string(actual_bytes) + " bytes)");
+                std::to_string(actual_bytes) + " bytes > " +
+                std::to_string(actual_bytes - 1) + " limit)");
+}
+
+TEST(M6WriterBuffer, DoubleLimitPrefersPartLimitWithBound) {
+  model::Document document;
+  document.paragraphs.push_back({});
+  document.paragraphs.back().runs.push_back({});
+  document.paragraphs.back().runs.back().text = std::string(2048, 'x');
+  constexpr size_t kGenerousLimit = 65536;
+  auto baseline = docx::detail::WriteWithBufferLimit(document, kGenerousLimit);
+  ASSERT_TRUE(baseline) << baseline.error().message;
+  const size_t document_bytes = Part(*baseline, "word/document.xml").size();
+  // The total bound equals the document part size: the prefix plus
+  // document.xml crosses it, while the per-part bound sits one byte lower and
+  // trips in the same AddPart call. The specific part error must win and must
+  // name its own bound, not just the observed size.
+  auto zip = docx::detail::WriteWithBufferLimit(document, document_bytes,
+                                                document_bytes - 1);
+  ASSERT_FALSE(zip) << "writer returned a ZIP despite oversized document";
+  EXPECT_EQ(zip.error().message,
+            "writer part limit exceeded: word/document.xml (" +
+                std::to_string(document_bytes) + " bytes > " +
+                std::to_string(document_bytes - 1) + " limit)");
 }
 
 TEST(M6WriterBuffer, TotalLimitErrorNamesOffendingPart) {
@@ -408,6 +448,60 @@ TEST(DocxWriterRelations, RegisteredTargetsHaveExplicitTypes) {
     ASSERT_TRUE(type) << target;
     EXPECT_EQ(*type, expected);
   }
+}
+
+TEST(DocxWriterRelations, CommentTargetTypesAsCommentsFromEveryStory) {
+  // The comments part is currently related from document.xml only, but the
+  // type lookup must stay source-independent: a header/footer story that
+  // references it must not fall through to the footer branch just because the
+  // target is not a header.
+  for (const char* source : {"document.xml", "header1.xml", "footer1.xml"}) {
+    auto type = docx::detail::RelationshipTypeFor(source, "comments.xml");
+    ASSERT_TRUE(type) << source;
+    EXPECT_EQ(*type, "comments") << source;
+  }
+}
+
+TEST(DocxWriterRelations, HeaderAndFooterRelsNeverTypeCommentsAsFooter) {
+  model::Document document;
+  model::Image image;
+  image.bytes = {'p', 'n', 'g'};
+  image.width = 96;
+  image.height = 96;
+  document.images.push_back(image);
+  model::Paragraph story;
+  model::Run picture;
+  picture.image_index = 0;
+  story.runs.push_back(picture);
+  document.section.headers[1].push_back(story);  // header
+  document.section.headers[3].push_back(story);  // footer
+  model::Paragraph body;
+  body.runs.push_back({});
+  document.paragraphs.push_back(body);
+  model::Comment comment;
+  comment.paragraphs.push_back(body);
+  document.comments.push_back(comment);
+
+  auto zip = docx::Write(document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string docrels = Part(*zip, "word/_rels/document.xml.rels");
+  EXPECT_NE(docrels.find("relationships/comments\" Target=\"comments.xml\""),
+            std::string::npos);
+  size_t story_rels = 0;
+  for (const std::string& name : PartNames(*zip)) {
+    if (!name.ends_with(".rels") || name == "word/_rels/document.xml.rels")
+      continue;
+    if (name.find("/header") == std::string::npos &&
+        name.find("/footer") == std::string::npos)
+      continue;
+    ++story_rels;
+    const std::string rels = Part(*zip, name.c_str());
+    EXPECT_EQ(rels.find("relationships/footer\" Target=\"comments.xml\""),
+              std::string::npos)
+        << name;
+    EXPECT_EQ(rels.find("Target=\"comments.xml\""), std::string::npos) << name;
+  }
+  EXPECT_EQ(story_rels, 2u);
 }
 
 TEST(DocxWriterRelations, OddEvenSettingsIsLastPartAndLinked) {

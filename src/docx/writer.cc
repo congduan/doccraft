@@ -161,10 +161,14 @@ struct WriteContext {
     ole_rids[source].resize(document->ole_objects.size());
   }
   std::expected<void, Error> AddPart(std::string name, std::string data) {
+    // A part that breaks its own bound is the more specific failure, so it wins
+    // over the cumulative buffer bound when both trip in the same call. Both
+    // diagnostics name the allowed size, not only the observed one.
     if (data.size() > max_part_bytes) {
       return std::unexpected(Error{"writer part limit exceeded: " + name +
                                    " (" + std::to_string(data.size()) +
-                                   " bytes)"});
+                                   " bytes > " +
+                                   std::to_string(max_part_bytes) + " limit)"});
     }
     if (data.size() > max_buffer_bytes - buffered) {
       const size_t total = buffered + data.size();
