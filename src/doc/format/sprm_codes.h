@@ -160,8 +160,10 @@ inline constexpr uint8_t kLegacySprmCPicLocation = 0x44;
 // LibreOffice's L_VAR `nLen` is not an extra fixed width, and sprmTDefTableShd
 // (0xBF) therefore carries no extra byte here.
 // Only unmapped opcodes are consumed through this table; the mapped subset is
-// translated by NormalizeLegacySprms, which keeps the measured width of
-// sprmCPicLocation (0x44, four bytes) even though LibreOffice marks it L_VAR.
+// translated by NormalizeLegacySprms. Mapped opcodes whose table row is L_VAR
+// keep that width: sprmCPicLocation (0x44) is read as one cb byte plus cb
+// operand bytes, and a cb of 4 (the only shape in the corpus) is forwarded as
+// the modern four-byte FC.
 // An opcode with no row falls back to LibreOffice's {0, L_VAR} rule in
 // ScanLegacySprms (a cb byte plus cb operand bytes) and the scan continues.
 enum class LegacySprmWidth : uint8_t { kFix, kVar, kVar2 };

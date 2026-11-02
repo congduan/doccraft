@@ -361,6 +361,11 @@ std::optional<size_t> ChgTabsOperandSize(Bytes raw, size_t p) {
          kChgTabsInsEntrySize * ins + 1;
 }
 
+// Word 6/95 sprmCPicLocation (0x44) is L_VAR in LibreOffice's v6 table: one cb
+// byte and cb operand bytes. Every occurrence measured in the corpus carries
+// cb = 4 and the 32-bit WordDocument PICF offset as those operand bytes.
+constexpr size_t kLegacyPicLocationOperandSize = 4;
+
 // Word 6/95 table operands, from wvWare's sprm.c and LibreOffice's
 // GetWW6SprmSearcher (these layouts predate [MS-DOC] section 2.9):
 // sprmTTableBorders is six two-byte BRC6 borders, sprmTDefTable(10) is a
@@ -647,6 +652,9 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out,
     uint16_t modern_east_asia = 0;
     bool mask_low_byte = false;
     uint8_t masked_low_byte[2] = {};
+    // Bytes to strip from the front of the operand before it reaches the
+    // modern handler; sprmCPicLocation keeps its cb byte there.
+    size_t operand_prefix = 0;
     bool mapped = true;
     LegacyTableTransform transform = LegacyTableTransform::kNone;
     switch (code) {
@@ -933,8 +941,21 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out,
         size = 2;  // Word 6 stores the full half-point word, not a byte.
         break;
       case kLegacySprmCPicLocation:
-        modern = kSprmCPicLocation;
-        size = 4;
+        // L_VAR, not a fixed four bytes (LibreOffice GetSprmTailLen's v6
+        // table; measured 44 04 <4B> in Bug50955.doc and ofz21385-1.doc).
+        // A cb of 4 is the only shape in the corpus, and its operand is the
+        // 32-bit FC the modern handler reads, so strip the cb and forward it.
+        // Any other cb has no FC to translate: consume the operand and drop
+        // the modifier instead of letting U32 read the cb as the offset.
+        if (p >= raw.size())
+          return fail(LegacySprmStop::Reason::kTruncatedOperand);
+        size = static_cast<size_t>(raw[p]) + 1;
+        if (raw[p] == kLegacyPicLocationOperandSize) {
+          modern = kSprmCPicLocation;
+          operand_prefix = 1;
+        } else {
+          partial = true;
+        }
         break;
       default:
         mapped = false;
@@ -988,6 +1009,8 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out,
     if (size > raw.size() - p)
       return fail(LegacySprmStop::Reason::kTruncatedOperand);
     Bytes operand = raw.subspan(p, size);
+    if (operand_prefix)
+      operand = operand.subspan(operand_prefix);
     // Rebuild the legacy table operands into the modern byte layout before
     // they reach the shared handlers. `rebuilt` outlives the append below.
     std::vector<uint8_t> rebuilt;

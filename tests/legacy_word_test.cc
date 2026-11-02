@@ -100,9 +100,11 @@ std::vector<uint8_t> Word6PictureDocument(size_t size, size_t pic,
   Put32(word, 1024, 768);
   Put32(word, 1028, 770);
   word[1032] = 250;
-  word[1524] = 5;
-  word[1525] = 0x44;  // Word 6 sprmCPicLocation, four-byte FC.
-  Put32(word, 1526, static_cast<uint32_t>(pic));
+  word[1524] = 6;
+  // Word 6 sprmCPicLocation is L_VAR: a cb byte, here 4, then the 32-bit FC.
+  word[1525] = 0x44;
+  word[1526] = 4;
+  Put32(word, 1527, static_cast<uint32_t>(pic));
   word[1535] = 1;
   Put32(word, pic, kHeader + payload);
   Put16(word, pic + 4, kHeader);
@@ -859,6 +861,79 @@ TEST(LegacyWord, LegacyScanReportsStoppingOpcode) {
   EXPECT_EQ(stop.offset, 0u);
   EXPECT_EQ(stop.reason,
             doccraft::doc::detail::LegacySprmStop::Reason::kUnboundedOperand);
+}
+
+TEST(LegacyWord, LegacyScanConsumesPicLocationCbPrefix) {
+  // LibreOffice's Word 6/95 width table marks sprmCPicLocation (0x44) L_VAR:
+  // one cb byte, then cb operand bytes (GetSprmTailLen / GetWW6SprmSearcher).
+  // Every one of the 1,340 occurrences in the 810-file corpus is `44 04 <4B>`;
+  // this is the ofz21385-1.doc CHPX page 409 shape. The trailing 0x43 is a
+  // real one-byte opcode, so a fixed four-byte read would consume it as an
+  // operand and turn the following 0x01 into a truncated opcode.
+  std::vector<uint8_t> out;
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(
+          std::vector<uint8_t>{0x44, 0x04, 0x7F, 0xA2, 0x5C, 0x43, 0x55, 0x01},
+          out),
+      doccraft::doc::detail::LegacySprmScan::kComplete);
+  // sprmCPicLocation (0x6A03) with the four operand bytes, then bold.
+  EXPECT_EQ(out, (std::vector<uint8_t>{0x03, 0x6A, 0x7F, 0xA2, 0x5C, 0x43, 0x35,
+                                       0x08, 0x01}));
+}
+
+TEST(LegacyWord, Word6PicLocationCbPrefixKeepsFollowingRunFormatting) {
+  // The same byte shape reaches the IR: the scan completes (no FKP warning)
+  // and the bold behind the picture reference is still applied.
+  auto document = ParseWord6(
+      Word6ChpxDocument({0x44, 0x04, 0x7F, 0xA2, 0x5C, 0x43, 0x55, 0x01}));
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+  EXPECT_EQ(CountWarnings(document->warnings, "Word 6/95 FKP"), 0u);
+}
+
+TEST(LegacyWord, LegacyScanDropsPicLocationWithUnexpectedCb) {
+  // A cb other than 4 carries no 32-bit FC the modern sprmCPicLocation
+  // handler could use. Consume the whole L_VAR operand and keep scanning;
+  // forwarding it would make the handler read the cb byte as the offset.
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x44, 0x02, 0xAA, 0xBB, 0x55, 0x01}, out),
+            doccraft::doc::detail::LegacySprmScan::kPartial);
+  EXPECT_EQ(out, (std::vector<uint8_t>{0x35, 0x08, 0x01}));
+}
+
+TEST(LegacyWord, LegacyScanPicLocationTruncatedOperandStops) {
+  // cb = 4 with only one operand byte present, and no cb byte at all, both
+  // stop the scan at 0x44 instead of guessing a width.
+  doccraft::doc::detail::LegacySprmStop stop;
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x44, 0x04, 0xAA}, out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(stop.opcode, 0x44);
+  EXPECT_EQ(stop.offset, 0u);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kTruncatedOperand);
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(std::vector<uint8_t>{0x44},
+                                                   out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kTruncatedOperand);
+}
+
+TEST(LegacyWord, LegacyScanNoLongerAcceptsUnprefixedPicLocation) {
+  // The pre-r63 synthetic `44 <4-byte FC>` form has no L_VAR cb. No corpus
+  // sample carries it (0 of 1,340 occurrences), and LibreOffice's v6 table
+  // says L_VAR, so the first FC byte is read as cb and usually runs past the
+  // grpprl. This pins the deliberate removal of the fixed-width fallback.
+  std::vector<uint8_t> out;
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(
+          std::vector<uint8_t>{0x44, 0x98, 0x08, 0x00, 0x00, 0x55, 0x01}, out),
+      doccraft::doc::detail::LegacySprmScan::kStopped);
 }
 
 TEST(LegacyWord, Word6FkpWarningNamesUnmappedOpcode) {
@@ -2182,9 +2257,10 @@ TEST(LegacyWord, Word6BadPictureReferenceIsSkippedWithWarning) {
   Put32(word, 1024, 768);
   Put32(word, 1028, 770);
   word[1032] = 250;
-  word[1524] = 5;
-  word[1525] = 0x44;          // sprmCPicLocation.
-  Put32(word, 1526, 0xFFFF);  // Far outside the 2560-byte stream.
+  word[1524] = 6;
+  word[1525] = 0x44;  // sprmCPicLocation, L_VAR (cb=4 + 32-bit FC).
+  word[1526] = 4;
+  Put32(word, 1527, 0xFFFF);  // Far outside the 2560-byte stream.
   word[1535] = 1;
   auto document = ParseWord6(word);
   ASSERT_TRUE(document) << document.error().message;
