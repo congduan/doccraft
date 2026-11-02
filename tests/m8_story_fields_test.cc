@@ -1360,8 +1360,9 @@ TEST(M8StoryFields, EmptyResultEvenHeaderKeepsEvenAndOddSettings) {
   auto parsed = doc::ParseFormatted(s.word, s.table, s.fib);
   ASSERT_TRUE(parsed) << parsed.error().message;
   ASSERT_EQ(parsed->section.headers[0].size(), 1u);
-  // The writer derives the settings part from the IR flag alone.
-  parsed->section.odd_even_different = true;
+  // The parser derives the flag from the kept story; the writer then emits the
+  // settings part from that IR flag alone.
+  ASSERT_TRUE(parsed->section.odd_even_different);
 
   auto zip = docx::Write(*parsed);
   ASSERT_TRUE(zip) << zip.error().message;
@@ -1370,6 +1371,15 @@ TEST(M8StoryFields, EmptyResultEvenHeaderKeepsEvenAndOddSettings) {
   EXPECT_NE(settings.find("<w:evenAndOddHeaders/>"), std::string::npos);
   EXPECT_NE(Part(*zip, "word/header1.xml").find("w:fldChar"),
             std::string::npos);
+  EXPECT_NE(Part(*zip, "word/document.xml")
+                .find("<w:headerReference w:type=\"even\""),
+            std::string::npos);
+  EXPECT_NE(Part(*zip, "word/_rels/document.xml.rels")
+                .find("Target=\"settings.xml\""),
+            std::string::npos);
+  EXPECT_NE(
+      Part(*zip, "[Content_Types].xml").find("PartName=\"/word/settings.xml\""),
+      std::string::npos);
 }
 
 // The relaxation is limited to field markers: a story of bare paragraph marks
