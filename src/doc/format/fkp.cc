@@ -1095,7 +1095,9 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
   if (pages > word.size() / 512)
     return std::unexpected(Error{"Word 6/95 BTE page count exceeds stream"});
   std::vector<uint8_t> seen(word.size() / 512);
-  bool warned = false;
+  // One warning per FKP page: the first range that stops or steps over an
+  // unlisted opcode reports it, later ranges on the same page stay silent.
+  std::vector<uint8_t> warned_pages(seen.size());
   for (size_t k = 0; k < pages; ++k) {
     const size_t pn = U16(plc, 4 * (pages + 1) + 2 * k);
     if (pn >= seen.size() || seen[pn]++)
@@ -1124,13 +1126,13 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
         LegacySprmStop stop;
         const LegacySprmScan scan = ScanLegacySprms(
             f.subspan(start, length - (para ? 2 : 0)), range.sprms, &stop);
-        if (!warned && warnings) {
+        if (warnings && !warned_pages[pn]) {
           if (scan == LegacySprmScan::kStopped) {
             warnings->push_back(LegacySprmStopWarning(stop, pn));
-            warned = true;
+            warned_pages[pn] = 1;
           } else if (stop.reason == LegacySprmStop::Reason::kUnmappedOpcode) {
             warnings->push_back(LegacySprmUnmappedWarning(stop, pn));
-            warned = true;
+            warned_pages[pn] = 1;
           }
         }
       }

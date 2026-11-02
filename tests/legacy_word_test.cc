@@ -278,6 +278,52 @@ std::vector<uint8_t> Word6ChpxDocument(const std::vector<uint8_t>& sprms) {
   return word;
 }
 
+// Builds a Word 6/95 document with a two-page CHPX BTE table: page 2 owns two
+// ranges (FC 768-769 and 769-770) and page 3 owns the third (770-772), so a
+// test can prove the warning is deduplicated per page rather than per table.
+std::vector<uint8_t> Word6TwoPageChpxDocument(
+    const std::vector<uint8_t>& first, const std::vector<uint8_t>& second,
+    const std::vector<uint8_t>& third) {
+  std::vector<uint8_t> word(2560);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 772);
+  Put32(word, 52, 4);
+  word[768] = 'A';
+  word[769] = 'B';
+  word[770] = 'C';
+  word[771] = '\r';
+  // CHPX BTE PLC at 2048: three FCs then the two FKP page numbers.
+  Put32(word, 88 + 12 * 8, 2048);
+  Put32(word, 92 + 12 * 8, 16);
+  Put32(word, 2048, 768);
+  Put32(word, 2052, 770);
+  Put32(word, 2056, 772);
+  Put16(word, 2060, 2);
+  Put16(word, 2062, 3);
+  // Page 2: two ranges with grpprls parked at page offsets 200 and 300.
+  Put32(word, 1024, 768);
+  Put32(word, 1028, 769);
+  Put32(word, 1032, 770);
+  word[1036] = 100;
+  word[1037] = 150;
+  word[1024 + 200] = static_cast<uint8_t>(first.size());
+  std::copy(first.begin(), first.end(), word.begin() + 1024 + 201);
+  word[1024 + 300] = static_cast<uint8_t>(second.size());
+  std::copy(second.begin(), second.end(), word.begin() + 1024 + 301);
+  word[1535] = 2;  // Page 2 run count.
+  // Page 3: one range with the grpprl parked at page offset 500.
+  Put32(word, 1536, 770);
+  Put32(word, 1540, 772);
+  word[1544] = 250;
+  word[1536 + 500] = static_cast<uint8_t>(third.size());
+  std::copy(third.begin(), third.end(), word.begin() + 1536 + 501);
+  word[2047] = 1;
+  return word;
+}
+
 // Builds a Word 6/95 document whose single PAPX FKP range carries `sprms`.
 // `sprms` must be an even number of bytes so the BX length covers exactly the
 // two style bytes plus the modifiers.
@@ -856,6 +902,27 @@ TEST(LegacyWord, Word6FkpWarningKeepsFirstStopOpcode) {
   EXPECT_EQ(found, 1);
 }
 
+TEST(LegacyWord, Word6FkpWarningDeduplicatesPerPage) {
+  // Page 2 carries two ranges with different unlisted opcodes, page 3 one.
+  // The warning is per FKP page: each page reports its first unmapped opcode,
+  // and the second range of page 2 must stay silent.
+  auto document = ParseWord6(Word6TwoPageChpxDocument(
+      {0xF0, 0x02, 0x11, 0x22}, {0xF1, 0x01, 0x33}, {0xF2, 0x01, 0x44}));
+  ASSERT_TRUE(document) << document.error().message;
+  std::vector<std::string> unmapped;
+  for (const auto& warning : document->warnings)
+    if (warning.find("Word 6/95 FKP contains unmapped sprms") == 0)
+      unmapped.push_back(warning);
+  ASSERT_EQ(unmapped.size(), 2u);
+  EXPECT_EQ(unmapped[0],
+            "Word 6/95 FKP contains unmapped sprms (opcode 0xf0 at grpprl "
+            "offset 0x00, FKP page 2: 3 operand byte(s) skipped)");
+  EXPECT_EQ(unmapped[1],
+            "Word 6/95 FKP contains unmapped sprms (opcode 0xf2 at grpprl "
+            "offset 0x00, FKP page 3: 2 operand byte(s) skipped)");
+  EXPECT_EQ(CountWarnings(document->warnings, "opcode 0xf1"), 0u);
+}
+
 TEST(LegacyWord, LegacyScanSkipsUnlistedOpcodeByCb) {
   // 0x01 is not in kLegacySprmSpecs: [MS-DOC] 2.9.215's Prm0 table has no
   // entry for it, LibreOffice's v6 table starts at sprmPIstd (0x02) and
@@ -872,6 +939,19 @@ TEST(LegacyWord, LegacyScanSkipsUnlistedOpcodeByCb) {
   EXPECT_EQ(stop.opcode, 0x01);
   EXPECT_EQ(stop.offset, 0u);
   EXPECT_EQ(stop.skipped, 3u);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kUnmappedOpcode);
+
+  // cb = 0 consumes the cb byte alone, so the next byte is scanned as an
+  // opcode again and the bold that follows is still reached.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                std::vector<uint8_t>{0x01, 0x00, 0x55, 0x01}, out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kPartial);
+  EXPECT_EQ(out, (std::vector<uint8_t>{0x35, 0x08, 0x01}));
+  EXPECT_EQ(stop.opcode, 0x01);
+  EXPECT_EQ(stop.offset, 0u);
+  EXPECT_EQ(stop.skipped, 1u);
   EXPECT_EQ(stop.reason,
             doccraft::doc::detail::LegacySprmStop::Reason::kUnmappedOpcode);
 }
