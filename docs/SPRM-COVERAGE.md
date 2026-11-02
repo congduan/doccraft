@@ -12,7 +12,7 @@
 > M11 页眉 PLC 双重损坏：`M11HeaderFields.DoublyCorruptPlcsKeepBothWarnings` 断言故事 PLC 与域 PLC 同时损坏时各发一条警告；不改变 sprm 状态。
 > M4 第二批损坏降级：`degraded_fkp_warning`、`degraded_sprm_warning`、`degraded_header_warning` 验证局部跳过、stderr 警告及正文保留；它们不改变正常输入下的各 opcode 覆盖状态。
 > M6 文本框降级：`M6TextboxDegradation.*`、`m6_bad_textbox_cli`、`m6_bad_textbox_story_cli` 覆盖 FTXBXS/Tbkd 逐故事跳过、PLC 整表跳过及正文/页眉文字保留；`M6WriterBuffer.SerializedPartsLimitReturnsError` 以注入的 8 KiB 上限覆盖 writer 总载荷超限，`M6WriterBuffer.SinglePartLimitReturnsNamedSize` 覆盖单部件超限。生产时总载荷和单部件上限均为 512 MiB。它们不是 sprm，不改变本表 opcode 状态（270 / 270 适用项，44 N/A）；§6.6、§6.9 仍为 ◐。
-> M8 续批旧版图片：`LegacyWord.Word6PicfMetafileBecomesMediaPart` 验证旧版单字节 opcode 0x44 经 WordDocument 中 66 字节 PICF 输出 WMF 媒体部件；`LegacyWord.Word6BitmapPicfReportsUnsupportedType` 验证 MFPF 位图(99) 明确不支持。现代 `sprmCPicLocation` 状态不变。
+> M8 续批旧版图片：`LegacyWord.Word6PicfMetafileBecomesMediaPart` 验证旧版单字节 opcode 0x44 经 WordDocument 中 66 字节 PICF 输出 WMF 媒体部件；`LegacyWord.Word6BitmapPicfReportsUnsupportedType` 验证 MFPF 位图(99) 明确不支持。r63 起 0x44 按 LO v6 表的 L_VAR 宽度消费（`44 04 <4B>`），cb 后的 4 字节作为 FC 传给同一图片路径（`LegacyWord.LegacyScanConsumesPicLocationCbPrefix`）。现代 `sprmCPicLocation` 状态不变。
 > M8 续批内联形状：`M5InlineShapes.PicfOfficeArtShapeWritesInlinePlaceholder` 验证 PICF 中无 BLIP 的 OfficeArtFSP 进入形状 IR 并写成内联 VML 占位；页眉 FTXBXS.lid 对 PlcfSpaHdr 的连接已由 `M4Textbox.HeaderTextboxAppearsInHeaderPart` 覆盖。文本框和形状仍为 §6.6 的 ◐。
 > M14 内联文本框：`M14InlineTextbox.StoryTextReachesInlineContent` 与 `MissingStoryWarnsAndKeepsEmptyShape` 覆盖 OfficeArtClientTextbox 指针连接 FTXBXS/Tbkd 故事，以及缺失范围的空框警告。它属于故事结构而非 sprm，§6.6 仍为 ◐。
 > M14 链式文本框：`M14LinkedTextbox.EachTbkdUsesItsOwnShapeAnchor` 覆盖两个 Tbkd 分段按各自 OfficeArtClientTextbox 指针连接非连续 FSPA 锚点，并断言两份独立的 `w:txbxContent`。`M4Textbox.SyntheticFlowBreaksStayInStoryOrder` 与 `M18Bookmarks.LinkedTextboxBreakEmitsBookmarkEndOnce` 已改为逐框内容与书签断言。它属于故事结构而非 sprm；§6.6 因缺真实 Word 链式 golden 保持 ◐。
@@ -407,7 +407,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 
 | 旧版 opcode | sprm | 现代去向 | 备注 |
 |---|---|---|---|
-| `0x01` | 无出处 | —（操作数字节经 cb 回退越过） | Prm0 isprm 表、LO `GetWW6SprmSearcher` v6 与 wvWare `rgsprmWord6` 均无此 opcode；r61 的「sprmPStyle，2B istd」是虚构行，r62 已删除。样本中出现的 `0x01` 是操作数/错位字节，不是宽度表条目；`ofz21385-1.doc` 残留的 `0x01` 停扫来自 `0x44` 定长 4 字节与该文件 L_VAR 形态 `44 04 <4B>` 的冲突（r16 条已知，r62 未改）；`LegacyWord.LegacyScanSkipsUnlistedOpcodeByCb`、`LegacyWord.Word6UnknownOpcodeSkipsCbOperandAndKeepsFollowing` |
+| `0x01` | 无出处 | —（操作数字节经 cb 回退越过） | Prm0 isprm 表、LO `GetWW6SprmSearcher` v6 与 wvWare `rgsprmWord6` 均无此 opcode；r61 的「sprmPStyle，2B istd」是虚构行，r62 已删除。样本中出现的 `0x01` 是操作数/错位字节，不是宽度表条目；`ofz21385-1.doc` 页 409–414 的 `0x01` 停扫来自 `0x44` 定宽 4 字节与该文件 L_VAR 形态 `44 04 <4B>` 的冲突，r63 按 L_VAR 修复后这 6 条告警已消失（见 0x44 行）；`LegacyWord.LegacyScanSkipsUnlistedOpcodeByCb`、`LegacyWord.Word6UnknownOpcodeSkipsCbOperandAndKeepsFollowing` |
 | `0x05` | sprmPJc | sprmPJc80 | 1B |
 | `0x07`/`0x08`/`0x09` | sprmPFKeep/KeepFollow/PageBreakBefore | 同名 | 1B |
 | `0x0F` | sprmPChgTabsPapx | sprmPChgTabsPapx (0xC60D) | 变长，按 cb 消费避免错位；删除项 2B/项（`080_080742.doc` 实测），删除位置输出 `w:tab w:val="clear"`；cb=0xFF 时停止扫描并警告（PChgTabsPapxOperand 定义 cb<255，扩展形态无依据）；`LegacyWord.Word6ChgTabsPapxReachesDocx`、`LegacyWord.Word6ChgTabsClearOnlyReachesDocx`、`LegacyWord.LegacyScanStopsOnPapxChgTabsExtendedCb` |
@@ -420,6 +420,7 @@ M6 的 RC4 解密和加密类型检测状态记录在 `DESIGN.md` §6.8；它们
 | `0x2C` | sprmPFNoAutoHyph | 同名 | 1B；M13 |
 | `0x33` | sprmPFWidowControl | 同名 | 1B |
 | `0x35`–`0x3A` | sprmPFKinsoku/WordWrap/OverflowPunct/TopLinePunct/AutoSpaceDE/AutoSpaceDN | 同名 | 1B；[MS-DOC] 2.9.215（Prm0 isprm）给出同编号映射，LO/wv 宽度表缺这几行；`LegacyWord.LegacyScanMapsEastAsianParagraphFlags` |
+| `0x44` | sprmCPicLocation | sprmCPicLocation (0x6A03) | **L_VAR**：1B cb + cb 字节；语料 1,340 处全为 `44 04 <4B>`（定宽 4B 形态 0 例），cb=4 时取 cb 后 4B 作为 WordDocument PICF 偏移转发，cb≠4 消费后丢弃并置 kPartial，缺 cb/越界停扫；r63；`LegacyWord.LegacyScanConsumesPicLocationCbPrefix`、`LegacyWord.LegacyScanDropsPicLocationWithUnexpectedCb`、`LegacyWord.LegacyScanNoLongerAcceptsUnprefixedPicLocation`、`LegacyWord.Word6PicfMetafileBecomesMediaPart` |
 | `0x55`/`0x56`/`0x57` | sprmCFBold/Italic/Strike | 同名 | 1B |
 | `0x5D` | sprmCFtc | sprmCRgFtc0 | 2B；M13 起映射字体名 |
 | `0x5E` | sprmCKul | 同名 | 1B |
