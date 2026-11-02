@@ -872,6 +872,17 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
         last_run_count = 0;
         continue;
       }
+      if (!picture && !fib.legacy &&
+          picture.error().kind != ErrorKind::kResourceLimit) {
+        // The shape fallback above consumed the one recoverable modern case.
+        // Any other decoding defect (a sprmCPicLocation pointing at filler,
+        // for instance) is local damage: warn and drop the image rather than
+        // reject the whole document. A resource limit stays fatal.
+        doc.warnings.push_back("inline picture at CP " + std::to_string(ch.cp) +
+                               " skipped: " + picture.error().message);
+        last_run_count = 0;
+        continue;
+      }
       if (!picture)
         return std::unexpected(picture.error());
       if (picture->bytes.size() > detail::kMaxTotalImageSize - total_image_size)

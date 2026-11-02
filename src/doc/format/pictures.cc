@@ -86,9 +86,11 @@ std::expected<model::Image, Error> DecodeBlip(Bytes body, uint16_t type,
     if (body.size() <= prefix)
       return std::unexpected(Error{"empty raster BLIP"});
     if (body.size() - prefix > detail::kMaxImageSize)
-      return std::unexpected(Error{"image size exceeds limit"});
+      return std::unexpected(
+          Error{"image size exceeds limit", ErrorKind::kResourceLimit});
     if (body.size() - prefix > budget)
-      return std::unexpected(Error{"total image size exceeds limit"});
+      return std::unexpected(
+          Error{"total image size exceeds limit", ErrorKind::kResourceLimit});
     image.bytes.assign(body.begin() + prefix, body.end());
     return image;
   }
@@ -98,11 +100,16 @@ std::expected<model::Image, Error> DecodeBlip(Bytes body, uint16_t type,
   Bytes header = body.subspan(uid_bytes, detail::kMetafileHeaderSize);
   const uint32_t original_size = U32(header, 0);
   const uint32_t stored_size = U32(header, 28);
-  if (original_size == 0 || original_size > detail::kMaxImageSize ||
-      stored_size > body.size() - prefix)
+  if (original_size == 0 || stored_size > body.size() - prefix)
     return std::unexpected(Error{"invalid metafile BLIP size"});
+  // A declared size past the configured bound is a resource limit, not local
+  // damage: the caller must keep it fatal.
+  if (original_size > detail::kMaxImageSize)
+    return std::unexpected(
+        Error{"image size exceeds limit", ErrorKind::kResourceLimit});
   if (original_size > budget)
-    return std::unexpected(Error{"total image size exceeds limit"});
+    return std::unexpected(
+        Error{"total image size exceeds limit", ErrorKind::kResourceLimit});
   Bytes payload = body.subspan(prefix, stored_size);
   const uint8_t compression = header[detail::kMetafileCompressionOffset];
   if (compression == detail::kMetafileUncompressed) {

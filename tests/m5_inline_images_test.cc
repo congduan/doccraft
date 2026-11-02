@@ -354,6 +354,44 @@ TEST(M5InlineImages, AggregateImageLimitAcceptsBoundaryRejectsOverflow) {
   EXPECT_EQ(rejected.error().message, "total image size exceeds limit");
 }
 
+TEST(M5InlineImages, MalformedInlinePictureWarnsAndDropsRun) {
+  // LibreOffice's ofz34749-1 carries a picture mark whose sprmCPicLocation is
+  // 0 while the Data stream starts with 0x0E filler, not a PICF. The damage is
+  // local to the image: keep the surrounding text and record the skip.
+  const std::vector<uint8_t> filler(96, 0x0e);
+  auto parsed = ParsePictures(
+      "A\x01"
+      "B\r",
+      filler);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_TRUE(parsed->images.empty());
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_EQ(parsed->warnings[0],
+            "inline picture at CP 1 skipped: invalid PICF header or length");
+  const auto& runs = parsed->paragraphs[0].runs;
+  // The dropped image leaves no run of its own; the surrounding text is kept
+  // (and merges because both sides share formatting).
+  ASSERT_EQ(runs.size(), 1u);
+  EXPECT_EQ(runs[0].text, "AB");
+  EXPECT_LT(runs[0].image_index, 0);
+}
+
+TEST(M5InlineImages, PicfResourceLimitStaysFatal) {
+  // The same run path must not launder a declared oversize payload into a
+  // warning: resource limits keep rejecting the document.
+  auto data = MetafilePicf(0xF01B, 0x216, false, {'W', 'M', 'F'});
+  ASSERT_FALSE(data.empty());
+  constexpr size_t kMeta = 68 + 8 + 36 + 8 + 16;
+  Put32(data, kMeta, static_cast<uint32_t>(doc::detail::kMaxImageSize + 1));
+  auto parsed = ParsePictures(
+      "A\x01"
+      "B\r",
+      data);
+  ASSERT_FALSE(parsed);
+  EXPECT_EQ(parsed.error().message, "image size exceeds limit");
+  EXPECT_EQ(parsed.error().kind, doc::ErrorKind::kResourceLimit);
+}
+
 TEST(M5InlineImages, SameChpxTextDoesNotAbsorbPicture) {
   const auto data = MetafilePicf(0xF01B, 0x216, false, {'W', 'M', 'F'});
   // Also exercise the same fast path inside a field result.
