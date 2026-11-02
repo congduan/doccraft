@@ -76,6 +76,10 @@ std::vector<std::string> PartNames(const std::vector<uint8_t>& archive) {
   return names;
 }
 
+// AddPart takes `name` by value and reads it only for the bound diagnostic
+// before moving it into parts; no call site aliases that string elsewhere, and
+// a const reference would only add a copy. There is no use-after-move path to
+// regress, so this suite asserts the diagnostics only (r65 review).
 TEST(M6WriterBuffer, SerializedPartsLimitReturnsError) {
   model::Document document;
   document.paragraphs.push_back({});
