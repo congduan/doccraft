@@ -62,15 +62,21 @@ struct LegacyStoryFlags {
 };
 
 // Applies the one-byte Word 6/95 sprm table to one SEPX and returns the
-// section's grpfIhdt and title-page flags.
-std::expected<LegacyStoryFlags, Error> ReadLegacySepx(Bytes raw) {
+// section's grpfIhdt and title-page flags. An opcode outside the table is
+// stepped over with the LibreOffice {0, L_VAR} fallback and reported through
+// `skip` (first one only).
+std::expected<LegacyStoryFlags, Error> ReadLegacySepx(Bytes raw,
+                                                      LegacySepxSkip* skip) {
   LegacyStoryFlags flags;
-  auto walked = WalkLegacySepx(raw, [&](uint8_t code, Bytes v) {
-    if (code == kLegacySprmSGprfIhdt && !v.empty())
-      flags.stories = v[0];
-    else if (code == kLegacySprmSFTitlePage && !v.empty())
-      flags.title_page = v[0] != 0;
-  });
+  auto walked = WalkLegacySepx(
+      raw,
+      [&](uint8_t code, Bytes v) {
+        if (code == kLegacySprmSGprfIhdt && !v.empty())
+          flags.stories = v[0];
+        else if (code == kLegacySprmSFTitlePage && !v.empty())
+          flags.title_page = v[0] != 0;
+      },
+      skip);
   if (!walked)
     return std::unexpected(walked.error());
   return flags;
@@ -127,12 +133,17 @@ std::expected<std::vector<LegacyStoryFlags>, Error> ReadLegacyStoryFlags(
       out[i].stories = kLegacyDefaultStoryFlags;
       continue;
     }
-    auto flags = ReadLegacySepx(*raw);
+    LegacySepxSkip skip;
+    auto flags = ReadLegacySepx(*raw, &skip);
     if (!flags) {
       if (survives[i])
         return std::unexpected(flags.error());
       out[i].stories = kLegacyDefaultStoryFlags;
       continue;
+    }
+    if (skip.skipped && warnings &&
+        (!corrected || corrected->unmapped.insert(fc).second)) {
+      warnings->push_back(LegacySepxUnmappedWarning(skip));
     }
     out[i] = *flags;
   }
@@ -160,7 +171,7 @@ std::expected<Bytes, Error> FrameLegacySepx(Bytes word, uint32_t fc,
     if (shifted) {
       // The section and header readers both frame this SED entry; report the
       // correction once per stored offset.
-      if (!corrected || corrected->insert(fc).second) {
+      if (!corrected || corrected->corrected.insert(fc).second) {
         if (warnings)
           warnings->push_back(
               "corrected Word 6/95 SEPX offset: stored one byte too high");

@@ -33,6 +33,8 @@ using detail::kSprmTDefTable;
 using detail::kSprmTDefTableObsolete;
 using detail::kUndefinedU32;
 using detail::LegacySepxCorrections;
+using detail::LegacySepxSkip;
+using detail::LegacySepxUnmappedWarning;
 using detail::ParsedSections;
 using detail::U16;
 using detail::U32;
@@ -140,9 +142,13 @@ std::expected<ParsedSections, Error> ReadSections(
             }
           } else {
             bool valid = true;
-            auto walked = WalkLegacySepx(*payload, [&](uint8_t code, Bytes v) {
-              valid &= ApplyLegacySectionSprm(section, code, v);
-            });
+            LegacySepxSkip skip;
+            auto walked = WalkLegacySepx(
+                *payload,
+                [&](uint8_t code, Bytes v) {
+                  valid &= ApplyLegacySectionSprm(section, code, v);
+                },
+                &skip);
             if (!walked) {
               if (walked.error().message != detail::kLegacySepxTruncated)
                 return std::unexpected(walked.error());
@@ -154,6 +160,9 @@ std::expected<ParsedSections, Error> ReadSections(
               section = model::Section{};
             } else if (!valid) {
               return std::unexpected(Error{"invalid SEPX sprm"});
+            } else if (skip.skipped && warnings &&
+                       (!corrected || corrected->unmapped.insert(fc).second)) {
+              warnings->push_back(LegacySepxUnmappedWarning(skip));
             }
           }
         }

@@ -27,6 +27,23 @@
 #include "doc/format/sprm_codes.h"
 
 namespace doccraft::doc::detail {
+namespace {
+
+// Renders a small value as `0xNN` for the legacy one-line warnings.
+std::string HexValue(size_t value) {
+  char text[2 * sizeof(size_t) + 3];
+  std::snprintf(text, sizeof(text), "0x%02zx", value);
+  return text;
+}
+
+}  // namespace
+
+std::string LegacySepxUnmappedWarning(const LegacySepxSkip& skip) {
+  return "Word 6/95 SEPX contains unmapped sprms (opcode " +
+         HexValue(skip.opcode) + " at SEPX offset " + HexValue(skip.offset) +
+         ": " + std::to_string(skip.skipped) + " operand byte(s) skipped)";
+}
+
 // Windows LCID values ([MS-LCID]); several LCIDs share one BCP-47 tag.
 std::string LanguageTag(uint16_t lid) {
   // Common Windows LIDs; retain uncommon IDs as a private BCP 47 tag.

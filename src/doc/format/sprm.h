@@ -99,19 +99,53 @@ bool WalkParagraph(Bytes b, Bytes data, F fn, int depth = 0) {
   return walked && valid;
 }
 
+// The first opcode a legacy SEPX walk stepped over with the LibreOffice
+// {0, L_VAR} fallback: the opcode, its byte offset inside the grpprl, and the
+// cb + 1 operand bytes that were consumed.
+struct LegacySepxSkip {
+  uint8_t opcode = 0;
+  size_t offset = 0;
+  size_t skipped = 0;
+};
+
+// Renders the warning for `skip` in the same shape as the legacy FKP message.
+std::string LegacySepxUnmappedWarning(const LegacySepxSkip& skip);
+
 // Steps through a Word 6/95 SEPX using the one-byte operand width table and
-// calls `fn(code, operand)` for every modifier. An opcode outside the table and
-// a truncated operand are reported with the same errors the legacy header
-// reader always used; both leave the SEPX only partially understood.
+// calls `fn(code, operand)` for every modifier. An opcode outside the table is
+// stepped over with LibreOffice's {0, L_VAR} fallback (the next byte is cb and
+// cb + 1 operand bytes follow), exactly like the body FKP path; the first such
+// skip is reported through `skip` when non-null. A truncated operand is still
+// an error and leaves the SEPX only partially understood.
 template <class F>
-std::expected<void, Error> WalkLegacySepx(Bytes raw, F fn) {
+std::expected<void, Error> WalkLegacySepx(Bytes raw, F fn,
+                                          LegacySepxSkip* skip = nullptr) {
+  bool skip_recorded = false;
   for (size_t p = 0; p < raw.size();) {
+    const size_t opcode_at = p;
     const uint8_t code = raw[p++];
     if (code == 0)
       continue;  // Word 6 separator padding.
     const LegacySprmSpec* spec = FindLegacySprmSpec(code);
-    if (!spec)
-      return std::unexpected(Error{"unsupported Word 6/95 SEPX sprm"});
+    if (!spec) {
+      // LibreOffice's GetSprmInfo uses {0, L_VAR} for an opcode it does not
+      // know: the next byte is cb and cb + 1 operand bytes follow. Step over
+      // them so an operand byte is never read as an opcode. A missing cb byte
+      // or a cb past the grpprl stays a truncation.
+      if (p >= raw.size())
+        return std::unexpected(Error{kLegacySepxTruncated});
+      const size_t size = static_cast<size_t>(raw[p]) + 1;
+      if (size > raw.size() - p)
+        return std::unexpected(Error{kLegacySepxTruncated});
+      if (skip && !skip_recorded) {
+        skip->opcode = code;
+        skip->offset = opcode_at;
+        skip->skipped = size;
+        skip_recorded = true;
+      }
+      p += size;
+      continue;
+    }
     size_t size = 0;
     switch (spec->width) {
       case LegacySprmWidth::kFix:

@@ -473,10 +473,16 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out,
                                LegacySprmStop* stop = nullptr);
 bool NormalizeLegacySprms(Bytes raw, std::vector<uint8_t>& out);
 
-// Stored fcSepx values whose one-byte-high offset was already corrected. The
-// section-property and header readers both frame the same SED entries, so they
-// share this set to warn once per offset instead of once per reader.
-using LegacySepxCorrections = std::set<uint32_t>;
+// Stored fcSepx values already handled by the shared legacy readers. The
+// section-property and header readers both frame and walk the same SED
+// entries, so they share these sets to warn once per offset instead of once
+// per reader.
+struct LegacySepxCorrections {
+  // Offsets whose one-byte-high fcSepx was corrected.
+  std::set<uint32_t> corrected;
+  // Offsets whose unmapped opcode was already reported.
+  std::set<uint32_t> unmapped;
+};
 
 // Frames the SEPX that starts at `fc`: a 16-bit length prefix followed by that
 // many bytes. A few Word 6 writers store fcSepx one byte too high; that offset

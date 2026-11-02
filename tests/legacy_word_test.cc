@@ -2705,13 +2705,73 @@ TEST(LegacyWord, Word6SectionWithoutSepxKeepsDefaultProperties) {
   EXPECT_FALSE(document->section.first_page_different);
 }
 
-TEST(LegacyWord, Word6UnsupportedSectionSprmRejectsDocument) {
+TEST(LegacyWord, Word6UnmappedSectionSprmSkipsAndWarns) {
+  // 0xF0 is outside the one-byte table, so the LibreOffice {0, L_VAR} fallback
+  // reads cb = 2 and steps over the three operand bytes after the opcode. The
+  // SXaPage that follows still reaches the section.
   auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
-  sample.section_sprms = {{0xF0, 0xAA}};
+  sample.section_sprms = {{0xF0, 0x02, 0x01, 0x02, 0xA4, 0x84, 0x2E}};
   auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
   auto document = ParseWord6(word);
-  ASSERT_FALSE(document);
-  EXPECT_EQ(document.error().message, "unsupported Word 6/95 SEPX sprm");
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 11908);
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "Word 6/95 SEPX contains unmapped sprms (opcode "
+                          "0xf0 at SEPX offset 0x02: 3 operand byte(s) "
+                          "skipped)"),
+            1u);
+}
+
+TEST(LegacyWord, Word6UnmappedSectionSprmKeepsNeighbouringProperties) {
+  // Properties before and after the unmapped opcode both survive: the walk no
+  // longer discards the whole section when one entry is unknown.
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {
+      {0xA4, 0x84, 0x2E, 0xF0, 0x02, 0x01, 0x02, 0xA5, 0xC6, 0x41}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 11908);
+  EXPECT_EQ(document->section.height, 16838);
+  EXPECT_EQ(
+      CountWarnings(document->warnings, "opcode 0xf0 at SEPX offset 0x05"), 1u);
+}
+
+TEST(LegacyWord, Word6UnmappedHeaderSepxSkipsAndWarns) {
+  auto sample = HeaderSample({"HDR\r"}, {0x02}, {4});
+  sample.section_sprms = {{0xF0, 0x02, 0x01, 0x02}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", sample);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->section.headers[1].size(), 1u);
+  EXPECT_EQ(document->section.headers[1][0].runs[0].text, "HDR");
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "Word 6/95 SEPX contains "
+                          "unmapped sprms"),
+            1u);
+}
+
+TEST(LegacyWord, Word6UnmappedSectionSprmTruncatedOperandUsesDefaults) {
+  // A cb past the end of the SEPX is still a truncation, not an unmapped skip.
+  auto overrun = HeaderSample({"HDR\r"}, {0x02}, {4});
+  overrun.section_sprms = {{0xF0, 0x05, 0x01}};
+  auto word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", overrun);
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 12240);
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "skipped section 0: truncated Word 6/95 SEPX; "
+                          "default section properties used"),
+            1u);
+  EXPECT_EQ(CountWarnings(document->warnings, "unmapped sprms"), 0u);
+  // The opcode as the very last byte has no cb at all.
+  auto missing = HeaderSample({"HDR\r"}, {0x02}, {4});
+  missing.section_sprms = {{0xF0}};
+  word = Word6HeaderDocument(0xA5DC, 0x65, "Body\r", missing);
+  document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->section.width, 12240);
+  EXPECT_EQ(CountWarnings(document->warnings, "unmapped sprms"), 0u);
 }
 
 TEST(LegacyWord, Word6TruncatedSectionSprmUsesDefaultProperties) {
