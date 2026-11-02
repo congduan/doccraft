@@ -615,13 +615,15 @@ enum class LegacyTableTransform {
 // Word 6/95 grpprls use one-byte opcodes. Translate the scalar properties
 // understood by this converter and step over the ones whose width the Word 6
 // table knows, so a harmless modifier can no longer discard every later
-// property. An opcode outside the table (or a truncated operand) still stops
-// the scan: without a width its operand bytes could be mistaken for opcodes.
-// `stop`, when given, receives the opcode, offset and reason of that first
-// stop so the caller can name it in a warning.
+// property. An opcode outside the table uses LibreOffice's {0, L_VAR} fallback
+// (GetSprmInfo: a cb byte followed by cb operand bytes) and the scan continues;
+// a truncated operand still stops it. `stop`, when given, receives the first
+// unlisted opcode (Reason::kUnmappedOpcode) or the first stop, so the caller
+// can warn once per FKP page.
 LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out,
                                LegacySprmStop* stop) {
   bool partial = false;
+  bool unmapped_recorded = false;
   for (size_t p = 0; p < raw.size();) {
     const uint8_t code = raw[p++];
     // Offset of the opcode inside the grpprl, reported when the scan stops.
@@ -940,8 +942,27 @@ LegacySprmScan ScanLegacySprms(Bytes raw, std::vector<uint8_t>& out,
     }
     if (!mapped) {
       const LegacySprmSpec* spec = FindLegacySprmSpec(code);
-      if (!spec)
-        return fail(LegacySprmStop::Reason::kUnknownOpcode);
+      if (!spec) {
+        // LibreOffice's GetSprmInfo uses {0, L_VAR} for a Word 6/95 opcode it
+        // does not know: the next byte is cb and cb + 1 operand bytes follow
+        // the opcode. Step over them so an operand byte is never read as an
+        // opcode. A missing cb byte or a cb past the grpprl is still a stop.
+        if (p >= raw.size())
+          return fail(LegacySprmStop::Reason::kTruncatedOperand);
+        size = static_cast<size_t>(raw[p]) + 1;
+        if (size > raw.size() - p)
+          return fail(LegacySprmStop::Reason::kTruncatedOperand);
+        if (stop && !unmapped_recorded) {
+          stop->opcode = code;
+          stop->offset = opcode_at;
+          stop->skipped = size;
+          stop->reason = LegacySprmStop::Reason::kUnmappedOpcode;
+          unmapped_recorded = true;
+        }
+        partial = true;
+        p += size;
+        continue;
+      }
       switch (spec->width) {
         case LegacySprmWidth::kFix:
           size = spec->size;
@@ -1042,10 +1063,22 @@ std::string LegacySprmStopWarning(const LegacySprmStop& stop, size_t page) {
     case LegacySprmStop::Reason::kUnboundedOperand:
       reason = "no width rule";
       break;
+    case LegacySprmStop::Reason::kUnmappedOpcode:
+      reason = "unmapped opcode";
+      break;
   }
   return "Word 6/95 FKP contains unsupported sprms (opcode " +
          HexValue(stop.opcode) + " at grpprl offset " + HexValue(stop.offset) +
          ", FKP page " + std::to_string(page) + ": " + reason + ")";
+}
+
+// Names the first opcode the {0, L_VAR} fallback stepped over, so an operand
+// byte that happens to look like an opcode can be told apart from a real gap.
+std::string LegacySprmUnmappedWarning(const LegacySprmStop& skip, size_t page) {
+  return "Word 6/95 FKP contains unmapped sprms (opcode " +
+         HexValue(skip.opcode) + " at grpprl offset " + HexValue(skip.offset) +
+         ", FKP page " + std::to_string(page) + ": " +
+         std::to_string(skip.skipped) + " operand byte(s) skipped)";
 }
 
 }  // namespace
@@ -1089,11 +1122,16 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
           start += 2;
         }
         LegacySprmStop stop;
-        if (ScanLegacySprms(f.subspan(start, length - (para ? 2 : 0)),
-                            range.sprms, &stop) == LegacySprmScan::kStopped &&
-            !warned && warnings) {
-          warnings->push_back(LegacySprmStopWarning(stop, pn));
-          warned = true;
+        const LegacySprmScan scan = ScanLegacySprms(
+            f.subspan(start, length - (para ? 2 : 0)), range.sprms, &stop);
+        if (!warned && warnings) {
+          if (scan == LegacySprmScan::kStopped) {
+            warnings->push_back(LegacySprmStopWarning(stop, pn));
+            warned = true;
+          } else if (stop.reason == LegacySprmStop::Reason::kUnmappedOpcode) {
+            warnings->push_back(LegacySprmUnmappedWarning(stop, pn));
+            warned = true;
+          }
         }
       }
       out.push_back(std::move(range));

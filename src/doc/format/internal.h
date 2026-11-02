@@ -443,21 +443,29 @@ std::vector<model::Style> ReadLegacyStyles(
     uint32_t codepage, std::vector<std::string>* warnings);
 
 // Translates a Word 6/95 one-byte-opcode grpprl into the modern sprm stream
-// consumed by Walk(). kStopped means an opcode width was unknown (or an
-// operand was truncated), so the rest of the grpprl was discarded; kPartial
-// means every opcode was stepped over but at least one is not mapped.
+// consumed by Walk(). kStopped means an operand was truncated (or its width
+// rule could not be applied), so the rest of the grpprl was discarded; kPartial
+// means every opcode was stepped over but at least one is not mapped, including
+// opcodes outside kLegacySprmSpecs consumed through the {0, L_VAR} fallback.
 enum class LegacySprmScan { kComplete, kPartial, kStopped };
 
-// Describes the entry that made ScanLegacySprms stop: its opcode, its byte
-// offset from the start of the grpprl, and why no width was available.
+// Describes the entry that made ScanLegacySprms stop, or the first opcode it
+// stepped over with the {0, L_VAR} fallback: its opcode, its byte offset from
+// the start of the grpprl, and why the scan could not use a wider rule.
 struct LegacySprmStop {
   enum class Reason {
-    kUnknownOpcode,     // No entry in kLegacySprmSpecs and no explicit case.
+    // Retained for the default-constructed value. Since r62 an opcode outside
+    // kLegacySprmSpecs is skipped through {0, L_VAR}, so no path produces it.
+    kUnknownOpcode,
     kTruncatedOperand,  // The grpprl ends before the operand does.
-    kUnboundedOperand   // The width rule itself cannot be applied.
+    kUnboundedOperand,  // The width rule itself cannot be applied.
+    // Outside kLegacySprmSpecs; `skipped` operand bytes were stepped over and
+    // the scan continued. The caller warns once per FKP page.
+    kUnmappedOpcode
   };
   uint8_t opcode = 0;
   size_t offset = 0;
+  size_t skipped = 0;  // Operand bytes consumed by kUnmappedOpcode.
   Reason reason = Reason::kUnknownOpcode;
 };
 

@@ -682,19 +682,30 @@ TEST(LegacyWord, Word6SkipsUnmappedTwoByteSprmAndKeepsFollowing) {
   EXPECT_TRUE(document->paragraphs[0].runs[0].italic);
 }
 
-TEST(LegacyWord, Word6UnknownOpcodeStillStopsParsing) {
-  // italic, opcode 0xF0 is absent from the Word 6 table, then bold. Parsing
-  // must stop so 0xF0's operand bytes are not read as modifiers.
-  auto word = Word6ChpxDocument({0x56, 1, 0xF0, 0xAA, 0xBB, 0x55, 1});
+TEST(LegacyWord, Word6UnknownOpcodeSkipsCbOperandAndKeepsFollowing) {
+  // italic, opcode 0xF0 is absent from the Word 6 table, then bold. The
+  // LibreOffice {0, L_VAR} fallback reads cb = 2 and steps over the two
+  // operand bytes, so the bold that follows is still reached.
+  auto word = Word6ChpxDocument({0x56, 1, 0xF0, 0x02, 0xAA, 0xBB, 0x55, 1});
   auto document = ParseWord6(word);
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->paragraphs.size(), 1u);
   ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
   EXPECT_TRUE(document->paragraphs[0].runs[0].italic);
-  EXPECT_FALSE(document->paragraphs[0].runs[0].bold);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+  // The skip is still reported as partial by the historical predicate.
   std::vector<uint8_t> normalized;
   EXPECT_FALSE(doccraft::doc::detail::NormalizeLegacySprms(
-      {word.data() + 1525, 7}, normalized));
+      {word.data() + 1525, 8}, normalized));
+  auto unmapped = std::find_if(
+      document->warnings.begin(), document->warnings.end(),
+      [](const std::string& warning) {
+        return warning.find("Word 6/95 FKP contains unmapped sprms") == 0;
+      });
+  ASSERT_NE(unmapped, document->warnings.end());
+  EXPECT_EQ(*unmapped,
+            "Word 6/95 FKP contains unmapped sprms (opcode 0xf0 at grpprl "
+            "offset 0x02, FKP page 2: 3 operand byte(s) skipped)");
 }
 
 TEST(LegacyWord, Word6SkipsVariableLengthSprmAndKeepsFollowing) {
@@ -768,18 +779,20 @@ TEST(LegacyWord, LegacyScanDistinguishesSkipFromStop) {
 }
 
 TEST(LegacyWord, LegacyScanReportsStoppingOpcode) {
-  // A stop must name the opcode that has no usable width, plus its offset in
-  // the grpprl, so a real document's warning can be matched against the Word
-  // 6/95 tables instead of only stating that something failed.
+  // An opcode outside the table is stepped over through {0, L_VAR}; the report
+  // names it and the operand bytes that were skipped even though the scan
+  // continues.
   doccraft::doc::detail::LegacySprmStop stop;
   std::vector<uint8_t> out;
-  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
-                std::vector<uint8_t>{0x55, 1, 0xF0, 0xAA}, out, &stop),
-            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(
+          std::vector<uint8_t>{0x55, 1, 0xF0, 0x02, 0xAA, 0xBB}, out, &stop),
+      doccraft::doc::detail::LegacySprmScan::kPartial);
   EXPECT_EQ(stop.opcode, 0xF0);
   EXPECT_EQ(stop.offset, 2u);
+  EXPECT_EQ(stop.skipped, 3u);
   EXPECT_EQ(stop.reason,
-            doccraft::doc::detail::LegacySprmStop::Reason::kUnknownOpcode);
+            doccraft::doc::detail::LegacySprmStop::Reason::kUnmappedOpcode);
   // A known opcode whose operand runs past the grpprl reports the same
   // opcode with the truncation reason, not the unknown-opcode one.
   out.clear();
@@ -802,26 +815,25 @@ TEST(LegacyWord, LegacyScanReportsStoppingOpcode) {
             doccraft::doc::detail::LegacySprmStop::Reason::kUnboundedOperand);
 }
 
-TEST(LegacyWord, Word6FkpWarningNamesStoppingOpcode) {
-  // The paragraph's BX carries style 0 and then `55 01 F0 AA`, so the unknown
-  // 0xF0 sits two bytes into the grpprl; the warning must say so.
-  auto document = ParseWord6(Word6PapxDocument({0x55, 1, 0xF0, 0xAA}));
+TEST(LegacyWord, Word6FkpWarningNamesUnmappedOpcode) {
+  // The paragraph's BX carries style 0 and then `55 01 F0 02 AA BB`, so the
+  // unlisted 0xF0 sits two bytes into the grpprl and its cb = 2 operand is
+  // stepped over; the warning must name the opcode, offset and skip width.
+  auto document =
+      ParseWord6(Word6PapxDocumentWithRoom({0x55, 1, 0xF0, 0x02, 0xAA, 0xBB}));
   ASSERT_TRUE(document) << document.error().message;
   ASSERT_EQ(document->paragraphs.size(), 1u);
   int found = 0;
   for (const auto& warning : document->warnings) {
-    if (warning.find("Word 6/95 FKP contains unsupported sprms") != 0)
+    if (warning.find("Word 6/95 FKP contains unmapped sprms") != 0)
       continue;
     ++found;
-    EXPECT_NE(warning.find("opcode 0xf0"), std::string::npos) << warning;
-    EXPECT_NE(warning.find("offset 0x02"), std::string::npos) << warning;
-    EXPECT_NE(warning.find("unknown opcode"), std::string::npos) << warning;
     // The PAPX FKP lives on page 3, and the fields must stay in this order so
     // a reader can grep the page and the offset together.
     EXPECT_NE(warning.find("FKP page 3"), std::string::npos) << warning;
     EXPECT_EQ(warning,
-              "Word 6/95 FKP contains unsupported sprms (opcode 0xf0 at "
-              "grpprl offset 0x02, FKP page 3: unknown opcode)")
+              "Word 6/95 FKP contains unmapped sprms (opcode 0xf0 at "
+              "grpprl offset 0x02, FKP page 3: 3 operand byte(s) skipped)")
         << warning;
   }
   EXPECT_EQ(found, 1);
@@ -844,39 +856,96 @@ TEST(LegacyWord, Word6FkpWarningKeepsFirstStopOpcode) {
   EXPECT_EQ(found, 1);
 }
 
-TEST(LegacyWord, LegacyScanSkipsSprmPStyle) {
-  // 0x01 is sprmPStyle ([MS-DOC] 2.9.215, a two-byte istd), not an unknown
-  // opcode. It was only missing from the width table, so the scanner must step
-  // over it, keep the bold that follows and still stop on a real gap.
+TEST(LegacyWord, LegacyScanSkipsUnlistedOpcodeByCb) {
+  // 0x01 is not in kLegacySprmSpecs: [MS-DOC] 2.9.215's Prm0 table has no
+  // entry for it, LibreOffice's v6 table starts at sprmPIstd (0x02) and
+  // wvWare's rgsprmWord6 maps index 1 to sprmNoop. The {0, L_VAR} fallback
+  // reads cb = 2, steps over the two operand bytes and keeps the bold after
+  // them instead of letting them be read as opcodes.
+  doccraft::doc::detail::LegacySprmStop stop;
+  std::vector<uint8_t> out;
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(
+          std::vector<uint8_t>{0x01, 0x02, 0xAA, 0xBB, 0x55, 0x01}, out, &stop),
+      doccraft::doc::detail::LegacySprmScan::kPartial);
+  EXPECT_EQ(out, (std::vector<uint8_t>{0x35, 0x08, 0x01}));
+  EXPECT_EQ(stop.opcode, 0x01);
+  EXPECT_EQ(stop.offset, 0u);
+  EXPECT_EQ(stop.skipped, 3u);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kUnmappedOpcode);
+}
+
+TEST(LegacyWord, LegacyScanContinuesAcrossUnlistedOpcodeBetweenSprms) {
+  // The real ofz21385-1.doc PAPX starts `18 01 19 01`; an unlisted opcode
+  // between the two must consume its cb operand and leave both table markers.
+  std::vector<uint8_t> out;
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(
+          std::vector<uint8_t>{0x18, 0x01, 0xF0, 0x01, 0xAA, 0x19, 0x01}, out),
+      doccraft::doc::detail::LegacySprmScan::kPartial);
+  EXPECT_EQ(out, (std::vector<uint8_t>{0x16, 0x24, 0x01, 0x17, 0x24, 0x01}));
+}
+
+TEST(LegacyWord, LegacyScanUnlistedOpcodeCbPastEndStops) {
+  // A cb that claims more operand bytes than the grpprl still stops: the
+  // fallback must not step past the end.
   doccraft::doc::detail::LegacySprmStop stop;
   std::vector<uint8_t> out;
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
-                std::vector<uint8_t>{0x01, 0x09, 0x00, 0x55, 0x01, 0xF0, 0xAA},
-                out, &stop),
+                std::vector<uint8_t>{0x18, 0x01, 0xF0, 0x05, 0xAA}, out, &stop),
             doccraft::doc::detail::LegacySprmScan::kStopped);
-  EXPECT_EQ(out, (std::vector<uint8_t>{0x35, 0x08, 0x01}));
   EXPECT_EQ(stop.opcode, 0xF0);
-  EXPECT_EQ(stop.offset, 5u);
+  EXPECT_EQ(stop.offset, 2u);
   EXPECT_EQ(stop.reason,
-            doccraft::doc::detail::LegacySprmStop::Reason::kUnknownOpcode);
+            doccraft::doc::detail::LegacySprmStop::Reason::kTruncatedOperand);
+  // Without a cb byte there is nothing to measure.
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(std::vector<uint8_t>{0xF0},
+                                                   out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(stop.offset, 0u);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kTruncatedOperand);
 }
 
-TEST(LegacyWord, Word6PapxSprmPStyleNoStopWarning) {
-  // A Word 6/95 PAPX can carry 0x01 (sprmPStyle) ahead of its visible
-  // modifiers. Now that the width is known the whole grpprl is consumed: the
-  // sprmPJc that follows still reaches the paragraph and no stop warning
-  // names the FKP page.
-  auto document = ParseWord6(
-      Word6PapxDocumentWithRoom({0x01, 0x09, 0x00, 0x05, 0x02, 0x00}));
-  ASSERT_TRUE(document) << document.error().message;
-  ASSERT_EQ(document->paragraphs.size(), 1u);
-  EXPECT_EQ(document->paragraphs[0].align, 2);
-  for (const auto& warning : document->warnings) {
-    EXPECT_EQ(warning.find("Word 6/95 FKP contains unsupported sprms"),
-              std::string::npos)
-        << warning;
-    EXPECT_EQ(warning.find("FKP page"), std::string::npos) << warning;
-  }
+TEST(LegacyWord, LegacyScanConsumesOfz21385PapxOperand) {
+  // The 64-byte grpprl of ofz21385-1.doc's PAPX page 432, rgb[16] = 100
+  // (byte offset 200). wvWare's wvGetPAPX reads cb * 2 = 66 bytes and then
+  // 66 - 2 grpprl bytes after istd, so byte 0x3f (0xE6) is part of the
+  // declared span even though it lies past the sprmTDefTable operand.
+  const std::vector<uint8_t> grpprl = {
+      0x18, 0x01, 0x19, 0x01, 0xB8, 0x47, 0x00, 0xB9, 0x01, 0xBE, 0x34,
+      0x00, 0x04, 0xB9, 0xFF, 0xC5, 0x02, 0xD1, 0x05, 0xFC, 0x14, 0xBC,
+      0x1E, 0x00, 0x00, 0x09, 0x00, 0x09, 0x00, 0x09, 0x00, 0x09, 0x00,
+      0x00, 0x00, 0x09, 0x00, 0x09, 0x00, 0x09, 0x00, 0x09, 0x78, 0xC5,
+      0x98, 0xDF, 0x8C, 0xE1, 0x0C, 0x29, 0xDF, 0xCC, 0x30, 0xE3, 0x9A,
+      0xDC, 0x9D, 0x36, 0xA9, 0xC5, 0xE4, 0xCC, 0xF9, 0xE6};
+  // The operand-complete 63-byte prefix consumes cleanly: 0x18/0x19/0xB8/
+  // 0xB9 each take their fixed width and 0xBE's count = 52 covers the rest.
+  // kComplete proves no operand byte was mistaken for another opcode; the
+  // rebuilt sprmTDefTable follows the four scalars.
+  std::vector<uint8_t> out;
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
+                doccraft::base::Bytes(grpprl).first(63), out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> scalars = {0x16, 0x24, 0x01, 0x17, 0x24,
+                                        0x01, 0x02, 0x96, 0x47, 0x00,
+                                        0x66, 0x34, 0x01};
+  ASSERT_GE(out.size(), scalars.size() + 2);
+  EXPECT_TRUE(std::equal(scalars.begin(), scalars.end(), out.begin()));
+  EXPECT_EQ(out[scalars.size()], 0x08);  // sprmTDefTable (0xD608) low byte.
+  EXPECT_EQ(out[scalars.size() + 1], 0xD6);
+  // The trailing 0xE6 has no cb byte left, so the declared 64-byte span still
+  // stops with a truncated operand instead of reading past the grpprl.
+  doccraft::doc::detail::LegacySprmStop stop;
+  out.clear();
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(grpprl, out, &stop),
+            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(stop.opcode, 0xE6);
+  EXPECT_EQ(stop.offset, 0x3Fu);
+  EXPECT_EQ(stop.reason,
+            doccraft::doc::detail::LegacySprmStop::Reason::kTruncatedOperand);
 }
 
 TEST(LegacyWord, LegacyScanStopsWhenMappedSprmLacksLengthByte) {
@@ -1876,27 +1945,35 @@ TEST(LegacyWord, Word6UnrecognisedBrc10BecomesExplicitNil) {
       << xml;
 }
 
-TEST(LegacyWord, LegacyScanStopsAfterTablePropertiesOnUnknownOpcode) {
-  // The six table sprms are mapped, but an opcode outside the Word 6 table
-  // still stops the scan so its operand bytes are never read as modifiers.
+TEST(LegacyWord, LegacyScanSkipsAfterTablePropertiesOnUnlistedOpcode) {
+  // The six table sprms are mapped; an opcode outside the Word 6 table is
+  // stepped over through {0, L_VAR} (cb = 2) so its operand bytes are never
+  // read as modifiers and the scan still reaches the group end.
   std::vector<uint8_t> out;
-  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(
-                std::vector<uint8_t>{0xB9, 1, 0xBA, 1, 0xF0, 0xAA}, out),
-            doccraft::doc::detail::LegacySprmScan::kStopped);
+  EXPECT_EQ(
+      doccraft::doc::detail::ScanLegacySprms(
+          std::vector<uint8_t>{0xB9, 1, 0xBA, 1, 0xF0, 0x02, 0xAA, 0xBB}, out),
+      doccraft::doc::detail::LegacySprmScan::kPartial);
   EXPECT_EQ(out, (std::vector<uint8_t>{0x66, 0x34, 1, 0x04, 0x34, 1}));
-  auto document =
-      ParseWord6(Word6PapxDocumentWithRoom({0xB9, 1, 0xBA, 1, 0xF0, 0xAA}));
+  auto document = ParseWord6(
+      Word6PapxDocumentWithRoom({0xB9, 1, 0xBA, 1, 0xF0, 0x02, 0xAA, 0xBB}));
   ASSERT_TRUE(document) << document.error().message;
-  std::string stop_warning;
-  for (const auto& warning : document->warnings)
-    if (warning.find("Word 6/95 FKP contains unsupported sprms") == 0)
-      stop_warning = warning;
+  int found = 0;
+  for (const auto& warning : document->warnings) {
+    if (warning.find("Word 6/95 FKP contains unmapped sprms") == 0)
+      ++found;
+  }
   // 0xF0 follows the two mapped table sprms, so it sits at grpprl offset 4.
-  ASSERT_FALSE(stop_warning.empty());
-  EXPECT_NE(stop_warning.find("opcode 0xf0"), std::string::npos)
-      << stop_warning;
-  EXPECT_NE(stop_warning.find("offset 0x04"), std::string::npos)
-      << stop_warning;
+  EXPECT_EQ(found, 1);
+  auto unmapped = std::find_if(
+      document->warnings.begin(), document->warnings.end(),
+      [](const std::string& warning) {
+        return warning.find("Word 6/95 FKP contains unmapped sprms") == 0;
+      });
+  ASSERT_NE(unmapped, document->warnings.end());
+  EXPECT_EQ(*unmapped,
+            "Word 6/95 FKP contains unmapped sprms (opcode 0xf0 at grpprl "
+            "offset 0x04, FKP page 3: 3 operand byte(s) skipped)");
 }
 
 TEST(LegacyWord, Word6TableCellBorderShadingReachDocx) {

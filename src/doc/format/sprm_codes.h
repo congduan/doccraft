@@ -144,12 +144,14 @@ inline constexpr uint8_t kLegacySprmCPicLocation = 0x44;
 
 // Word 6/95 one-byte sprm operand widths. Transcribed row for row from
 // LibreOffice sw/source/filter/ww8/ww8scan.cxx (GetWW6SprmSearcher), whose
-// opcodes come from sw/source/filter/ww8/sprmids.hxx namespace v6. 0x01
-// (sprmPStyle, a two-byte istd) and 0x35..0x3A are absent from that
-// transcription; their widths come from [MS-DOC] 2.9.215 (Prm0 isprm), which
-// numbers the same one-byte space. The table lets the FKP translator step over
-// opcodes whose semantics it does not map: a known width never turns an
-// operand byte into a bogus opcode.
+// opcodes come from sw/source/filter/ww8/sprmids.hxx namespace v6. 0x35..0x3A
+// are absent from that transcription; their widths come from [MS-DOC] 2.9.215
+// (Prm0 isprm), which numbers the same one-byte space. That table has no 0x01
+// entry either (0x00 sprmCLbcCRJ is followed directly by 0x04 sprmPIncLvl),
+// and neither LibreOffice's v6 table (which starts at sprmPIstd = 0x02) nor
+// wvWare's rgsprmWord6 (index 1 is sprmNoop) lists it. The table lets the FKP
+// translator step over opcodes whose semantics it does not map: a known width
+// never turns an operand byte into a bogus opcode.
 //
 // kFix: `size` operand bytes. kVar: one cb byte, `size` extra fixed bytes,
 // then cb operand bytes. kVar2: a 16-bit count of (operand bytes + 1).
@@ -160,6 +162,8 @@ inline constexpr uint8_t kLegacySprmCPicLocation = 0x44;
 // Only unmapped opcodes are consumed through this table; the mapped subset is
 // translated by NormalizeLegacySprms, which keeps the measured width of
 // sprmCPicLocation (0x44, four bytes) even though LibreOffice marks it L_VAR.
+// An opcode with no row falls back to LibreOffice's {0, L_VAR} rule in
+// ScanLegacySprms (a cb byte plus cb operand bytes) and the scan continues.
 enum class LegacySprmWidth : uint8_t { kFix, kVar, kVar2 };
 
 struct LegacySprmSpec {
@@ -170,7 +174,6 @@ struct LegacySprmSpec {
 
 inline constexpr LegacySprmSpec kLegacySprmSpecs[] = {
     {0x00, 0, LegacySprmWidth::kFix},   // default sprm (skipped)
-    {0x01, 2, LegacySprmWidth::kFix},   // sprmPStyle (two-byte istd)
     {0x02, 2, LegacySprmWidth::kFix},   // sprmPIstd
     {0x03, 3, LegacySprmWidth::kVar},   // sprmPIstdPermute
     {0x04, 1, LegacySprmWidth::kFix},   // sprmPIncLv1
