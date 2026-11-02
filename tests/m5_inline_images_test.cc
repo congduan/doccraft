@@ -332,6 +332,43 @@ std::expected<model::Document, doc::Error> ParsePictures(
   return doc::ParseFormatted(word, table, fib, data);
 }
 
+// Two FKP pages, each covering one picture marker with its own
+// sprmCPicLocation. Used to mix a healthy picture with a damaged one.
+std::expected<model::Document, doc::Error> ParseTwoPictures(
+    const std::string& text, const std::vector<uint8_t>& data,
+    uint32_t first_offset, uint32_t second_offset) {
+  constexpr size_t kTextFc = 2048, kPageSize = 512;
+  std::vector<uint8_t> word(kTextFc + text.size()), table(52);
+  std::copy(text.begin(), text.end(), word.begin() + kTextFc);
+  table[0] = 2;
+  Put32(table, 1, 16);
+  Put32(table, 9, text.size());
+  Put32(table, 15, 0x40000000u + kTextFc * 2);
+  // CHPX BTE: two pages, split at the second picture marker (FC kTextFc + 2).
+  Put32(table, 32, kTextFc);
+  Put32(table, 36, kTextFc + 2);
+  Put32(table, 40, kTextFc + text.size());
+  Put32(table, 44, 1);
+  Put32(table, 48, 2);
+  for (size_t page = 0; page < 2; ++page) {
+    const size_t at = kPageSize * (page + 1);
+    Put32(word, at, kTextFc + 2 * page);
+    Put32(word, at + 4, page == 0 ? kTextFc + 2 : kTextFc + text.size());
+    word[at + 8] = 20;
+    word[at + 511] = 1;
+    word[at + 40] = 9;
+    Put16(word, at + 41, doc::detail::kSprmCPicLocation);
+    Put32(word, at + 43, page == 0 ? first_offset : second_offset);
+    Put16(word, at + 47, doc::detail::kSprmCFData);
+    word[at + 49] = 0;
+  }
+  doc::Fib fib;
+  fib.ccp_text = text.size();
+  fib.lcb_clx = 21;
+  fib.chpx_bte = {32, 20};
+  return doc::ParseFormatted(word, table, fib, data);
+}
+
 TEST(M5InlineImages, AggregateImageLimitAcceptsBoundaryRejectsOverflow) {
   // Each decoded metafile is legal; repeated references still allocate images.
   const auto data =
@@ -390,6 +427,100 @@ TEST(M5InlineImages, PicfResourceLimitStaysFatal) {
   ASSERT_FALSE(parsed);
   EXPECT_EQ(parsed.error().message, "image size exceeds limit");
   EXPECT_EQ(parsed.error().kind, doc::ErrorKind::kResourceLimit);
+}
+
+TEST(M5InlineImages, MetafileOversizeStoredTruncationStaysFatal) {
+  // Both defects are present: the declared original size is past the bound and
+  // the stored size does not fit the BLIP body. The resource limit must be
+  // checked first, or the malformed size hides the oversize declaration.
+  auto data = MetafilePicf(0xF01B, 0x216, false, {'W', 'M', 'F'});
+  ASSERT_FALSE(data.empty());
+  constexpr size_t kMeta = 68 + 8 + 36 + 8 + 16;
+  Put32(data, kMeta, static_cast<uint32_t>(doc::detail::kMaxImageSize + 1));
+  Put32(data, kMeta + 28, 1000);
+  auto image = doc::ReadInlinePicture(data, 0);
+  ASSERT_FALSE(image);
+  EXPECT_EQ(image.error().message, "image size exceeds limit");
+  EXPECT_EQ(image.error().kind, doc::ErrorKind::kResourceLimit);
+  auto parsed = ParsePictures(
+      "A\x01"
+      "B\r",
+      data);
+  ASSERT_FALSE(parsed);
+  EXPECT_EQ(parsed.error().message, "image size exceeds limit");
+  EXPECT_EQ(parsed.error().kind, doc::ErrorKind::kResourceLimit);
+}
+
+TEST(M5InlineImages, EscherDepthLimitStaysFatal) {
+  // Ten nested OfficeArt containers pass depth 8. The nesting bound is a
+  // parsing protection limit, not local damage: reject the document.
+  const auto wrap = [](std::vector<uint8_t> body) {
+    std::vector<uint8_t> record(8);
+    Put16(record, 0, 0x000F);  // version 15 marks a container.
+    Put16(record, 2, doc::detail::kDggContainer);
+    Put32(record, 4, static_cast<uint32_t>(body.size()));
+    record.insert(record.end(), body.begin(), body.end());
+    return record;
+  };
+  std::vector<uint8_t> records;
+  for (int i = 0; i < 10; ++i)
+    records = wrap(std::move(records));
+  std::vector<uint8_t> data(68 + records.size());
+  Put32(data, 0, static_cast<uint32_t>(data.size()));
+  Put16(data, 4, 68);
+  Put16(data, 28, 1440);
+  Put16(data, 30, 720);
+  Put16(data, 32, 1000);
+  Put16(data, 34, 1000);
+  std::copy(records.begin(), records.end(), data.begin() + 68);
+  auto image = doc::ReadInlinePicture(data, 0);
+  ASSERT_FALSE(image);
+  EXPECT_EQ(image.error().message, "Escher nesting limit exceeded");
+  EXPECT_EQ(image.error().kind, doc::ErrorKind::kResourceLimit);
+  auto parsed = ParsePictures(
+      "A\x01"
+      "B\r",
+      data);
+  ASSERT_FALSE(parsed);
+  EXPECT_EQ(parsed.error().message, "Escher nesting limit exceeded");
+  EXPECT_EQ(parsed.error().kind, doc::ErrorKind::kResourceLimit);
+}
+
+TEST(M5InlineImages, PicfOutsideDataStreamStaysFatal) {
+  // A picture mark pointing past the Data stream is structural damage, not a
+  // defective image payload: it must not be degraded to a warning.
+  auto parsed = ParsePictures(
+      "A\x01"
+      "B\r",
+      {});
+  ASSERT_FALSE(parsed);
+  EXPECT_EQ(parsed.error().message, "PICF outside Data stream");
+  EXPECT_EQ(parsed.error().kind, doc::ErrorKind::kStructure);
+}
+
+TEST(M5InlineImages, MixedGoodAndBadPicturesKeepGoodOne) {
+  auto good = MetafilePicf(0xF01B, 0x216, false, {'W', 'M', 'F'});
+  ASSERT_FALSE(good.empty());
+  std::vector<uint8_t> data = good;
+  data.resize(good.size() + 96, 0x0e);
+  auto parsed = ParseTwoPictures(
+      "A\x01"
+      "B\x01\r",
+      data, 0, static_cast<uint32_t>(good.size()));
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->images.size(), 1u);
+  EXPECT_EQ(parsed->images[0].bytes, std::vector<uint8_t>({'W', 'M', 'F'}));
+  ASSERT_EQ(parsed->warnings.size(), 1u);
+  EXPECT_NE(parsed->warnings[0].find("CP 3"), std::string::npos);
+  EXPECT_NE(parsed->warnings[0].find("invalid PICF header or length"),
+            std::string::npos);
+  bool kept = false;
+  for (const auto& run : parsed->paragraphs[0].runs)
+    kept = kept || run.image_index == 0;
+  EXPECT_TRUE(kept);
+  auto zip = docx::Write(*parsed);
+  ASSERT_TRUE(zip) << zip.error().message;
+  EXPECT_EQ(Count(Part(*zip, "word/document.xml"), "<w:drawing>"), 1u);
 }
 
 TEST(M5InlineImages, SameChpxTextDoesNotAbsorbPicture) {

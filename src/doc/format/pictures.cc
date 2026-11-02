@@ -100,16 +100,17 @@ std::expected<model::Image, Error> DecodeBlip(Bytes body, uint16_t type,
   Bytes header = body.subspan(uid_bytes, detail::kMetafileHeaderSize);
   const uint32_t original_size = U32(header, 0);
   const uint32_t stored_size = U32(header, 28);
-  if (original_size == 0 || stored_size > body.size() - prefix)
-    return std::unexpected(Error{"invalid metafile BLIP size"});
   // A declared size past the configured bound is a resource limit, not local
-  // damage: the caller must keep it fatal.
+  // damage: the caller must keep it fatal. Check it before the stored-size
+  // overflow so a truncated BLIP cannot disguise an oversize declaration.
   if (original_size > detail::kMaxImageSize)
     return std::unexpected(
         Error{"image size exceeds limit", ErrorKind::kResourceLimit});
   if (original_size > budget)
     return std::unexpected(
         Error{"total image size exceeds limit", ErrorKind::kResourceLimit});
+  if (original_size == 0 || stored_size > body.size() - prefix)
+    return std::unexpected(Error{"invalid metafile BLIP size"});
   Bytes payload = body.subspan(prefix, stored_size);
   const uint8_t compression = header[detail::kMetafileCompressionOffset];
   if (compression == detail::kMetafileUncompressed) {
@@ -133,7 +134,8 @@ std::expected<std::optional<model::Image>, Error> ScanEscher(Bytes records,
                                                              int depth,
                                                              size_t budget) {
   if (depth > detail::kEscherMaxDepth)
-    return std::unexpected(Error{"Escher nesting limit exceeded"});
+    return std::unexpected(
+        Error{"Escher nesting limit exceeded", ErrorKind::kResourceLimit});
   size_t pos = 0;
   while (pos < records.size()) {
     if (records.size() - pos < detail::kEscherHeaderSize)
@@ -244,7 +246,8 @@ std::expected<model::Image, Error> ReadInlinePicture(Bytes data,
                                                      uint32_t offset,
                                                      size_t budget) {
   if (offset > data.size() || data.size() - offset < detail::kPicfHeaderSize)
-    return std::unexpected(Error{"PICF outside Data stream"});
+    return std::unexpected(
+        Error{"PICF outside Data stream", ErrorKind::kStructure});
   Bytes picf = data.subspan(offset);
   const uint32_t length = U32(picf, 0);
   if (length < detail::kPicfHeaderSize || length > picf.size() ||
@@ -442,7 +445,8 @@ struct DrawingIndex {
 std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
                                     bool bstore = false) {
   if (depth > detail::kEscherMaxDepth)
-    return std::unexpected(Error{"Escher nesting limit exceeded"});
+    return std::unexpected(
+        Error{"Escher nesting limit exceeded", ErrorKind::kResourceLimit});
   while (!bytes.empty()) {
     if (++index.records > detail::kMaxDrawingRecords)
       return std::unexpected(Error{"drawing record count exceeds limit"});
@@ -573,7 +577,8 @@ std::expected<Bytes, Error> DrawingRange(Bytes table, Fib::Range range) {
 std::expected<model::Shape, Error> ReadInlineShape(Bytes data,
                                                    uint32_t offset) {
   if (offset > data.size() || data.size() - offset < detail::kPicfHeaderSize)
-    return std::unexpected(Error{"PICF outside Data stream"});
+    return std::unexpected(
+        Error{"PICF outside Data stream", ErrorKind::kStructure});
   Bytes picf = data.subspan(offset);
   const size_t length = U32(picf, 0);
   if (length <= detail::kPicfHeaderSize || length > picf.size() ||

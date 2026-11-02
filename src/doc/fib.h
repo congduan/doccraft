@@ -20,9 +20,11 @@
 #include <string>
 namespace doccraft::doc {
 // Lets a caller keep local damage local while still failing the document on
-// resource limits: kMalformed marks a defective payload, kResourceLimit marks
-// a payload that is well formed but exceeds a configured bound.
-enum class ErrorKind : uint8_t { kMalformed, kResourceLimit };
+// resource limits or structural damage: kMalformed marks a defective payload,
+// kStructure marks a reference or layout that is inconsistent with the
+// document structure, kResourceLimit marks a payload that is well formed but
+// exceeds a configured bound.
+enum class ErrorKind : uint8_t { kMalformed, kStructure, kResourceLimit };
 
 struct Error {
   std::string message;
