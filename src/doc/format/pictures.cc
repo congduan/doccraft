@@ -400,12 +400,17 @@ struct ArtRecord {
   Bytes body;
 };
 
-std::expected<ArtRecord, Error> ArtNext(Bytes& bytes) {
+// A record header that is missing or declares more bytes than remain ends the
+// scan: the drawing data sits at the tail of the (possibly truncated)
+// WordDocument stream, records parsed before the cut stay valid, so callers
+// turn the soft nullopt into one warning instead of rejecting the document.
+// Structural damage inside an intact record still fails hard through Error.
+std::expected<std::optional<ArtRecord>, Error> ArtNext(Bytes& bytes) {
   if (bytes.size() < detail::kEscherHeaderSize)
-    return std::unexpected(Error{"truncated drawing record"});
+    return std::nullopt;
   const auto size = U32(bytes, 4);
   if (size > bytes.size() - detail::kEscherHeaderSize)
-    return std::unexpected(Error{"drawing record exceeds stream"});
+    return std::nullopt;
   const auto header = U16(bytes, 0);
   ArtRecord record{
       U16(bytes, 2),
@@ -414,6 +419,16 @@ std::expected<ArtRecord, Error> ArtNext(Bytes& bytes) {
       bytes.subspan(detail::kEscherHeaderSize, size)};
   bytes = bytes.subspan(detail::kEscherHeaderSize + size);
   return record;
+}
+
+// Names a soft scan end, so a real document's warning can be matched against
+// the stream truncation reported by the CFB layer without re-instrumenting
+// the parser. The offset counts from the start of the damaged scan.
+void NoteDrawingScanEnd(std::vector<std::string>* warnings, size_t offset) {
+  if (warnings)
+    warnings->push_back("skipped drawing records: a record at offset " +
+                        std::to_string(offset) +
+                        " extends past the end of the stream");
 }
 
 // OfficeArtCOLORREF: red, green and blue followed by a flag byte. A set flag
@@ -442,57 +457,74 @@ struct DrawingIndex {
   size_t records = 0;
 };
 
-std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
-                                    bool bstore = false) {
+// Returns the offset (within `bytes`) at which the scan hit a truncated
+// record header, or nullopt when the whole range was scanned.
+std::expected<std::optional<size_t>, Error> IndexArt(Bytes bytes,
+                                                     DrawingIndex& index,
+                                                     int depth,
+                                                     bool bstore = false) {
   if (depth > detail::kEscherMaxDepth)
     return std::unexpected(
         Error{"Escher nesting limit exceeded", ErrorKind::kResourceLimit});
+  size_t offset = 0;
   while (!bytes.empty()) {
     if (++index.records > detail::kMaxDrawingRecords)
       return std::unexpected(Error{"drawing record count exceeds limit"});
     auto r = ArtNext(bytes);
     if (!r)
       return std::unexpected(r.error());
-    if (bstore && r->type == detail::kEscherFbse) {
-      if (r->body.size() < detail::kFbseFixedSize)
+    if (!*r)
+      return offset;
+    const ArtRecord& record = **r;
+    offset += detail::kEscherHeaderSize + record.body.size();
+    if (bstore && record.type == detail::kEscherFbse) {
+      if (record.body.size() < detail::kFbseFixedSize)
         return std::unexpected(Error{"truncated drawing FBSE"});
-      index.blips.push_back(r->body);
-    } else if (r->type == detail::kSpContainer) {
+      index.blips.push_back(record.body);
+    } else if (record.type == detail::kSpContainer) {
       uint32_t id = 0, pib = 0, textbox_id = 0;
       uint16_t shape_type = 0;
       std::string shape_text;
       int fill_color = -1, line_color = -1, line_width = 0;
       uint32_t fill_type = 0;
       bool fill_type_set = false;
-      Bytes children = r->body;
+      Bytes children = record.body;
+      size_t child_offset = 0;
       while (!children.empty()) {
         if (++index.records > detail::kMaxDrawingRecords)
           return std::unexpected(Error{"drawing record count exceeds limit"});
         auto child = ArtNext(children);
         if (!child)
           return std::unexpected(child.error());
-        if (child->type == detail::kFsp) {
-          if (child->body.size() != 8 || child->version != 2)
+        if (!*child) {
+          return offset - record.body.size() + child_offset;
+        }
+        const ArtRecord& shape_record = **child;
+        child_offset += detail::kEscherHeaderSize + shape_record.body.size();
+        if (shape_record.type == detail::kFsp) {
+          if (shape_record.body.size() != 8 || shape_record.version != 2)
             return std::unexpected(Error{"invalid drawing FSP"});
-          id = U32(child->body, 0);
-          shape_type = child->instance;
-        } else if (child->type == detail::kClientTextbox) {
+          id = U32(shape_record.body, 0);
+          shape_type = shape_record.instance;
+        } else if (shape_record.type == detail::kClientTextbox) {
           // [MS-DOC] 2.9.170: high word is the 1-based FTXBXS index;
           // low word is the zero-based position in the linked chain.
-          if (child->body.size() != sizeof(uint32_t) || child->version != 0)
+          if (shape_record.body.size() != sizeof(uint32_t) ||
+              shape_record.version != 0)
             return std::unexpected(Error{"invalid drawing client textbox"});
-          textbox_id = U32(child->body, 0);
-        } else if (child->type == detail::kFopt ||
-                   child->type == detail::kTertiaryFopt) {
-          if (child->instance > child->body.size() / detail::kFopteSize)
+          textbox_id = U32(shape_record.body, 0);
+        } else if (shape_record.type == detail::kFopt ||
+                   shape_record.type == detail::kTertiaryFopt) {
+          if (shape_record.instance >
+              shape_record.body.size() / detail::kFopteSize)
             return std::unexpected(Error{"truncated drawing properties"});
-          size_t complex_at = child->instance * detail::kFopteSize;
-          for (size_t i = 0; i < child->instance; ++i) {
+          size_t complex_at = shape_record.instance * detail::kFopteSize;
+          for (size_t i = 0; i < shape_record.instance; ++i) {
             const size_t at = i * detail::kFopteSize;
-            const uint16_t op = U16(child->body, at);
+            const uint16_t op = U16(shape_record.body, at);
             const uint16_t property = op & detail::kPropertyIdMask;
             if (!(op & detail::kPropertyComplex)) {
-              const uint32_t value = U32(child->body, at + 2);
+              const uint32_t value = U32(shape_record.body, at + 2);
               if (property == detail::kPib) {
                 pib = value;
               } else if (property == detail::kFillColor) {
@@ -508,14 +540,14 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
               }
             }
             if (op & detail::kPropertyComplex) {
-              const uint32_t length = U32(child->body, at + 2);
-              if (length > child->body.size() - complex_at)
+              const uint32_t length = U32(shape_record.body, at + 2);
+              if (length > shape_record.body.size() - complex_at)
                 return std::unexpected(
                     Error{"drawing complex property exceeds record"});
               if ((op & detail::kPropertyIdMask) == detail::kGtextUnicode) {
                 if (length % 2)
                   return std::unexpected(Error{"invalid WordArt UTF-16"});
-                Bytes text = child->body.subspan(complex_at, length);
+                Bytes text = shape_record.body.subspan(complex_at, length);
                 for (size_t j = 0; j < text.size(); j += 2) {
                   const uint16_t code = U16(text, j);
                   if (code == 0)
@@ -557,14 +589,14 @@ std::expected<void, Error> IndexArt(Bytes bytes, DrawingIndex& index, int depth,
       info.line_width = line_width;
       if (id && !index.shapes.emplace(id, std::move(info)).second)
         return std::unexpected(Error{"duplicate drawing shape id"});
-    } else if (r->version == detail::kEscherContainerVersion) {
-      auto nested = IndexArt(r->body, index, depth + 1,
-                             r->type == detail::kBStoreContainer);
+    } else if (record.version == detail::kEscherContainerVersion) {
+      auto nested = IndexArt(record.body, index, depth + 1,
+                             record.type == detail::kBStoreContainer);
       if (!nested)
         return nested;
     }
   }
-  return {};
+  return std::nullopt;
 }
 
 std::expected<Bytes, Error> DrawingRange(Bytes table, Fib::Range range) {
@@ -574,8 +606,8 @@ std::expected<Bytes, Error> DrawingRange(Bytes table, Fib::Range range) {
 }
 }  // namespace
 
-std::expected<model::Shape, Error> ReadInlineShape(Bytes data,
-                                                   uint32_t offset) {
+std::expected<model::Shape, Error> ReadInlineShape(
+    Bytes data, uint32_t offset, std::vector<std::string>* warnings) {
   if (offset > data.size() || data.size() - offset < detail::kPicfHeaderSize)
     return std::unexpected(
         Error{"PICF outside Data stream", ErrorKind::kStructure});
@@ -596,6 +628,8 @@ std::expected<model::Shape, Error> ReadInlineShape(Bytes data,
   auto parsed = IndexArt(picf.subspan(start, length - start), index, 0);
   if (!parsed)
     return std::unexpected(parsed.error());
+  if (parsed->has_value())
+    NoteDrawingScanEnd(warnings, **parsed);
   if (index.shapes.size() != 1 || !index.pictures.empty())
     return std::unexpected(Error{"PICF has no supported inline shape"});
   const int goal_width = S16(picf, detail::kPicfGoalOffset);
@@ -621,7 +655,8 @@ std::expected<model::Shape, Error> ReadInlineShape(Bytes data,
 }
 
 std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
-    Bytes word, Bytes table, const Fib& fib) {
+    Bytes word, Bytes table, const Fib& fib,
+    std::vector<std::string>* warnings) {
   std::vector<FloatingPicture> result;
   if (!fib.spa_main.size)
     return result;
@@ -643,23 +678,40 @@ std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
   auto group = ArtNext(content);
   if (!group)
     return std::unexpected(group.error());
-  if (group->type != detail::kDggContainer)
+  if (!*group) {
+    // Even the drawing group header is truncated; nothing was indexed.
+    NoteDrawingScanEnd(warnings, content.size());
+    return result;
+  }
+  const ArtRecord& group_record = **group;
+  if (group_record.type != detail::kDggContainer)
     return std::unexpected(Error{"missing drawing group container"});
-  auto indexed = IndexArt(group->body, index, 0);
+  auto indexed = IndexArt(group_record.body, index, 0);
   if (!indexed)
     return std::unexpected(indexed.error());
+  if (indexed->has_value())
+    NoteDrawingScanEnd(warnings, **indexed);
   while (!content.empty()) {
     const auto label = content.front();
     content = content.subspan(1);
     auto drawing = ArtNext(content);
     if (!drawing)
       return std::unexpected(drawing.error());
-    if (label > 1 || drawing->type != detail::kDgContainer)
+    if (!*drawing) {
+      // The tail of the OfficeArtWordDrawing atom is truncated; shapes
+      // registered above stay valid.
+      NoteDrawingScanEnd(warnings, group_record.body.size() + content.size());
+      break;
+    }
+    const ArtRecord& drawing_record = **drawing;
+    if (label > 1 || drawing_record.type != detail::kDgContainer)
       return std::unexpected(Error{"invalid Word drawing container"});
     if (label == 0) {
-      indexed = IndexArt(drawing->body, index, 0);
+      indexed = IndexArt(drawing_record.body, index, 0);
       if (!indexed)
         return std::unexpected(indexed.error());
+      if (indexed->has_value())
+        NoteDrawingScanEnd(warnings, **indexed);
     }
   }
   size_t budget = detail::kMaxTotalImageSize;
@@ -695,10 +747,16 @@ std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
       auto record = ArtNext(blip);
       if (!record)
         return std::unexpected(record.error());
-      if (record->version != 0)
+      if (!*record) {
+        // A truncated BLIP loses only this picture; earlier images stay.
+        NoteDrawingScanEnd(warnings, blip.size());
+        continue;
+      }
+      const ArtRecord& blip_record = **record;
+      if (blip_record.version != 0)
         return std::unexpected(Error{"invalid BLIP record version"});
-      auto image =
-          DecodeBlip(record->body, record->type, record->instance, budget);
+      auto image = DecodeBlip(blip_record.body, blip_record.type,
+                              blip_record.instance, budget);
       if (!image)
         return std::unexpected(image.error());
       budget -= image->bytes.size();

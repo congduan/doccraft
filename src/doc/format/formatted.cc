@@ -148,7 +148,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
   if (!papx)
     return std::unexpected(papx.error());
   size_t total_image_size = 0;
-  auto floating = ReadFloatingPictures(word, table, fib);
+  auto floating = ReadFloatingPictures(word, table, fib, &doc.warnings);
   if (!floating)
     return std::unexpected(floating.error());
   for (const auto& picture : *floating)
@@ -824,7 +824,7 @@ std::expected<model::Document, Error> ParseFormatted(Bytes word, Bytes table,
                     detail::kMaxTotalImageSize - total_image_size);
       if (!picture && !fib.legacy &&
           picture.error().message == "PICF has no supported embedded BLIP") {
-        auto shape = ReadInlineShape(data, r.object_offset);
+        auto shape = ReadInlineShape(data, r.object_offset, &doc.warnings);
         if (!shape)
           return std::unexpected(shape.error());
         if (shape->textbox_id) {

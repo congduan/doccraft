@@ -930,12 +930,32 @@ TEST(M5FloatingImages, RejectsMalformedRangesRecordsAndReferences) {
   s = Floating(0x54);
   s.fib.drawing_group.offset = s.table.size();
   check(s);
+  // A drawing group body that runs past the end of the stream ends the scan:
+  // records parsed before the cut stay valid, so the reader warns and
+  // succeeds instead of rejecting the document (r73 truncation downgrade).
   s = Floating(0x54);
   Put32(s.table, 4, 0xFFFFFFFF);
-  check(s);
+  {
+    std::vector<std::string> warnings;
+    const auto r = doc::ReadFloatingPictures(s.word, s.table, s.fib, &warnings);
+    ASSERT_TRUE(r);
+    EXPECT_TRUE(r->empty());
+    ASSERT_EQ(warnings.size(), 1U);
+    EXPECT_NE(warnings.front().find("extends past the end of the stream"),
+              std::string::npos);
+  }
+  // A truncated delayed BLIP drops only that picture and warns once.
   s = Floating(0x54);
   s.word.resize(7);
-  check(s);
+  {
+    std::vector<std::string> warnings;
+    const auto r = doc::ReadFloatingPictures(s.word, s.table, s.fib, &warnings);
+    ASSERT_TRUE(r);
+    EXPECT_TRUE(r->empty());
+    ASSERT_EQ(warnings.size(), 1U);
+    EXPECT_NE(warnings.front().find("extends past the end of the stream"),
+              std::string::npos);
+  }
   s = Floating(0x54);
   Put32(s.table, s.fib.spa_main.offset, s.fib.ccp_text);
   check(s);
@@ -951,6 +971,55 @@ TEST(M5FloatingImages, RejectsMalformedRangesRecordsAndReferences) {
   check(Floating(6 << 5));
   check(Floating(3 << 1));
   check(Floating(4 << 9));
+}
+
+TEST(M5FloatingImages, TruncatedGroupTailWarnsAndKeepsParsedShapes) {
+  // A truncated WordDocument stream can end inside the drawing group with a
+  // garbage record header. Records parsed before the cut stay valid; the scan
+  // stops with one warning instead of rejecting the document.
+  auto s = Floating(0x54, /*delayed=*/true, 1, /*shape_type=*/1,
+                    /*has_pib=*/false);
+  s.table.push_back(1);  // OfficeArtWordDrawing second story label.
+  Append(s.table, Art(0xF002, 15,
+                      Art(0xF004, 15,
+                          Art(0xF00A, (1 << 4) | 2, std::vector<uint8_t>(8)))));
+  s.fib.drawing_group.size =
+      static_cast<uint32_t>(s.table.size()) - s.fib.drawing_group.offset;
+  // The garbage tail looks like a record header whose declared length runs
+  // past the end of the drawing range.
+  std::vector<uint8_t> tail(10);
+  Put16(tail, 0, 0x0F32);
+  Put16(tail, 2, 0x3BEB);
+  Put32(tail, 4, 0x9A8B0000);
+  Append(s.table, tail);
+
+  std::vector<std::string> warnings;
+  const auto result = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+  ASSERT_TRUE(result) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  ASSERT_TRUE(result->front().shape);
+  EXPECT_EQ(result->front().shape->type, 1);
+}
+
+TEST(M5FloatingImages, TruncatedContainerChildKeepsSiblings) {
+  // One damaged child record inside a shape container ends the container scan;
+  // shapes parsed from earlier containers are kept.
+  auto s = Floating(0x54, /*delayed=*/true, 1, /*shape_type=*/1,
+                    /*has_pib=*/false);
+  std::vector<uint8_t> fsp(8);
+  Put32(fsp, 0, 1027);
+  std::vector<uint8_t> container =
+      Art(0xF004, 15, Art(0xF00A, (1 << 4) | 2, fsp));
+  Put32(container, 4, 0xFFFFFFFF);  // Declared length runs past the stream.
+  s.table.push_back(1);
+  Append(s.table, container);
+  s.fib.drawing_group.size =
+      static_cast<uint32_t>(s.table.size()) - s.fib.drawing_group.offset;
+
+  const auto result = doc::ReadFloatingPictures(s.word, s.table, s.fib);
+  ASSERT_TRUE(result) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  EXPECT_EQ(result->front().shape->id, 1026U);
 }
 
 TEST(M5FloatingImages, DelayedMetafileAggregateBudgetBeforeInflate) {

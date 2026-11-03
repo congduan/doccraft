@@ -39,7 +39,8 @@ std::expected<model::Image, Error> ReadLegacyPicture(
     size_t budget = std::numeric_limits<size_t>::max());
 
 std::expected<model::Shape, Error> ReadInlineShape(
-    std::span<const uint8_t> data, uint32_t offset);
+    std::span<const uint8_t> data, uint32_t offset,
+    std::vector<std::string>* warnings = nullptr);
 
 std::expected<std::optional<model::Image>, Error> ReadOlePresentation(
     std::span<const uint8_t> stream,
@@ -52,7 +53,7 @@ struct FloatingPicture {
 };
 std::expected<std::vector<FloatingPicture>, Error> ReadFloatingPictures(
     std::span<const uint8_t> word, std::span<const uint8_t> table,
-    const Fib& fib);
+    const Fib& fib, std::vector<std::string>* warnings = nullptr);
 }  // namespace doccraft::doc
 
 #endif  // SRC_DOC_FORMAT_H_
