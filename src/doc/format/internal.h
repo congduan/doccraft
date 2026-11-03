@@ -413,25 +413,27 @@ std::expected<std::vector<FormatRange>, Error> ReadFkps(
     Bytes word, Bytes table, Fib::Range r, bool para,
     std::vector<std::string>* warnings = nullptr, bool legacy = false);
 
-// One formatting interval as the legacy overlap pass sees it: the FC bounds,
+// One formatting interval as the shared overlap pass sees it: the FC bounds,
 // the page identity it belongs to (ranges with the same `page` come from one
-// FKP page) and whether that page overran the FC interval its BTE entry
-// assigns to it. `first`/`last` mirror FormatRange but keep the pass free of
-// the grpprl payload.
-struct LegacyFkpOverlap {
+// FKP page) and that page's damage rank. The legacy reader passes 0 when the
+// page stays inside the FC interval its BTE entry assigns to it and 1 when it
+// does not; the modern reader adds 2 for a page that fits no interval of the
+// whole FC partition. `first`/`last` mirror FormatRange but keep the pass
+// free of the grpprl payload.
+struct FkpOverlap {
   uint32_t first;
   uint32_t last;
   size_t page;
-  bool outside_bte;
+  int rank;
 };
 
-// Resolves overlapping legacy FKP intervals at page granularity. The page
-// whose intervals leave its BTE FC bounds is dropped; an overlap that cannot
-// be attributed to one page (including one where both pages stay inside their
-// bounds) refuses the table instead of guessing. Returns the dropped page
-// identities in drop order.
-std::expected<std::vector<size_t>, Error> ResolveLegacyFkpOverlaps(
-    std::vector<LegacyFkpOverlap> ranges);
+// Resolves overlapping FKP intervals at page granularity, dropping the side
+// with the worse damage rank. An overlap that cannot be attributed to one
+// page (both sides carry the same rank, including two that both stay inside
+// their bounds) refuses the table instead of guessing; `overlap_error` names
+// the refusing path. Returns the dropped page identities in drop order.
+std::expected<std::vector<size_t>, Error> ResolveFkpOverlaps(
+    std::vector<FkpOverlap> ranges, const char* overlap_error);
 
 const FormatRange* Find(const std::vector<FormatRange>& a, uint32_t fc);
 

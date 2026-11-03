@@ -43,8 +43,10 @@ using doccraft::test::Prl;
 using doccraft::test::Put16;
 using doccraft::test::Put32;
 
-constexpr uint16_t kSprmPJc = 0x2401;
-constexpr uint16_t kSprmPItap = 0x6649;
+using doccraft::doc::detail::kSprmPItap;
+using doccraft::doc::detail::kSprmPJc;
+// sprmPHugePapx has no named production constant; WalkParagraph expands it by
+// raw opcode (see sprm.h), so the test pins 0x6646 directly.
 constexpr uint16_t kSprmPHugePapx = 0x6646;
 
 DocSpec TextSpec(const std::string& text = "Hi\r") {
@@ -779,6 +781,170 @@ TEST(M20Malformed, FkpBtePageCountExceedsStream) {
   Put32(s.word, 158 + 13 * 8, size);
   s.table.resize(offset + size, 0);
   ExpectRejected(Pack(s), "BTE page count exceeds WordDocument");
+}
+
+// ---------------------------------------------------------------------------
+// Modern FKP cross-page overlap attribution (r72)
+// ---------------------------------------------------------------------------
+// Cross-page overlaps are attributed to a page and that page is dropped as a
+// whole, mirroring the r71 legacy rule. Evidence ranks: 0 = every range stays
+// inside the entry's own BTE interval; 1 = the page reproduces another
+// interval of the PLC's FC partition exactly (healthy content parked in the
+// wrong PLC slot, the forcepoint50-grfanchor-1.doc shape); 2 = the page
+// straddles the partition (or is the damaged placeholder of a failed PAPX
+// page). Equal ranks stay a whole-table rejection.
+
+// `count` paragraphs of "A\r", each with a centered (jc=1) PAPX, so the
+// PAPX FKP PLCBTE holds one entry per ten paragraphs and the runs partition
+// [2048, 2048+2*count) at even FCs.
+DocSpec ParagraphsSpec(size_t count) {
+  DocSpec spec;
+  for (size_t i = 0; i < count; ++i) {
+    spec.text.push_back('A');
+    spec.text.push_back('\r');
+    spec.papx.push_back(
+        {static_cast<uint32_t>(spec.text.size() - 1), Prl(kSprmPJc, {1})});
+  }
+  return spec;
+}
+
+// Replaces the FKP page of BTE entry `entry` with a freshly built page.
+void WriteFkpPage(DocStreams* s, size_t entry,
+                  const std::vector<doccraft::test::FkpRun>& runs) {
+  const auto bytes = doccraft::test::BuildFkpPage(runs);
+  const size_t at = FkpPageNumber(*s, entry) * 512;
+  std::copy(bytes.begin(), bytes.end(), s->word.begin() + at);
+}
+
+std::string BodyText(const doccraft::model::Document& document) {
+  std::string text;
+  for (const auto& para : document.paragraphs)
+    for (const auto& run : para.runs)
+      text += run.text;
+  return text;
+}
+
+size_t CountWarnings(const std::vector<std::string>& warnings,
+                     const char* keyword) {
+  size_t count = 0;
+  for (const auto& warning : warnings)
+    if (warning.find(keyword) != std::string::npos)
+      ++count;
+  return count;
+}
+
+TEST(M20Malformed, FkpCrossPageOverlapDropsOutsidePage) {
+  // Page 5 covers its BTE interval [2048,2068) with ten sound ranges. Page 6
+  // owns [2068,2070) but its single range starts at 2050, running back into
+  // page 5's territory. The page that leaves its own BTE bounds is the
+  // damaged side: it is dropped whole, page 5 keeps its formatting, and the
+  // eleventh paragraph falls back to default properties.
+  DocStreams s = doccraft::test::BuildDocStreams(ParagraphsSpec(11));
+  ASSERT_EQ(FkpPages(s), 2u);
+  const uint32_t dropped = FkpPageNumber(s, 1);
+  Put32(s.word, dropped * 512, 2050);  // [2050,2070) vs own bte [2068,2070)
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->warnings.size(), 1u) << document->warnings.front();
+  EXPECT_EQ(document->warnings.front(), "skipped PAPX FKP page " +
+                                            std::to_string(dropped) +
+                                            ": overlapping FKP ranges");
+  ASSERT_EQ(document->paragraphs.size(), 11u);
+  EXPECT_EQ(BodyText(*document), std::string(11, 'A'));
+  for (size_t i = 0; i < 10; ++i)
+    EXPECT_EQ(document->paragraphs[i].align, 1) << i;
+  EXPECT_EQ(document->paragraphs[10].align, -1);
+}
+
+TEST(M20Malformed, FkpCrossPageOverlapBothOutsideRejects) {
+  // Page 5's first range starts at 2046, before its interval [2048,2068), and
+  // page 6 starts at 2050 before its [2068,2070). Neither page reproduces an
+  // interval of the partition [2048,2068),[2068,2070) exactly, so both sides
+  // carry the same evidence and the table is still rejected.
+  DocStreams s = doccraft::test::BuildDocStreams(ParagraphsSpec(11));
+  Put32(s.word, FkpPageNumber(s, 0) * 512, 2046);
+  Put32(s.word, FkpPageNumber(s, 1) * 512, 2050);
+  ExpectRejected(Pack(s), "overlapping FKP ranges");
+}
+
+TEST(M20Malformed, FkpCrossPageOverlapAlignedPageBeatsStraddler) {
+  // forcepoint50-grfanchor-1.doc shape: the PLC page array is shifted
+  // relative to the FC array, so every page leaves its own BTE interval.
+  // Page 5 carries exactly entry 1's interval [2068,2088) - healthy content
+  // in the wrong PLC slot - while page 6 straddles the partition with
+  // [2075,2092). The straddler is dropped and the aligned page stays.
+  DocStreams s = doccraft::test::BuildDocStreams(ParagraphsSpec(21));
+  ASSERT_EQ(FkpPages(s), 3u);
+  const uint32_t straddler = FkpPageNumber(s, 1);
+  WriteFkpPage(&s, 0,
+               {{2068, 2088, doccraft::test::PapxPayload(Prl(kSprmPJc, {2}))}});
+  WriteFkpPage(&s, 1,
+               {{2075, 2092, doccraft::test::PapxPayload(Prl(kSprmPJc, {1}))}});
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->warnings.size(), 1u) << document->warnings.front();
+  EXPECT_EQ(document->warnings.front(), "skipped PAPX FKP page " +
+                                            std::to_string(straddler) +
+                                            ": overlapping FKP ranges");
+  ASSERT_EQ(document->paragraphs.size(), 21u);
+  EXPECT_EQ(BodyText(*document), std::string(21, 'A'));
+  for (size_t i = 0; i < 10; ++i)
+    EXPECT_EQ(document->paragraphs[i].align, -1) << i;  // before page 5
+  for (size_t i = 10; i < 20; ++i)
+    EXPECT_EQ(document->paragraphs[i].align, 2) << i;  // page 5's payload
+  EXPECT_EQ(document->paragraphs[20].align, 1);        // page 7 (in bounds)
+}
+
+TEST(M20Malformed, FkpOverlapPlaceholderLosesToAlignedPage) {
+  // Page 6 fails its run count, leaving the damaged placeholder [2068,2088)
+  // for its BTE interval. Page 5 carries exactly that interval as real
+  // formatting, so the placeholder loses the overlap silently: the region
+  // keeps real formatting and only the run-count warning remains.
+  DocStreams s = doccraft::test::BuildDocStreams(ParagraphsSpec(21));
+  ASSERT_EQ(FkpPages(s), 3u);
+  const uint32_t failed = FkpPageNumber(s, 1);
+  WriteFkpPage(&s, 0,
+               {{2068, 2088, doccraft::test::PapxPayload(Prl(kSprmPJc, {2}))}});
+  s.word[failed * 512 + 511] = 0;  // invalid FKP run count
+  auto fib = doccraft::doc::ParseFib(s.word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  auto document = doccraft::doc::ParseFormatted(s.word, s.table, *fib, s.data);
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(document->warnings.size(), 1u) << document->warnings.front();
+  EXPECT_EQ(document->warnings.front(), "skipped PAPX FKP page " +
+                                            std::to_string(failed) +
+                                            ": invalid FKP run count");
+  EXPECT_EQ(CountWarnings(document->warnings, "overlapping FKP ranges"), 0u);
+  ASSERT_EQ(document->paragraphs.size(), 21u);
+  EXPECT_EQ(BodyText(*document), std::string(21, 'A'));
+  for (size_t i = 10; i < 20; ++i)
+    EXPECT_EQ(document->paragraphs[i].align, 2) << i;
+  EXPECT_EQ(document->paragraphs[20].align, 1);
+}
+
+TEST(M20Malformed, FkpOverlapSamePageDropsPageOnce) {
+  // A modern FKP page stores n+1 increasing FCs, so two ranges of one page
+  // cannot overlap through ReadFkps; the shared page-level rule is pinned
+  // directly, mirroring LegacyWord.Word6IntraPageOverlapDropsPageOnce. The
+  // higher damage rank loses, equal ranks on different pages refuse.
+  auto dropped = doccraft::doc::detail::ResolveFkpOverlaps(
+      {{2068, 2073, 2, 0}, {2070, 2075, 2, 0}}, "overlapping FKP ranges");
+  ASSERT_TRUE(dropped) << dropped.error().message;
+  ASSERT_EQ(dropped->size(), 1u);
+  EXPECT_EQ((*dropped)[0], 2u);
+  dropped = doccraft::doc::detail::ResolveFkpOverlaps(
+      {{2068, 2073, 2, 0}, {2070, 2075, 3, 1}}, "overlapping FKP ranges");
+  ASSERT_TRUE(dropped) << dropped.error().message;
+  ASSERT_EQ(dropped->size(), 1u);
+  EXPECT_EQ((*dropped)[0], 3u);
+  auto refused = doccraft::doc::detail::ResolveFkpOverlaps(
+      {{2068, 2073, 2, 0}, {2070, 2075, 3, 0}}, "overlapping FKP ranges");
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error().message, "overlapping FKP ranges");
 }
 
 // ---------------------------------------------------------------------------

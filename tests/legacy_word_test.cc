@@ -1363,8 +1363,9 @@ TEST(LegacyWord, Word6IntraPageOverlapDropsPageOnce) {
   // BTE defect. The page-level rule is still pinned directly here: two
   // overlapping intervals that carry the same page identity drop that page
   // exactly once.
-  auto dropped = doccraft::doc::detail::ResolveLegacyFkpOverlaps(
-      {{768, 773, 2, false}, {770, 775, 2, false}});
+  auto dropped = doccraft::doc::detail::ResolveFkpOverlaps(
+      {{768, 773, 2, false}, {770, 775, 2, false}},
+      "overlapping Word 6/95 FKP ranges");
   ASSERT_TRUE(dropped) << dropped.error().message;
   ASSERT_EQ(dropped->size(), 1u);
   EXPECT_EQ((*dropped)[0], 2u);
