@@ -209,6 +209,11 @@ std::expected<void, Error> WriteCommentPart(const model::Document& document,
     if (!comment.initials.empty()) {
       Attr(node, "w:initials", comment.initials);
     }
+    // ATRDPOST10 DTTM, formatted like the run revision dates; an invalid or
+    // unset DTTM formats to an empty string and the attribute is omitted.
+    if (const std::string date = RevisionDate(comment.date); !date.empty()) {
+      Attr(node, "w:date", date);
+    }
     if (comment.paragraphs.empty()) {
       node.append_child("w:p");
     }

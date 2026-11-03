@@ -67,6 +67,10 @@ struct Fib {
   // Annotation range bookmarks and their tag table (FibRgFcLcb97 pairs
   // 42/43 and 37). A comment without one is a point annotation.
   Range atn_bkf, atn_bkl, atn_bkmk;
+  // Comment date array (FibRgFcLcb97 pair(112) = FIB byte offset 0x41A,
+  // anchored by fcClx = pair(33) = 0x01A2): one 18-byte ATRDPOST10 record
+  // per comment, DTTM ([MS-DOC] 2.9.60) first.
+  Range atrd_extra;
   // Bookmark name table (SttbfBkmk) and the start/end PLCs (PlcfBkf/PlcfBkl).
   Range sttb_bkmk, bkf, bkl;
   // Revision author names (SttbfRMark = FibRgFcLcb97 pair(51), right after

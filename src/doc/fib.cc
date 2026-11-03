@@ -268,6 +268,10 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.atn_bkmk = pair(37);
   f.atn_bkf = pair(42);
   f.atn_bkl = pair(43);
+  // [MS-DOC] FibRgFcLcb97: fcAtrdExtra/lcbAtrdExtra is row 113, read here as
+  // pair(112) (0-based, anchored by fcClx = pair(33) = 0x01A2, so this pair
+  // sits at byte 0x41A, where LibreOffice ww8scan.cxx reads the same row).
+  f.atrd_extra = pair(112);
   f.sttb_bkmk = pair(21);
   f.bkf = pair(22);
   f.bkl = pair(23);

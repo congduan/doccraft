@@ -341,6 +341,9 @@ struct Block {
 struct Comment {
   std::string author;
   std::string initials;
+  // ATRDPOST10 DTTM ([MS-DOC] 2.9.60); 0 = unset, matching the Run revision
+  // date convention. Invalid DTTMs are also left as 0 by the reader.
+  uint32_t date = 0;
   std::vector<Paragraph> paragraphs;
 };
 

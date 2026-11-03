@@ -119,6 +119,32 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(
   return out;
 }
 
+// ATRDPOST10 ([MS-DOC] §2.3.1): one 18-byte record per comment, with the
+// comment's DTTM ([MS-DOC] 2.9.60) in the leading 4 bytes (LibreOffice
+// ww8par.cxx indexes pExtended[nIndex * 18] the same way). A size that is
+// not a whole number of records, or fewer records than comments, means the
+// array is damaged: every date stays unset and one warning fires. A record
+// whose DTTM is invalid per 2.9.65 simply carries no date, silently.
+std::expected<std::vector<uint32_t>, Error> ReadCommentDates(Bytes table,
+                                                             Fib::Range r,
+                                                             size_t count) {
+  std::vector<uint32_t> out;
+  if (!r.size) {
+    return out;
+  }
+  constexpr size_t kAtrdPost10Size = 18;
+  if (!Valid(table, r) || r.size % kAtrdPost10Size ||
+      r.size / kAtrdPost10Size < count) {
+    return std::unexpected(Error{"invalid comment date array"});
+  }
+  Bytes b = table.subspan(r.offset, r.size);
+  out.reserve(count);
+  for (size_t i = 0; i < count; i++) {
+    out.push_back(U32(b, i * kAtrdPost10Size));
+  }
+  return out;
+}
+
 // GrpXstAtnOwners is an array of Xst: cch (2 bytes) followed by cch UTF-16
 // characters. There is no count; the array ends with the buffer.
 std::expected<std::vector<std::string>, Error> ReadAuthors(Bytes table,
@@ -341,6 +367,12 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
   }
   const BookmarkMarks story_bookmarks =
       FilterStoryBookmarks(bookmarks, ranges, "comment", &doc.warnings);
+  std::vector<uint32_t> dates;
+  if (auto read = ReadCommentDates(table, fib.atrd_extra, count); read) {
+    dates = std::move(*read);
+  } else {
+    doc.warnings.push_back("skipped comment dates: " + read.error().message);
+  }
   for (size_t i = 0; i < count; i++) {
     const uint32_t first = U32(text, 4 * i);
     const uint32_t last = ClampCommentEnd(U32(text, 4 * (i + 1)), fib.ccp_atn);
@@ -352,6 +384,9 @@ std::expected<void, Error> ReadComments(model::Document& doc, Bytes word,
       comment.author = (*anchors)[i].initials;
     }
     comment.initials = (*anchors)[i].initials;
+    if (i < dates.size()) {
+      comment.date = dates[i];
+    }
     if (last > first) {
       comment.paragraphs =
           ReadStoryParagraphs(*chars, chpx, papx, doc.fonts, prcs, base, first,

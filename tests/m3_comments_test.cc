@@ -158,7 +158,7 @@ TEST(M3Comments, WritesCommentsPartAndAnchors) {
 
   const std::string comments = Part(*zip, "word/comments.xml");
   ASSERT_FALSE(comments.empty());
-  EXPECT_NE(comments.find("<w:comment w:id=\"1\" w:author=\"Alice\">"),
+  EXPECT_NE(comments.find("<w:comment w:id=\"1\" w:author=\"Alice\" w:date=\""),
             std::string::npos);
   EXPECT_NE(comments.find("<w:comment w:id=\"2\" w:author=\"Bob\">"),
             std::string::npos);
@@ -197,3 +197,166 @@ TEST(M3Comments, DocumentWithoutCommentsHasNoPart) {
   EXPECT_TRUE(Part(*zip, "word/comments.xml").empty());
   EXPECT_EQ(Count(Part(*zip, "word/document.xml"), "commentReference"), 0u);
 }
+
+namespace comment_date {
+
+void Put16(std::vector<uint8_t>& b, size_t p, uint16_t v) {
+  b[p] = static_cast<uint8_t>(v);
+  b[p + 1] = static_cast<uint8_t>(v >> 8);
+}
+
+void Put32(std::vector<uint8_t>& b, size_t p, uint32_t v) {
+  for (int i = 0; i < 4; ++i) {
+    b[p + i] = static_cast<uint8_t>(v >> (8 * i));
+  }
+}
+
+// FibRgFcLcb97 row 113, read here as pair(112) (0-based pairs anchored by
+// fcClx = pair(33) at byte 0x01A2): fcAtrdExtra/lcbAtrdExtra point at the
+// ATRDPOST10 date array in the table stream ([MS-DOC] §2.16.6; LibreOffice
+// ww8scan.cxx reads the same pair at FIB offset 0x41A).
+TEST(M3Comments, FibReadsAtrdExtraFromPair112) {
+  std::vector<uint8_t> word(4096);
+  Put16(word, 0, 0xA5EC);
+  Put16(word, 2, 0x00C1);
+  Put16(word, 32, 14);                // csw
+  Put16(word, 62, 22);                // cslw
+  Put16(word, 152, 115);              // cbRgFcLcb > 113
+  Put32(word, 154 + 112 * 8, 0x3C2);  // fcAtrdExtra
+  Put32(word, 158 + 112 * 8, 36);     // lcbAtrdExtra: two ATRDPOST10
+  auto fib = doc::ParseFib(word);
+  ASSERT_TRUE(fib) << fib.error().message;
+  EXPECT_EQ(fib->atrd_extra, (doc::Fib::Range{0x3C2, 36}));
+}
+
+// Synthetic comment story in the shape of ParseFixture("comments-basic"),
+// plus an optional raw ATRDPOST10 array appended to the table stream.
+struct SyntheticComments {
+  doc::Fib fib;
+  std::vector<uint8_t> word, table;
+};
+
+SyntheticComments BuildComments(std::vector<uint8_t> atrd_post10) {
+  SyntheticComments s;
+  // Main story: one anchored comment mark; annotation story: "AB\r\r".
+  const std::string main = "X\x05\r";
+  const std::string atn = "AB\r\r";
+  s.fib.ccp_text = static_cast<uint32_t>(main.size());
+  s.fib.ccp_atn = static_cast<uint32_t>(atn.size());
+  const std::string all = main + atn;
+  constexpr uint32_t kFc = 512;
+  s.word.assign(4096, 0);
+  for (size_t i = 0; i < all.size(); i++) {
+    s.word[kFc + i] = static_cast<uint8_t>(all[i]);
+  }
+  // CLX = Pcdt: clxt(1) lcb(4) then a one-piece PlcPcd.
+  s.fib.fc_clx = 0;
+  s.fib.lcb_clx = 21;
+  s.table.assign(21, 0);
+  s.table[0] = 2;
+  Put32(s.table, 1, 16);
+  Put32(s.table, 5, 0);
+  Put32(s.table, 9, static_cast<uint32_t>(all.size()));
+  Put32(s.table, 15, 0x40000000u | (kFc * 2));
+  // PlcfandRef: one anchor at CP 1 plus the guard CP, 30-byte ATRDPre10.
+  s.fib.and_ref = {21, 38};
+  s.table.resize(21 + 38);
+  Put32(s.table, 21, 1);
+  Put32(s.table, 25, 2);
+  // PlcfandTxt: one story range [0, ccp_atn) plus the guard CP.
+  s.fib.and_txt = {59, 8};
+  s.table.resize(59 + 8);
+  Put32(s.table, 59, 0);
+  Put32(s.table, 63, s.fib.ccp_atn);
+  // GrpXstAtnOwners: one Xst "Alice" (2-byte cch + 5 UTF-16 chars); the
+  // array ends with the buffer, so it must hold exactly the one Xst — a
+  // trailing zero cch would be rejected as damaged.
+  const size_t owners = s.table.size();
+  s.table.resize(owners + 12);
+  Put16(s.table, owners, 5);
+  for (size_t i = 0; i < 5; i++) {
+    Put16(s.table, owners + 2 + 2 * i, static_cast<uint16_t>("Alice"[i]));
+  }
+  s.fib.atn_owners = {static_cast<uint32_t>(owners), 12};
+  if (!atrd_post10.empty()) {
+    const size_t at = s.table.size();
+    s.table.insert(s.table.end(), atrd_post10.begin(), atrd_post10.end());
+    s.fib.atrd_extra = {static_cast<uint32_t>(at),
+                        static_cast<uint32_t>(atrd_post10.size())};
+  }
+  return s;
+}
+
+// One 18-byte ATRDPOST10 record ([MS-DOC] §2.3.1): the DTTM sits at offset 0;
+// LibreOffice ww8par.cxx indexes pExtended[nIndex * 18] and reads the leading
+// 4-byte DTTM.
+void PutAtrdPost10(std::vector<uint8_t>& b, size_t index, uint32_t dttm) {
+  Put32(b, index * 18, dttm);
+}
+
+TEST(M3Comments, CommentDateFromAtrdPost10ReachesDocx) {
+  std::vector<uint8_t> post10(18, 0);
+  // 0x07982284: [MS-DOC] 2.9.60 DTTM for 2021-08-04 10:04 (day 4, month 8,
+  // year 121, hour 10, minute 4; the DTTM layout has no second field, so the
+  // written attribute always ends in :00).
+  PutAtrdPost10(post10, 0, 0x07982284);
+  SyntheticComments s = BuildComments(post10);
+  auto d = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->comments.size(), 1u);
+  EXPECT_EQ(d->comments[0].date, 0x07982284u);
+  EXPECT_TRUE(d->warnings.empty());
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string comments = Part(*zip, "word/comments.xml");
+  EXPECT_NE(comments.find("w:date=\"2021-08-04T10:04:00Z\""),
+            std::string::npos);
+}
+
+// An all-zero DTTM is invalid per [MS-DOC] 2.9.65 (day and month are 0), so
+// no w:date attribute is written and nothing warns.
+TEST(M3Comments, ZeroAtrdPost10DttmWritesNoDate) {
+  std::vector<uint8_t> post10(18, 0);
+  SyntheticComments s = BuildComments(post10);
+  auto d = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->comments.size(), 1u);
+  EXPECT_EQ(d->comments[0].date, 0u);
+  EXPECT_TRUE(d->warnings.empty());
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip);
+  EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
+}
+
+// A truncated or count-short ATRDPOST10 array warns once and leaves every
+// date unset; the comment bodies, authors and initials stay intact.
+TEST(M3Comments, DamagedAtrdPost10WarnsAndKeepsComments) {
+  std::vector<uint8_t> post10(9, 0);  // half a record
+  SyntheticComments s = BuildComments(post10);
+  auto d = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->comments.size(), 1u);
+  EXPECT_NE(ParagraphText(d->comments[0].paragraphs[0]), "");
+  EXPECT_EQ(d->comments[0].author, "Alice");
+  ASSERT_FALSE(d->warnings.empty());
+  EXPECT_NE(d->warnings[0].find("skipped comment dates"), std::string::npos);
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip);
+  EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
+}
+
+// Without fcAtrdExtra/lcbAtrdExtra (the pre-Word-2002 shape) no date is
+// written and no warning fires — the previous behaviour.
+TEST(M3Comments, MissingAtrdPost10StaysSilent) {
+  SyntheticComments s = BuildComments({});
+  auto d = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->comments.size(), 1u);
+  EXPECT_EQ(d->comments[0].date, 0u);
+  EXPECT_TRUE(d->warnings.empty());
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip);
+  EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
+}
+
+}  // namespace comment_date
