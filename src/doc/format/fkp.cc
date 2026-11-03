@@ -1287,6 +1287,14 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
   out.reserve(ranges.size());
   for (auto& entry : ranges)
     out.push_back(std::move(entry.range));
+  // Find() walks the ranges with upper_bound, so the surviving ranges must be
+  // ordered by FC. The BTE traversal order can differ from the FC order when a
+  // page's ranges sit outside its own BTE interval, which leaves a reversed
+  // pair even after the overlap pass.
+  std::sort(out.begin(), out.end(),
+            [](const FormatRange& x, const FormatRange& y) {
+              return x.first < y.first;
+            });
   return out;
 }
 

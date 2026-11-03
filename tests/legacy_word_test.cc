@@ -1318,6 +1318,31 @@ TEST(LegacyWord, Word6OverlongRangeDropsOnlyItsOwnPage) {
   EXPECT_TRUE(runs[2].italic);
 }
 
+TEST(LegacyWord, Word6BtePageOrderOppositeFcOrderKeepsBothRanges) {
+  // BTE bounds [768,770,775]: page 2 owns [768,770) but its CHPX range is
+  // [773,775), while page 3 owns [770,775) with the range [770,773). The two
+  // ranges do not overlap, yet the BTE traversal order is the reverse of the
+  // FC order. ReadLegacyFkps must sort the ranges it returns, otherwise
+  // Find()'s upper_bound precondition fails and the later formatting is lost.
+  auto document = ParseWord6(Word6ChpxPagesDocument(
+      {768, 770, 775}, {{{773, 775, {0x56, 1}}}, {{770, 773, {0x55, 1}}}}));
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(CountWarnings(document->warnings, "skipped Word 6/95 FKP page"),
+            0u);
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  const auto& runs = document->paragraphs[0].runs;
+  ASSERT_EQ(runs.size(), 3u);
+  EXPECT_EQ(runs[0].text, "AB");
+  EXPECT_FALSE(runs[0].bold);
+  EXPECT_FALSE(runs[0].italic);
+  EXPECT_EQ(runs[1].text, "CDE");
+  EXPECT_TRUE(runs[1].bold);
+  EXPECT_FALSE(runs[1].italic);
+  EXPECT_EQ(runs[2].text, "F");
+  EXPECT_FALSE(runs[2].bold);
+  EXPECT_TRUE(runs[2].italic);
+}
+
 TEST(LegacyWord, Word6OverlappingBteBoundsRejectsWholeTable) {
   // The CHPX BTE FC array is [768,800,700,900]: page 2 owns [768,800) and
   // page 4 owns [700,900), so those BTE intervals interleave. Both ranges
@@ -1332,15 +1357,17 @@ TEST(LegacyWord, Word6OverlappingBteBoundsRejectsWholeTable) {
 }
 
 TEST(LegacyWord, Word6IntraPageOverlapDropsPageOnce) {
-  // An FKP page lists its intervals as a contiguous FC partition, so the
-  // parser cannot produce two overlapping intervals on one page, and a
-  // repeated page number stays a fatal BTE defect. The page-level rule still
-  // needs to be pinned: two overlapping intervals that carry the same page
-  // identity drop that page exactly once.
+  // A CHPX FKP stores n+1 strictly increasing FC boundaries, so its ranges
+  // always form a contiguous partition; two overlapping intervals on one page
+  // cannot be encoded end to end, and a repeated page number stays a fatal
+  // BTE defect. The page-level rule is still pinned directly here: two
+  // overlapping intervals that carry the same page identity drop that page
+  // exactly once.
   auto dropped = doccraft::doc::detail::ResolveLegacyFkpOverlaps(
       {{768, 773, 2, false}, {770, 775, 2, false}});
   ASSERT_TRUE(dropped) << dropped.error().message;
-  EXPECT_EQ(*dropped, (std::vector<size_t>{2}));
+  ASSERT_EQ(dropped->size(), 1u);
+  EXPECT_EQ((*dropped)[0], 2u);
 }
 
 TEST(LegacyWord, Word6DroppedOverlapPageKeepsOnlySkipWarning) {
