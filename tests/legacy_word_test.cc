@@ -443,6 +443,57 @@ std::vector<uint8_t> Word6TwoPageChpxDocument(
   return word;
 }
 
+// One CHPX run for Word6ChpxPagesDocument: the FC interval and its grpprl.
+struct Word6ChpxRange {
+  uint32_t first;
+  uint32_t last;
+  std::vector<uint8_t> sprms;
+};
+
+// Builds a Word 6/95 document whose CHPX BTE names one FKP page per `bounds`
+// interval. `bounds` holds pages + 1 ascending FC values, so page k owns
+// [bounds[k], bounds[k + 1]); `ranges[k]` lists that page's runs. Each page
+// parks its grpprls at offsets 100 + 100 * j, leaving room for four runs.
+// The body text is "ABCDEF\r" over FC 768-775.
+std::vector<uint8_t> Word6ChpxPagesDocument(
+    const std::vector<uint32_t>& bounds,
+    const std::vector<std::vector<Word6ChpxRange>>& ranges) {
+  const size_t pages = bounds.size() - 1;
+  const size_t bte = 2560;
+  std::vector<uint8_t> word(bte + 4 * (pages + 1) + 2 * pages);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 775);
+  Put32(word, 52, 7);
+  const char text[] = "ABCDEF\r";
+  std::copy(text, text + 7, word.begin() + 768);
+  // CHPX BTE PLC: pages + 1 FC bounds, then one 2-byte page number per page.
+  Put32(word, 88 + 12 * 8, static_cast<uint32_t>(bte));
+  Put32(word, 92 + 12 * 8, static_cast<uint32_t>(4 * (pages + 1) + 2 * pages));
+  for (size_t k = 0; k <= pages; ++k)
+    Put32(word, bte + 4 * k, bounds[k]);
+  for (size_t k = 0; k < pages; ++k)
+    Put16(word, bte + 4 * (pages + 1) + 2 * k, static_cast<uint16_t>(k + 2));
+  for (size_t k = 0; k < pages; ++k) {
+    const size_t base = (k + 2) * 512;
+    const auto& page_ranges = ranges[k];
+    for (size_t j = 0; j < page_ranges.size(); ++j) {
+      Put32(word, base + 4 * j, page_ranges[j].first);
+      Put32(word, base + 4 * (j + 1), page_ranges[j].last);
+      const size_t off = 100 + 100 * j;
+      word[base + 4 * (page_ranges.size() + 1) + j] =
+          static_cast<uint8_t>(off / 2);
+      word[base + off] = static_cast<uint8_t>(page_ranges[j].sprms.size());
+      std::copy(page_ranges[j].sprms.begin(), page_ranges[j].sprms.end(),
+                word.begin() + base + off + 1);
+    }
+    word[base + 511] = static_cast<uint8_t>(page_ranges.size());
+  }
+  return word;
+}
+
 // Builds a Word 6/95 document whose single PAPX FKP range carries `sprms`.
 // `sprms` must be an even number of bytes so the BX length covers exactly the
 // two style bytes plus the modifiers.
@@ -1239,6 +1290,82 @@ TEST(LegacyWord, Word6DamagedPapxPayloadPageKeepsOtherPageFormatting) {
   EXPECT_EQ(document->paragraphs[0].align, 2);
   ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
   EXPECT_EQ(document->paragraphs[0].runs[0].text, "ABC");
+}
+
+TEST(LegacyWord, Word6OverlongRangeDropsOnlyItsOwnPage) {
+  // Page 2's BTE interval is [768,771) but its single CHPX range runs on to
+  // 775, swallowing the healthy ranges of pages 3 ([771,773)) and 4
+  // ([773,775)). The old "drop the later range's page" rule deleted pages 3
+  // and 4 and kept the damaged page 2; the BTE FC bound must blame page 2.
+  auto document = ParseWord6(
+      Word6ChpxPagesDocument({768, 771, 773, 775}, {{{768, 775, {0x55, 1}}},
+                                                    {{771, 773, {0x55, 1}}},
+                                                    {{773, 775, {0x56, 1}}}}));
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(CountWarnings(document->warnings, "skipped Word 6/95 FKP page"),
+            1u);
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "skipped Word 6/95 FKP page 2: overlapping"),
+            1u);
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  const auto& runs = document->paragraphs[0].runs;
+  ASSERT_EQ(runs.size(), 3u);
+  EXPECT_EQ(runs[0].text, "ABC");
+  EXPECT_FALSE(runs[0].bold);
+  EXPECT_EQ(runs[1].text, "DE");
+  EXPECT_TRUE(runs[1].bold);
+  EXPECT_EQ(runs[2].text, "F");
+  EXPECT_TRUE(runs[2].italic);
+}
+
+TEST(LegacyWord, Word6OverlappingBteBoundsRejectsWholeTable) {
+  // The CHPX BTE FC array is [768,800,700,900]: page 2 owns [768,800) and
+  // page 4 owns [700,900), so those BTE intervals interleave. Both ranges
+  // stay inside their own interval, which leaves the overlap unattributable
+  // (page 3's inverted [800,700) interval owns an unrelated range at 900).
+  auto document = ParseWord6(
+      Word6ChpxPagesDocument({768, 800, 700, 900}, {{{768, 790, {0x55, 1}}},
+                                                    {{900, 910, {0x56, 1}}},
+                                                    {{750, 880, {0x55, 1}}}}));
+  ASSERT_FALSE(document);
+  EXPECT_EQ(document.error().message, "overlapping Word 6/95 FKP ranges");
+}
+
+TEST(LegacyWord, Word6IntraPageOverlapDropsPageOnce) {
+  // An FKP page lists its intervals as a contiguous FC partition, so the
+  // parser cannot produce two overlapping intervals on one page, and a
+  // repeated page number stays a fatal BTE defect. The page-level rule still
+  // needs to be pinned: two overlapping intervals that carry the same page
+  // identity drop that page exactly once.
+  auto dropped = doccraft::doc::detail::ResolveLegacyFkpOverlaps(
+      {{768, 773, 2, false}, {770, 775, 2, false}});
+  ASSERT_TRUE(dropped) << dropped.error().message;
+  EXPECT_EQ(*dropped, (std::vector<size_t>{2}));
+}
+
+TEST(LegacyWord, Word6DroppedOverlapPageKeepsOnlySkipWarning) {
+  // Page 2 carries an unmapped sprm and is also the damaged side of the
+  // cross-page overlap. Caching the sprm warning until the page survives
+  // means the dropped page warns once, with the skip cause only.
+  auto document = ParseWord6(Word6ChpxPagesDocument(
+      {768, 771, 773, 775}, {{{768, 775, {0xF0, 0x02, 0xAA, 0xBB}}},
+                             {{771, 773, {0x55, 1}}},
+                             {{773, 775, {0x56, 1}}}}));
+  ASSERT_TRUE(document) << document.error().message;
+  EXPECT_EQ(CountWarnings(document->warnings, "unmapped sprms"), 0u);
+  EXPECT_EQ(CountWarnings(document->warnings, "skipped Word 6/95 FKP page"),
+            1u);
+  EXPECT_EQ(CountWarnings(document->warnings,
+                          "skipped Word 6/95 FKP page 2: overlapping"),
+            1u);
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  const auto& runs = document->paragraphs[0].runs;
+  ASSERT_EQ(runs.size(), 3u);
+  EXPECT_EQ(runs[0].text, "ABC");
+  EXPECT_EQ(runs[1].text, "DE");
+  EXPECT_TRUE(runs[1].bold);
+  EXPECT_EQ(runs[2].text, "F");
+  EXPECT_TRUE(runs[2].italic);
 }
 
 TEST(LegacyWord, LegacyScanSkipsUnlistedOpcodeByCb) {

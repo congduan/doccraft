@@ -413,6 +413,26 @@ std::expected<std::vector<FormatRange>, Error> ReadFkps(
     Bytes word, Bytes table, Fib::Range r, bool para,
     std::vector<std::string>* warnings = nullptr, bool legacy = false);
 
+// One formatting interval as the legacy overlap pass sees it: the FC bounds,
+// the page identity it belongs to (ranges with the same `page` come from one
+// FKP page) and whether that page overran the FC interval its BTE entry
+// assigns to it. `first`/`last` mirror FormatRange but keep the pass free of
+// the grpprl payload.
+struct LegacyFkpOverlap {
+  uint32_t first;
+  uint32_t last;
+  size_t page;
+  bool outside_bte;
+};
+
+// Resolves overlapping legacy FKP intervals at page granularity. The page
+// whose intervals leave its BTE FC bounds is dropped; an overlap that cannot
+// be attributed to one page (including one where both pages stay inside their
+// bounds) refuses the table instead of guessing. Returns the dropped page
+// identities in drop order.
+std::expected<std::vector<size_t>, Error> ResolveLegacyFkpOverlaps(
+    std::vector<LegacyFkpOverlap> ranges);
+
 const FormatRange* Find(const std::vector<FormatRange>& a, uint32_t fc);
 
 std::vector<std::string> ReadFonts(Bytes table, Fib::Range r);

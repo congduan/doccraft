@@ -1106,6 +1106,45 @@ std::string LegacySprmUnmappedWarning(const LegacySprmStop& skip, size_t page) {
 
 }  // namespace
 
+std::expected<std::vector<size_t>, Error> ResolveLegacyFkpOverlaps(
+    std::vector<LegacyFkpOverlap> ranges) {
+  std::sort(ranges.begin(), ranges.end(),
+            [](const LegacyFkpOverlap& a, const LegacyFkpOverlap& b) {
+              return a.first < b.first;
+            });
+  std::vector<size_t> dropped;
+  for (bool again = true; again;) {
+    again = false;
+    for (size_t i = 1; i < ranges.size(); ++i) {
+      if (ranges[i].first >= ranges[i - 1].last)
+        continue;
+      const LegacyFkpOverlap& earlier = ranges[i - 1];
+      const LegacyFkpOverlap& later = ranges[i];
+      size_t page = 0;
+      if (earlier.page == later.page) {
+        // Two intervals of one page disagree: the page itself is inconsistent.
+        page = earlier.page;
+      } else if (earlier.outside_bte != later.outside_bte) {
+        // Only the page whose intervals leave its BTE FC bound is damaged.
+        page = earlier.outside_bte ? earlier.page : later.page;
+      } else {
+        // Both pages are equally (un)damaged, so the page-local evidence does
+        // not identify a culprit. Refuse the table rather than guess.
+        return std::unexpected(Error{"overlapping Word 6/95 FKP ranges"});
+      }
+      dropped.push_back(page);
+      ranges.erase(std::remove_if(ranges.begin(), ranges.end(),
+                                  [page](const LegacyFkpOverlap& entry) {
+                                    return entry.page == page;
+                                  }),
+                   ranges.end());
+      again = true;
+      break;
+    }
+  }
+  return dropped;
+}
+
 std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
     Bytes word, Fib::Range r, bool para, std::vector<std::string>* warnings) {
   std::vector<FormatRange> out;
@@ -1124,15 +1163,34 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
   // so a dropped page loses formatting but never text.
   struct NamedRange {
     FormatRange range;
-    size_t page;
+    size_t state;
+    // Set when any range on the page falls outside the FC interval its BTE
+    // entry assigns to it. That is the evidence used to blame a page for a
+    // cross-page overlap; without it the overlap is table-level.
+    bool outside_bte;
   };
+  // Warnings are collected per page and emitted only after the overlap pass
+  // has decided whether the page survives, so a discarded page warns once:
+  // with the skip cause, never with its sprm warning as well.
+  struct PageState {
+    size_t page;
+    std::vector<std::string> sprm_warnings;
+    std::string drop_warning;
+  };
+  std::vector<PageState> page_states;
   std::vector<NamedRange> ranges;
   for (size_t k = 0; k < pages; ++k) {
     const size_t pn = U16(plc, 4 * (pages + 1) + 2 * k);
     if (pn >= seen.size() || seen[pn]++)
       return std::unexpected(Error{"invalid Word 6/95 FKP page"});
+    // The BTE FC array bounds the page's ranges; a page whose ranges leave
+    // this interval is the damaged side of a cross-page overlap.
+    const uint32_t bte_first = U32(plc, 4 * k);
+    const uint32_t bte_last = U32(plc, 4 * (k + 1));
     Bytes f = word.subspan(pn * 512, 512);
     const size_t count = f[511], stride = para ? 7 : 1;
+    page_states.push_back(PageState{pn, {}, {}});
+    const size_t state = page_states.size() - 1;
     std::vector<NamedRange> page_ranges;
     // One warning per FKP page: the first range that stops or steps over an
     // unlisted opcode reports it, later ranges on the same page stay silent.
@@ -1172,7 +1230,7 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
             }
           }
         }
-        page_ranges.push_back(NamedRange{std::move(range), pn});
+        page_ranges.push_back(NamedRange{std::move(range), state, false});
       }
       return {};
     };
@@ -1180,40 +1238,50 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
     if (!page) {
       // A page-local structural defect discards only this page. The first
       // defect names the cause, so one page produces one warning.
-      if (warnings)
-        warnings->push_back("skipped Word 6/95 FKP page " + std::to_string(pn) +
-                            ": " + page.error().message);
+      page_states[state].drop_warning = "skipped Word 6/95 FKP page " +
+                                        std::to_string(pn) + ": " +
+                                        page.error().message;
       continue;
     }
-    if (warnings)
-      warnings->insert(warnings->end(), page_warnings.begin(),
-                       page_warnings.end());
-    for (auto& entry : page_ranges)
+    page_states[state].sprm_warnings = std::move(page_warnings);
+    const bool outside_bte = std::any_of(
+        page_ranges.begin(), page_ranges.end(), [&](const NamedRange& entry) {
+          return entry.range.first < bte_first || entry.range.last > bte_last;
+        });
+    for (auto& entry : page_ranges) {
+      entry.outside_bte = outside_bte;
       ranges.push_back(std::move(entry));
+    }
   }
-  // Overlaps are resolved at page granularity: the later range of the sorted
-  // pair is the one that breaks the ordering, so its page is dropped and the
-  // surviving pages are checked again.
-  std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
-    return a.range.first < b.range.first;
-  });
-  for (bool dropped = true; dropped;) {
-    dropped = false;
-    for (size_t i = 1; i < ranges.size(); ++i) {
-      if (ranges[i].range.first >= ranges[i - 1].range.last)
-        continue;
-      const size_t page = ranges[i].page;
-      if (warnings)
-        warnings->push_back("skipped Word 6/95 FKP page " +
-                            std::to_string(page) +
-                            ": overlapping Word 6/95 FKP ranges");
-      ranges.erase(std::remove_if(ranges.begin(), ranges.end(),
-                                  [page](const NamedRange& entry) {
-                                    return entry.page == page;
-                                  }),
-                   ranges.end());
-      dropped = true;
-      break;
+  // Overlaps are resolved at page granularity by ResolveLegacyFkpOverlaps:
+  // the BTE FC bounds name the damaged side of a cross-page pair, and an
+  // undecidable overlap refuses the whole table.
+  std::vector<LegacyFkpOverlap> overlap;
+  overlap.reserve(ranges.size());
+  for (const auto& entry : ranges)
+    overlap.push_back(
+        {entry.range.first, entry.range.last, entry.state, entry.outside_bte});
+  auto dropped = ResolveLegacyFkpOverlaps(std::move(overlap));
+  if (!dropped)
+    return std::unexpected(dropped.error());
+  for (const size_t state : *dropped) {
+    PageState& page = page_states[state];
+    page.drop_warning = "skipped Word 6/95 FKP page " +
+                        std::to_string(page.page) +
+                        ": overlapping Word 6/95 FKP ranges";
+    ranges.erase(std::remove_if(ranges.begin(), ranges.end(),
+                                [state](const NamedRange& entry) {
+                                  return entry.state == state;
+                                }),
+                 ranges.end());
+  }
+  if (warnings) {
+    for (const auto& page : page_states) {
+      if (!page.drop_warning.empty())
+        warnings->push_back(page.drop_warning);
+      else
+        warnings->insert(warnings->end(), page.sprm_warnings.begin(),
+                         page.sprm_warnings.end());
     }
   }
   out.reserve(ranges.size());
