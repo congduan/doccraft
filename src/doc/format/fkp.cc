@@ -1118,56 +1118,107 @@ std::expected<std::vector<FormatRange>, Error> ReadLegacyFkps(
   if (pages > word.size() / 512)
     return std::unexpected(Error{"Word 6/95 BTE page count exceeds stream"});
   std::vector<uint8_t> seen(word.size() / 512);
-  // One warning per FKP page: the first range that stops or steps over an
-  // unlisted opcode reports it, later ranges on the same page stay silent.
-  std::vector<uint8_t> warned_pages(seen.size());
+  // Keeps each range next to its FKP page so a page-local defect can discard
+  // the whole page without touching its neighbours. Word 6/95 FKP pages carry
+  // only formatting: the body text comes from fcMin/fcMac or the piece table,
+  // so a dropped page loses formatting but never text.
+  struct NamedRange {
+    FormatRange range;
+    size_t page;
+  };
+  std::vector<NamedRange> ranges;
   for (size_t k = 0; k < pages; ++k) {
     const size_t pn = U16(plc, 4 * (pages + 1) + 2 * k);
     if (pn >= seen.size() || seen[pn]++)
       return std::unexpected(Error{"invalid Word 6/95 FKP page"});
     Bytes f = word.subspan(pn * 512, 512);
     const size_t count = f[511], stride = para ? 7 : 1;
-    if (!count || 4 * (count + 1) + stride * count > 511)
-      return std::unexpected(Error{"invalid Word 6/95 FKP run count"});
-    for (size_t j = 0; j < count; ++j) {
-      const uint32_t first = U32(f, 4 * j), last = U32(f, 4 * (j + 1));
-      if (last <= first)
-        return std::unexpected(Error{"invalid Word 6/95 FKP FC order"});
-      FormatRange range{first, last, {}};
-      const size_t off = 2 * f[4 * (count + 1) + stride * j];
-      if (off) {
-        if (off >= 511)
-          return std::unexpected(Error{"invalid Word 6/95 FKP offset"});
-        const size_t length = para ? 2 * f[off] : f[off];
-        if (length > 511 - off - 1 || (para && length < 2))
-          return std::unexpected(Error{"invalid Word 6/95 FKP payload"});
-        size_t start = off + 1;
-        if (para) {
-          range.style = U16(f, start);
-          start += 2;
-        }
-        LegacySprmStop stop;
-        const LegacySprmScan scan = ScanLegacySprms(
-            f.subspan(start, length - (para ? 2 : 0)), range.sprms, &stop);
-        if (warnings && !warned_pages[pn]) {
-          if (scan == LegacySprmScan::kStopped) {
-            warnings->push_back(LegacySprmStopWarning(stop, pn));
-            warned_pages[pn] = 1;
-          } else if (stop.reason == LegacySprmStop::Reason::kUnmappedOpcode) {
-            warnings->push_back(LegacySprmUnmappedWarning(stop, pn));
-            warned_pages[pn] = 1;
+    std::vector<NamedRange> page_ranges;
+    // One warning per FKP page: the first range that stops or steps over an
+    // unlisted opcode reports it, later ranges on the same page stay silent.
+    // Held back until the whole page parses so a skipped page warns once.
+    std::vector<std::string> page_warnings;
+    bool page_warned = false;
+    auto read_page = [&]() -> std::expected<void, Error> {
+      if (!count || 4 * (count + 1) + stride * count > 511)
+        return std::unexpected(Error{"invalid Word 6/95 FKP run count"});
+      for (size_t j = 0; j < count; ++j) {
+        const uint32_t first = U32(f, 4 * j), last = U32(f, 4 * (j + 1));
+        if (last <= first)
+          return std::unexpected(Error{"invalid Word 6/95 FKP FC order"});
+        FormatRange range{first, last, {}};
+        const size_t off = 2 * f[4 * (count + 1) + stride * j];
+        if (off) {
+          if (off >= 511)
+            return std::unexpected(Error{"invalid Word 6/95 FKP offset"});
+          const size_t length = para ? 2 * f[off] : f[off];
+          if (length > 511 - off - 1 || (para && length < 2))
+            return std::unexpected(Error{"invalid Word 6/95 FKP payload"});
+          size_t start = off + 1;
+          if (para) {
+            range.style = U16(f, start);
+            start += 2;
+          }
+          LegacySprmStop stop;
+          const LegacySprmScan scan = ScanLegacySprms(
+              f.subspan(start, length - (para ? 2 : 0)), range.sprms, &stop);
+          if (warnings && !page_warned) {
+            if (scan == LegacySprmScan::kStopped) {
+              page_warnings.push_back(LegacySprmStopWarning(stop, pn));
+              page_warned = true;
+            } else if (stop.reason == LegacySprmStop::Reason::kUnmappedOpcode) {
+              page_warnings.push_back(LegacySprmUnmappedWarning(stop, pn));
+              page_warned = true;
+            }
           }
         }
+        page_ranges.push_back(NamedRange{std::move(range), pn});
       }
-      out.push_back(std::move(range));
+      return {};
+    };
+    auto page = read_page();
+    if (!page) {
+      // A page-local structural defect discards only this page. The first
+      // defect names the cause, so one page produces one warning.
+      if (warnings)
+        warnings->push_back("skipped Word 6/95 FKP page " + std::to_string(pn) +
+                            ": " + page.error().message);
+      continue;
+    }
+    if (warnings)
+      warnings->insert(warnings->end(), page_warnings.begin(),
+                       page_warnings.end());
+    for (auto& entry : page_ranges)
+      ranges.push_back(std::move(entry));
+  }
+  // Overlaps are resolved at page granularity: the later range of the sorted
+  // pair is the one that breaks the ordering, so its page is dropped and the
+  // surviving pages are checked again.
+  std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+    return a.range.first < b.range.first;
+  });
+  for (bool dropped = true; dropped;) {
+    dropped = false;
+    for (size_t i = 1; i < ranges.size(); ++i) {
+      if (ranges[i].range.first >= ranges[i - 1].range.last)
+        continue;
+      const size_t page = ranges[i].page;
+      if (warnings)
+        warnings->push_back("skipped Word 6/95 FKP page " +
+                            std::to_string(page) +
+                            ": overlapping Word 6/95 FKP ranges");
+      ranges.erase(std::remove_if(ranges.begin(), ranges.end(),
+                                  [page](const NamedRange& entry) {
+                                    return entry.page == page;
+                                  }),
+                   ranges.end());
+      dropped = true;
+      break;
     }
   }
-  std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-    return a.first < b.first;
-  });
-  for (size_t i = 1; i < out.size(); ++i)
-    if (out[i].first < out[i - 1].last)
-      return std::unexpected(Error{"overlapping Word 6/95 FKP ranges"});
+  out.reserve(ranges.size());
+  for (auto& entry : ranges)
+    out.push_back(std::move(entry.range));
   return out;
 }
 

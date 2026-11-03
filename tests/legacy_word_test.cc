@@ -1115,6 +1115,132 @@ TEST(LegacyWord, Word6FkpWarningDeduplicatesPerPage) {
   EXPECT_EQ(CountWarnings(document->warnings, "opcode 0xf1"), 0u);
 }
 
+TEST(LegacyWord, Word6DamagedFcOrderPageKeepsOtherPageFormatting) {
+  // Two CHPX BTE entries point at pages 2 and 3. Page 2 has a descending FC
+  // pair (772 -> 768), which is a page-local defect: the page must be skipped
+  // with one warning while page 3 still bolds ABC. The PAPX page 4 stays
+  // healthy so the same document proves paragraph formatting survives too.
+  std::vector<uint8_t> word(3072);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 772);
+  Put32(word, 52, 4);
+  word[768] = 'A';
+  word[769] = 'B';
+  word[770] = 'C';
+  word[771] = '\r';
+  // CHPX BTE PLC at 2560: three FC bounds then pages 2 and 3.
+  Put32(word, 88 + 12 * 8, 2560);
+  Put32(word, 92 + 12 * 8, 16);
+  Put32(word, 2560, 768);
+  Put32(word, 2564, 772);
+  Put32(word, 2568, 772);
+  Put16(word, 2572, 2);
+  Put16(word, 2574, 3);
+  // PAPX BTE PLC at 2576: one range on page 4.
+  Put32(word, 88 + 13 * 8, 2576);
+  Put32(word, 92 + 13 * 8, 10);
+  Put32(word, 2576, 768);
+  Put32(word, 2580, 772);
+  Put16(word, 2584, 4);
+  // Page 2: one range whose last FC is below its first FC.
+  Put32(word, 1024, 772);
+  Put32(word, 1028, 768);
+  word[1535] = 1;
+  // Page 3: bold over FC 768-772.
+  Put32(word, 1536, 768);
+  Put32(word, 1540, 772);
+  word[1544] = 250;
+  word[2036] = 2;
+  word[2037] = 0x55;
+  word[2038] = 1;
+  word[2047] = 1;
+  // Page 4: right align over FC 768-772.
+  Put32(word, 2048, 768);
+  Put32(word, 2052, 772);
+  word[2056] = 100;
+  word[2248] = 2;
+  Put16(word, 2249, 0);
+  word[2251] = 0x05;
+  word[2252] = 2;
+  word[2559] = 1;
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  int skipped = 0;
+  for (const auto& warning : document->warnings) {
+    if (warning.find("skipped Word 6/95 FKP page") != 0)
+      continue;
+    ++skipped;
+    EXPECT_EQ(warning,
+              "skipped Word 6/95 FKP page 2: invalid Word 6/95 FKP FC order")
+        << warning;
+  }
+  EXPECT_EQ(skipped, 1);
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].align, 2);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_TRUE(document->paragraphs[0].runs[0].bold);
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "ABC");
+}
+
+TEST(LegacyWord, Word6DamagedPapxPayloadPageKeepsOtherPageFormatting) {
+  // Page 2's PAPX declares 400 payload bytes at offset 400 (only 110 fit), so
+  // the page is skipped; page 3 still applies the right alignment and the
+  // body text stays intact.
+  std::vector<uint8_t> word(3072);
+  Put16(word, 0, 0xA5DC);
+  Put16(word, 2, 0x65);
+  Put16(word, 6, 0x0409);
+  Put32(word, 24, 768);
+  Put32(word, 28, 772);
+  Put32(word, 52, 4);
+  word[768] = 'A';
+  word[769] = 'B';
+  word[770] = 'C';
+  word[771] = '\r';
+  // PAPX BTE PLC at 2560: three FC bounds then pages 2 and 3.
+  Put32(word, 88 + 13 * 8, 2560);
+  Put32(word, 92 + 13 * 8, 16);
+  Put32(word, 2560, 768);
+  Put32(word, 2564, 772);
+  Put32(word, 2568, 772);
+  Put16(word, 2572, 2);
+  Put16(word, 2574, 3);
+  // Page 2: PAPX at page offset 400 declares 200 words.
+  Put32(word, 1024, 768);
+  Put32(word, 1028, 772);
+  word[1032] = 200;
+  word[1424] = 200;
+  word[1535] = 1;
+  // Page 3: right align over FC 768-772.
+  Put32(word, 1536, 768);
+  Put32(word, 1540, 772);
+  word[1544] = 100;
+  word[1736] = 2;
+  Put16(word, 1737, 0);
+  word[1739] = 0x05;
+  word[1740] = 2;
+  word[2047] = 1;
+  auto document = ParseWord6(word);
+  ASSERT_TRUE(document) << document.error().message;
+  int skipped = 0;
+  for (const auto& warning : document->warnings) {
+    if (warning.find("skipped Word 6/95 FKP page") != 0)
+      continue;
+    ++skipped;
+    EXPECT_EQ(warning,
+              "skipped Word 6/95 FKP page 2: invalid Word 6/95 FKP payload")
+        << warning;
+  }
+  EXPECT_EQ(skipped, 1);
+  ASSERT_EQ(document->paragraphs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].align, 2);
+  ASSERT_EQ(document->paragraphs[0].runs.size(), 1u);
+  EXPECT_EQ(document->paragraphs[0].runs[0].text, "ABC");
+}
+
 TEST(LegacyWord, LegacyScanSkipsUnlistedOpcodeByCb) {
   // 0x01 is not in kLegacySprmSpecs: [MS-DOC] 2.9.215's Prm0 table has no
   // entry for it, LibreOffice's v6 table starts at sprmPIstd (0x02) and
