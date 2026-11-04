@@ -328,6 +328,22 @@ TEST(M3Comments, ZeroAtrdPost10DttmWritesNoDate) {
   EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
 }
 
+// A DTTM with weekday 7 (bits 29-31 all set) is invalid per [MS-DOC] 2.9.65
+// (wdy must be 0-6), so no w:date attribute is written and nothing warns.
+TEST(M3Comments, WeekdaySevenDttmWritesNoDate) {
+  std::vector<uint8_t> post10(18, 0);
+  PutAtrdPost10(post10, 0, 0x07982284u | 0xE0000000u);
+  SyntheticComments s = BuildComments(post10);
+  auto d = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->comments.size(), 1u);
+  EXPECT_EQ(d->comments[0].date, 0x07982284u | 0xE0000000u);
+  EXPECT_TRUE(d->warnings.empty());
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip);
+  EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
+}
+
 // A truncated or count-short ATRDPOST10 array warns once and leaves every
 // date unset; the comment bodies, authors and initials stay intact.
 TEST(M3Comments, DamagedAtrdPost10WarnsAndKeepsComments) {
@@ -338,8 +354,9 @@ TEST(M3Comments, DamagedAtrdPost10WarnsAndKeepsComments) {
   ASSERT_EQ(d->comments.size(), 1u);
   EXPECT_NE(ParagraphText(d->comments[0].paragraphs[0]), "");
   EXPECT_EQ(d->comments[0].author, "Alice");
-  ASSERT_FALSE(d->warnings.empty());
+  ASSERT_EQ(d->warnings.size(), 1u);
   EXPECT_NE(d->warnings[0].find("skipped comment dates"), std::string::npos);
+  EXPECT_EQ(d->comments[0].date, 0u);
   auto zip = docx::Write(*d);
   ASSERT_TRUE(zip);
   EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
