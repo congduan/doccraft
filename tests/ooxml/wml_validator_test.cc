@@ -274,8 +274,14 @@ TEST(WmlValidatorTest, RejectsBase64BinaryNonZeroPadBits) {
 
 TEST(WmlValidatorTest, AcceptsWhitespaceSeparatedBase64BinaryAttribute) {
   // The W3C lexical rule strips whitespace between quanta, so a value with
-  // leading, trailing or embedded spaces is still valid.
-  for (const char* value : {" QUJD ", "QU JD", "\tQU\nJD\r "}) {
+  // leading, trailing or embedded spaces is still valid. " \t\n " strips to
+  // the empty string, which is in the lexical space. The last sample builds
+  // its whitespace from character references, so the raw tab/newline/CR
+  // characters reach the validator inside the attribute value.
+  const std::string mixed = std::string("\tQU\nJD\r ");
+  const std::string refs = std::string("&#9;QU&#10;JD&#13; ");
+  for (const std::string& value : {std::string(" QUJD "), std::string("QU JD"),
+                                   mixed, refs, std::string(" \t\n ")}) {
     const auto violations = ValidatePart(
         "word/settings.xml",
         WrapSettings(std::string(R"(<w:documentProtection w:hash=")") + value +
