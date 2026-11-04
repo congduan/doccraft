@@ -193,11 +193,14 @@ TEST(WmlValidatorTest, AcceptsLexicallyValidAttributes) {
 }
 
 TEST(WmlValidatorTest, AcceptsValidBase64BinaryAttribute) {
-  const auto violations =
-      ValidatePart("word/settings.xml",
-                   WrapSettings(R"(<w:documentProtection w:hash="AA=="/>)"));
-
-  EXPECT_TRUE(violations.empty()) << Describe(violations);
+  // "AA==" and "QQ==" encode one byte with zero pad bits.
+  for (const char* value : {"AA==", "QQ=="}) {
+    const auto violations = ValidatePart(
+        "word/settings.xml",
+        WrapSettings(std::string(R"(<w:documentProtection w:hash=")") + value +
+                     R"("/>)"));
+    EXPECT_TRUE(violations.empty()) << value << ": " << Describe(violations);
+  }
 }
 
 TEST(WmlValidatorTest, AcceptsOnePadCharacterBase64BinaryAttribute) {
@@ -272,11 +275,24 @@ TEST(WmlValidatorTest, RejectsBase64BinaryNonZeroPadBits) {
 TEST(WmlValidatorTest, AcceptsWhitespaceSeparatedBase64BinaryAttribute) {
   // The W3C lexical rule strips whitespace between quanta, so a value with
   // leading, trailing or embedded spaces is still valid.
-  const auto violations = ValidatePart(
-      "word/settings.xml", WrapSettings(R"(<w:documentProtection w:hash=" QUJD "
-/>)"));
+  for (const char* value : {" QUJD ", "QU JD", "\tQU\nJD\r "}) {
+    const auto violations = ValidatePart(
+        "word/settings.xml",
+        WrapSettings(std::string(R"(<w:documentProtection w:hash=")") + value +
+                     R"("/>)"));
+    EXPECT_TRUE(violations.empty()) << value << ": " << Describe(violations);
+  }
+}
 
-  EXPECT_TRUE(violations.empty()) << Describe(violations);
+TEST(WmlValidatorTest, RejectsUnpaddedBase64BinaryLengthNotMultipleOfFour) {
+  // "QUJDRA" has no padding and its length is not a multiple of four.
+  const auto violations =
+      ValidatePart("word/settings.xml",
+                   WrapSettings(R"(<w:documentProtection w:hash="QUJDRA"/>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
+      << violations[0].message;
 }
 
 TEST(WmlValidatorTest, RejectsTooShortPaddedBase64BinaryAttribute) {

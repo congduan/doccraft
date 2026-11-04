@@ -162,15 +162,18 @@ bool AttributeValueMatches(const AttributeSchema& attribute,
                (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=' ||
                c == ' ' || c == '\t' || c == '\n' || c == '\r';
       });
-      std::string_view packed(value);
-      // W3C canonical form: whitespace may appear between quanta and is
-      // not part of the value.
-      std::size_t skipped = packed.find_first_not_of(" \t\n\r");
-      packed.remove_prefix(std::min(skipped, packed.size()));
-      while (!packed.empty() && std::string_view(" \t\n\r").find(
-                                    packed.back()) != std::string_view::npos) {
-        packed.remove_suffix(1);
-      }
+      const std::string packed = [&] {
+        std::string out;
+        out.reserve(value.size());
+        for (const char c : value) {
+          if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+            out.push_back(c);
+        }
+        return out;
+      }();
+      // W3C lexical rule: whitespace may appear between quanta and is not
+      // part of the value, so all of it is stripped above — not just the
+      // leading and trailing characters.
       const std::size_t pad_start = packed.find('=');
       const bool has_padding = pad_start != std::string_view::npos;
       // Total length a multiple of four, always; with padding, one or two
