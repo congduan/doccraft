@@ -47,10 +47,38 @@ struct ParticleNode {
   uint16_t slot_count;
 };
 
+enum class AttributeType : uint8_t {
+  kString,
+  kOnOff,
+  kEnum,
+  kDateTime,
+  kInt16,
+  kInt32,
+  kInt64,
+  kInteger,
+  kUInt16,
+  kUInt32,
+  kByte,
+  kHexBinary,
+  kBase64Binary,
+  kOther,
+};
+
+struct AttributeSchema {
+  const char* local;
+  AttributeType type;
+};
+
 struct ElementSchema {
   const char* ns;
   const char* local;
   uint16_t particle;  // Index into kParticles; kNoIndex means "no children".
+  // Attribute rows live in kAttributes[first_attribute ... + attribute_count],
+  // sorted by local name for binary search. The union keeps names unique per
+  // slice; a rare three-way type conflict (w:default/@val) collapses to
+  // kString, the union's loosest check.
+  uint16_t first_attribute;
+  uint16_t attribute_count;
 };
 
 namespace generated {
@@ -60,6 +88,8 @@ extern const std::size_t kParticleCount;
 extern const uint16_t kChildSlots[];
 extern const ElementSchema kElements[];
 extern const std::size_t kElementCount;
+extern const AttributeSchema kAttributes[];
+extern const std::size_t kAttributeCount;
 
 }  // namespace generated
 

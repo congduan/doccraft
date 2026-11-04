@@ -37,6 +37,32 @@ KIND = {
     "Any": "kAny",
 }
 
+# SDK attribute scalar types mapped to validator check kinds. kOnOff, the
+# integer widths and the two binary types carry a lexical check; kString,
+# kEnum and kDateTime are recorded distinctly (unknown-attribute detection
+# still applies) but their value spaces are not validated yet: EnumValue
+# needs the member table and DateTimeValue accepts many formats.
+ATTRIBUTE_TYPE = {
+    "StringValue": "kString",
+    "OnOffValue": "kOnOff",
+    "EnumValue`1": "kEnum",
+    "DateTimeValue": "kDateTime",
+    "Int16Value": "kInt16",
+    "Int32Value": "kInt32",
+    "Int64Value": "kInt64",
+    "IntegerValue": "kInteger",
+    "UInt16Value": "kUInt16",
+    "UInt32Value": "kUInt32",
+    "ByteValue": "kByte",
+    "HexBinaryValue": "kHexBinary",
+    "Base64BinaryValue": "kBase64Binary",
+    "TrueFalseValue": "kOther",
+    "TrueFalseBlankValue": "kOther",
+    "BooleanValue": "kOther",
+    "SingleValue": "kOther",
+    "DecimalValue": "kOther",
+}
+
 TEMPLATE_HEADER = """\
 // Copyright 2026 The doccraft Authors. All Rights Reserved.
 //
@@ -87,10 +113,38 @@ struct ParticleNode {{
   uint16_t slot_count;
 }};
 
+enum class AttributeType : uint8_t {{
+  kString,
+  kOnOff,
+  kEnum,
+  kDateTime,
+  kInt16,
+  kInt32,
+  kInt64,
+  kInteger,
+  kUInt16,
+  kUInt32,
+  kByte,
+  kHexBinary,
+  kBase64Binary,
+  kOther,
+}};
+
+struct AttributeSchema {{
+  const char* local;
+  AttributeType type;
+}};
+
 struct ElementSchema {{
   const char* ns;
   const char* local;
   uint16_t particle;  // Index into kParticles; kNoIndex means "no children".
+  // Attribute rows live in kAttributes[first_attribute ... + attribute_count],
+  // sorted by local name for binary search. The union keeps names unique per
+  // slice; a rare three-way type conflict (w:default/@val) collapses to
+  // kString, the union's loosest check.
+  uint16_t first_attribute;
+  uint16_t attribute_count;
 }};
 
 namespace generated {{
@@ -100,6 +154,8 @@ extern const std::size_t kParticleCount;
 extern const uint16_t kChildSlots[];
 extern const ElementSchema kElements[];
 extern const std::size_t kElementCount;
+extern const AttributeSchema kAttributes[];
+extern const std::size_t kAttributeCount;
 
 }}  // namespace generated
 
@@ -109,7 +165,7 @@ extern const std::size_t kElementCount;
 """
 
 
-def emit_source(sdk, particles, slots, elements):
+def emit_source(sdk, particles, slots, elements, attributes):
     out = []
     out.append(
         "// Copyright 2026 The doccraft Authors. All Rights Reserved.\n"
@@ -159,9 +215,17 @@ def emit_source(sdk, particles, slots, elements):
     out.append("const std::size_t kParticleCount = sizeof(kParticles) / "
                "sizeof(kParticles[0]);\n\n")
 
+    out.append("const AttributeSchema kAttributes[] = {\n")
+    for local, type_code in attributes:
+        out.append('    {"%s", AttributeType::%s},\n' % (local, type_code))
+    out.append("};\n\n")
+    out.append("const std::size_t kAttributeCount = sizeof(kAttributes) / "
+               "sizeof(kAttributes[0]);\n\n")
+
     out.append("const ElementSchema kElements[] = {\n")
-    for ns, local, particle in elements:
-        out.append('    {"%s", "%s", %d},\n' % (ns, local, particle))
+    for ns, local, particle, first_attribute, attribute_count in elements:
+        out.append('    {"%s", "%s", %d, %d, %d},\n'
+                   % (ns, local, particle, first_attribute, attribute_count))
     out.append("};\n\n")
     out.append("const std::size_t kElementCount = sizeof(kElements) / "
                "sizeof(kElements[0]);\n\n")
@@ -187,11 +251,14 @@ def main():
     # positives. Documented in docs/KNOWN-SIMPLIFICATIONS.md.
     groups = {}
     order_keys = []
+    attrs_by_key = {}
     for entry in entries:
         key = (entry["ns"], entry["local"])
         if key not in groups:
             groups[key] = []
             order_keys.append(key)
+            attrs_by_key[key] = []
+        attrs_by_key[key].extend(entry.get("attributes") or [])
         groups[key].extend(entry.get("particle") or [])
 
     index = {key: i for i, key in enumerate(order_keys)}
@@ -242,6 +309,7 @@ def main():
     empty = {"k": "Sequence", "min": 1, "max": 1}
     merged = 0
     elements = []
+    attributes = []
     for key in order_keys:
         roots = groups[key]
         # A null particle means a leaf element: an empty sequence accepts no
@@ -253,7 +321,46 @@ def main():
         else:
             tree = emit({"k": "Choice", "min": 1, "max": 1, "ch": roots})
             merged += 1
-        elements.append((key[0], key[1], tree))
+        # Union the attribute declarations of every CLR entry that shares this
+        # qualified name, keyed by attribute local name. Attributes are
+        # qualified in practice (the WML table has exactly one unqualified
+        # name, w:customXml/@uri), so matching by local keeps the slice small;
+        # a mismatch would let a foreign attribute pass under a local name,
+        # which the validator closes by skipping attributes from other
+        # namespaces entirely.
+        # Union the attribute declarations of every CLR entry sharing this
+        # qualified name, keyed by attribute local name. Attributes are
+        # qualified in practice (the WML table's only unqualified name is
+        # w:customXml/@uri, which sits on a cross-namespace element the
+        # validator never reaches), so the same-namespace filter keeps the
+        # slice exact; the validator also skips attributes from other
+        # namespaces outright.
+        types_by_local = {}
+        for attribute in attrs_by_key.get(key, ()):
+            if attribute["ns"] != key[0]:
+                continue
+            type_code = ATTRIBUTE_TYPE.get(attribute["type"], "kOther")
+            previous = types_by_local.get(attribute["local"])
+            if previous is None or previous == type_code:
+                types_by_local[attribute["local"]] = type_code
+                continue
+            # One name, different SDK types across merged CLR entries: keep
+            # whichever check accepts the union of both value spaces. The
+            # unimplemented checks accept any lexical form; two conflicting
+            # implemented checks fall back to the unchecked kString.
+            loose = {"kString", "kEnum", "kDateTime"}
+            if previous in loose:
+                pass  # keep the previous entry; it accepts any lexical form
+            elif type_code in loose:
+                types_by_local[attribute["local"]] = type_code
+            else:
+                types_by_local[attribute["local"]] = "kString"
+        first_attribute = len(attributes)
+        for local in sorted(types_by_local):
+            attributes.append((local, types_by_local[local]))
+        elements.append(
+            (key[0], key[1], tree, first_attribute,
+             len(attributes) - first_attribute))
 
     order = sorted(range(len(elements)),
                    key=lambda i: (elements[i][1], elements[i][0]))
@@ -278,13 +385,15 @@ def main():
     (out_dir / "wml_schema_data.h").write_text(
         TEMPLATE_HEADER.format(sdk=sdk), encoding="utf-8")
     (out_dir / "wml_schema_data.cc").write_text(
-        emit_source(sdk, particles, slots, elements), encoding="utf-8")
+        emit_source(sdk, particles, slots, elements, attributes),
+        encoding="utf-8")
 
     kinds = {}
     for node in particles:
         kinds[node["kind"]] = kinds.get(node["kind"], 0) + 1
     print("elements=%d particles=%d slots=%d %s"
           % (len(elements), len(particles), len(slots), kinds))
+    print("attributes=%d" % len(attributes))
     return 0
 
 
