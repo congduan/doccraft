@@ -1022,6 +1022,63 @@ TEST(M5FloatingImages, TruncatedContainerChildKeepsSiblings) {
   EXPECT_EQ(result->front().shape->id, 1026U);
 }
 
+TEST(M5FloatingImages, NestedContainerTruncationWarnsWithOuterOffset) {
+  // A plain nested container (neither a SpContainer nor a BStore special
+  // case) whose scan stops on a truncated record must still produce the one
+  // "skipped drawing records" warning, with the offset counted from the top
+  // scan start. Before the r80 fix the truncation flag was dropped at the
+  // container recursion and no warning was emitted. The damaged container
+  // lives in the first (label 0) story because only those are indexed.
+  auto s = Floating(0x54, /*delayed=*/true, 1, /*shape_type=*/1,
+                    /*has_pib=*/false);
+  // Rebuild the first story's DgContainer body: wrap the intact shape
+  // container in a plain F003 container and place a garbage record header
+  // after it, inside the F003 body. Layout of the original story record at
+  // drawing offset 61: 8-byte header + 24-byte body (the F004 shape
+  // container from the Floating() helper without a pib).
+  std::vector<uint8_t> fsp(8);
+  Put32(fsp, 0, 1026);
+  const std::vector<uint8_t> shape =
+      Art(0xF004, 15, Art(0xF00A, (1 << 4) | 2, fsp));
+  std::vector<uint8_t> tail(8);
+  Put16(tail, 0, 0x0F32);
+  Put16(tail, 2, 0x3BEB);
+  Put32(tail, 4, 0x9A8B0000);  // Declared length runs past the stream.
+  std::vector<uint8_t> f003 = Art(0xF003, 15, shape);
+  Append(f003, tail);
+  const std::vector<uint8_t> dg = Art(0xF002, 15, f003);
+  const size_t story_at = 61;  // group (60) + label (1).
+  const size_t plc_at = s.fib.spa_main.offset;
+  ASSERT_EQ(plc_at, story_at + 32);
+  static_cast<void>(
+      s.table.erase(s.table.begin() + static_cast<std::ptrdiff_t>(story_at),
+                    s.table.begin() + static_cast<std::ptrdiff_t>(plc_at)));
+  s.table.insert(s.table.begin() + static_cast<std::ptrdiff_t>(story_at),
+                 dg.begin(), dg.end());
+  const size_t moved = dg.size() - (plc_at - story_at);
+  s.fib.drawing_group.size = static_cast<uint32_t>(s.table.size()) -
+                             s.fib.drawing_group.offset - s.fib.spa_main.size;
+  s.fib.spa_main.offset = static_cast<uint32_t>(plc_at + moved);
+  static_cast<void>(moved);
+
+  std::vector<std::string> warnings;
+  const auto result =
+      doc::ReadFloatingPictures(s.word, s.table, s.fib, &warnings);
+  ASSERT_TRUE(result) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  EXPECT_EQ(result->front().shape->id, 1026U);
+  ASSERT_EQ(warnings.size(), 1U) << "expected exactly one truncation warning";
+  const std::string& warning = warnings.front();
+  EXPECT_NE(warning.find("extends past the end of the stream"),
+            std::string::npos)
+      << warning;
+  // The garbage header sits 8 (F003 header) + 24 (shape container extent)
+  // = 32 bytes into the F003 body, and the F003 record starts at the very
+  // beginning of the DgContainer body scan, so the top-level offset is
+  // exactly 32 (8-byte F003 header + 24 bytes of shape container).
+  EXPECT_NE(warning.find("offset 32 "), std::string::npos) << warning;
+}
+
 TEST(M5FloatingImages, DelayedMetafileAggregateBudgetBeforeInflate) {
   auto s = Floating(0x54, true, 4);
   auto picf =

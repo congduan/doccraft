@@ -496,9 +496,8 @@ std::expected<std::optional<size_t>, Error> IndexArt(Bytes bytes,
         auto child = ArtNext(children);
         if (!child)
           return std::unexpected(child.error());
-        if (!*child) {
+        if (!*child)
           return offset - record.body.size() + child_offset;
-        }
         const ArtRecord& shape_record = **child;
         child_offset += detail::kEscherHeaderSize + shape_record.body.size();
         if (shape_record.type == detail::kFsp) {
@@ -594,6 +593,15 @@ std::expected<std::optional<size_t>, Error> IndexArt(Bytes bytes,
                              record.type == detail::kBStoreContainer);
       if (!nested)
         return nested;
+      // A nested container that stopped on a truncated record soft-ends the
+      // whole scan: translate the child offset into this scan's coordinates
+      // and propagate it so the top level keeps its one-warning promise.
+      // Returning immediately keeps the earliest truncation point, which is
+      // also the smallest offset if several containers are damaged. `offset`
+      // already counts this record, so the container body starts at
+      // `offset - record.body.size()` (mirroring the SpContainer branch).
+      if (nested->has_value())
+        return offset - record.body.size() + **nested;
     }
   }
   return std::nullopt;
