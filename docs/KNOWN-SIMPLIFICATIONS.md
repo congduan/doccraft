@@ -269,11 +269,17 @@
   1258/932/936/949/950 等文本按 CP1252 近似输出（拉丁重音正确、其他文种变成乱码），
   `SupportsCodepage()` 对这些代码页返回 false，`convert` 的 SummaryInformation 代码页
   探测已按该返回值降级。可在 WASM 上补内置表的后续批解决，见 `docs/DESIGN.md` §2.1。
-- glibc 的 CP1255（希伯来）与 CP1258（越南）是**有状态**映射：单字节输入时它先把字符
-  留在内部状态里、不产出 UTF-8，直到下一个字节到达才吐出。`base::DecodeAnsiChar` 的接口
-  是「一次一个字符」，因此这两种代码页的文本会整体后移一个字符、末尾丢失一个字符
-  （重构前即如此，非本批引入；`tests/charset_test.cc` 因此不对这两页做单字节断言）。
-  Windows 的 `MultiByteToWideChar` 无此状态，两个平台对这两页的输出因此不同。修法需要
-  把解码接口改成有状态的流式 API，会触及 `src/doc/`，留待后续批。
+> r72 修复（glibc 有状态 CP1255/1258 的 flush）：`DecodeBackendChar` 在每次逐字节转换
+  成功后立即 flush 转换状态（`iconv(cd, nullptr, nullptr, &out, &outleft)`），滞留字符
+  随即经同一代码页解码输出，与整段转换逐字节一致。有状态页从此每个字节自包含：压缩
+  piece 不再后移一位/丢失末字符，Windows（`MultiByteToWideChar` 无状态）与 iconv 平台
+  对这两页的输出也恢复逐字节一致。无状态页与无状态后端 flush 不产出，行为不变；逐字节
+  的 `iconv(cd, nullptr, nullptr, nullptr, nullptr)` 状态复位保留，作为 EILSEQ 之后的
+  兜底。实证：C 探针直接调 iconv，CP1255 单字节 0xE0 被消费但产出 0 字节，flush 后产出
+  `d7 90`（U+05D0）。回归：`CharsetTest.StatefulPagesEmitEachByteImmediately`、
+  `StatefulPagesDecodeRunsByteByByte`、`StatefulPageSingleByteRunNotLost`、
+  `StatefulPagesInvalidByteThenValidByte`、
+  `PieceTableTest.DecodesCompressedHebrewPiecesWithoutShift`；
+  `SupportedCodepagesDecodeKnownLetters` 重新纳入 1255/1258 单字节断言。
 - `SupportsCodepage(10000)`（Macintosh）在 iconv 目标上为 true、Windows 上为 false：
   10000 不是 Windows 代码页，`MultiByteToWideChar` 不认识它。
