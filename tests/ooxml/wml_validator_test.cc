@@ -255,6 +255,56 @@ TEST(WmlValidatorTest, RejectsShortBase64BinaryAttribute) {
   }
 }
 
+TEST(WmlValidatorTest, RejectsBase64BinaryNonZeroPadBits) {
+  // "AB==" and "AAB=" have legal shapes, but the discarded low bits of the
+  // final quantum are non-zero, which the W3C lexical rule forbids.
+  for (const char* value : {"AB==", "AAB="}) {
+    const auto violations = ValidatePart(
+        "word/settings.xml",
+        WrapSettings(std::string(R"(<w:documentProtection w:hash=")") + value +
+                     R"("/>)"));
+    ASSERT_EQ(violations.size(), 1u) << value << ": " << Describe(violations);
+    EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
+        << violations[0].message;
+  }
+}
+
+TEST(WmlValidatorTest, AcceptsWhitespaceSeparatedBase64BinaryAttribute) {
+  // The W3C lexical rule strips whitespace between quanta, so a value with
+  // leading, trailing or embedded spaces is still valid.
+  const auto violations = ValidatePart(
+      "word/settings.xml", WrapSettings(R"(<w:documentProtection w:hash=" QUJD "
+/>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, RejectsTooShortPaddedBase64BinaryAttribute) {
+  // A padded value needs at least two data characters before the padding, so
+  // "==" and "=++=" have no final quantum to check and are rejected outright.
+  for (const char* value : {"==", "=A", "A="}) {
+    const auto violations = ValidatePart(
+        "word/settings.xml",
+        WrapSettings(std::string(R"(<w:documentProtection w:hash=")") + value +
+                     R"("/>)"));
+    ASSERT_EQ(violations.size(), 1u) << value << ": " << Describe(violations);
+    EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
+        << violations[0].message;
+  }
+}
+
+TEST(WmlValidatorTest, RejectsBase64BinaryOnlyPaddingOrShortTail) {
+  for (const char* value : {"====", "A==="}) {
+    const auto violations = ValidatePart(
+        "word/settings.xml",
+        WrapSettings(std::string(R"(<w:documentProtection w:hash=")") + value +
+                     R"("/>)"));
+    ASSERT_EQ(violations.size(), 1u) << value << ": " << Describe(violations);
+    EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
+        << violations[0].message;
+  }
+}
+
 TEST(WmlValidatorTest, IgnoresUnprefixedAttributeDespiteDefaultNamespace) {
   // XML namespaces do not apply to unprefixed attributes, so a default
   // namespace declaration must not pull "bogus" into the WML namespace.
@@ -310,6 +360,10 @@ TEST(WmlValidatorTest, RejectsNonNumericUnboundedIntegerAttribute) {
              R"("/></w:r></w:p>)"));
     ASSERT_EQ(violations.size(), 1u) << value << ": " << Describe(violations);
     EXPECT_NE(violations[0].message.find("id"), std::string::npos)
+        << violations[0].message;
+    // The unknown-attribute path would also name "id": assert the targeted
+    // xsd:integer lexical branch was hit, not merely some violation.
+    EXPECT_NE(violations[0].message.find("xsd:integer"), std::string::npos)
         << violations[0].message;
   }
 }

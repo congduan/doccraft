@@ -18,6 +18,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -152,23 +153,60 @@ bool AttributeValueMatches(const AttributeSchema& attribute,
       return false;
     }
     case AttributeType::kBase64Binary: {
-      // xsd:base64Binary with padding: length a multiple of four, only the
-      // base64 alphabet, and '=' only as the final one or two characters.
-      // The empty string is in the lexical space.
+      // xsd:base64Binary: after stripping whitespace, the length is a
+      // multiple of four, only the base64 alphabet remains, '=' appears
+      // only as the final one or two characters, and the six-bit values
+      // under any trailing padding are zero (the pad bits must be zero).
       const bool lexical = std::all_of(value.begin(), value.end(), [](char c) {
         return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-               (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=';
+               (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=' ||
+               c == ' ' || c == '\t' || c == '\n' || c == '\r';
       });
-      const std::size_t pad_start = value.find('=');
+      std::string_view packed(value);
+      // W3C canonical form: whitespace may appear between quanta and is
+      // not part of the value.
+      std::size_t skipped = packed.find_first_not_of(" \t\n\r");
+      packed.remove_prefix(std::min(skipped, packed.size()));
+      while (!packed.empty() && std::string_view(" \t\n\r").find(
+                                    packed.back()) != std::string_view::npos) {
+        packed.remove_suffix(1);
+      }
+      const std::size_t pad_start = packed.find('=');
       const bool has_padding = pad_start != std::string_view::npos;
       // Total length a multiple of four, always; with padding, one or two
       // '=' at the very end — every character after the first '=' is '='.
       const bool padding_shape =
-          value.size() % 4 == 0 &&
-          (!has_padding || (value.size() - pad_start <= 2 &&
-                            value.substr(pad_start).find_first_not_of('=') ==
+          packed.size() % 4 == 0 &&
+          (!has_padding || (packed.size() - pad_start <= 2 &&
+                            packed.substr(pad_start).find_first_not_of('=') ==
                                 std::string_view::npos));
-      if (lexical && padding_shape)
+      // One padding character discards two bits, two discard four: the
+      // non-padding characters of the final quantum must carry zeroes in
+      // the discarded low bits.
+      bool pad_bits_clear = true;
+      if (has_padding && packed.size() >= 3) {
+        const auto six_bits = [](char c) {
+          constexpr char kAlphabet[] =
+              "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345678"
+              "9+/";
+          const char* at = std::strchr(kAlphabet, c);
+          return at == nullptr ? -1 : static_cast<int>(at - kAlphabet);
+        };
+        if (packed.size() - pad_start == 2) {
+          const int high = six_bits(packed[packed.size() - 3]);
+          // Two '=' drop four bits: low nibble of the last data sextet
+          // must be zero.
+          pad_bits_clear = high >= 0 && (high & 0x0f) == 0;
+        } else {
+          const int high = six_bits(packed[packed.size() - 3]);
+          const int low = six_bits(packed[packed.size() - 2]);
+          // One '=' drops two bits: low pair of the combined twelve bits
+          // must be zero.
+          pad_bits_clear =
+              high >= 0 && low >= 0 && ((high << 6 | low) & 0x03) == 0;
+        }
+      }
+      if (lexical && padding_shape && pad_bits_clear)
         return true;
       *why_not = "is not a valid xsd:base64Binary value";
       return false;
