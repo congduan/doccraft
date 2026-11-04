@@ -220,7 +220,7 @@ TEST(WmlValidatorTest, AcceptsEmptyBase64BinaryAttribute) {
 }
 
 TEST(WmlValidatorTest, RejectsBase64BinaryPaddingNotAtEnd) {
-  // "AA=A" has the right length and two '=' characters, but the byte after
+  // "AA=A" has the right length and '=' in the middle, but the byte after
   // the first '=' is not padding.
   const auto violations =
       ValidatePart("word/settings.xml",
@@ -239,6 +239,20 @@ TEST(WmlValidatorTest, RejectsBase64BinaryPaddingBeforeData) {
   ASSERT_EQ(violations.size(), 1u) << Describe(violations);
   EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
       << violations[0].message;
+}
+
+TEST(WmlValidatorTest, RejectsShortBase64BinaryAttribute) {
+  // Without padding the length must still be a multiple of four: "A" and
+  // "AAA" are base64 alphabet characters but not complete quanta.
+  for (const char* value : {"A", "AAA"}) {
+    const auto violations = ValidatePart(
+        "word/settings.xml",
+        WrapSettings(std::string(R"(<w:documentProtection w:hash=")") + value +
+                     R"("/>)"));
+    ASSERT_EQ(violations.size(), 1u) << value << ": " << Describe(violations);
+    EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
+        << violations[0].message;
+  }
 }
 
 TEST(WmlValidatorTest, IgnoresUnprefixedAttributeDespiteDefaultNamespace) {
@@ -287,13 +301,26 @@ TEST(WmlValidatorTest, AcceptsZeroPaddedUnboundedIntegerAttribute) {
 }
 
 TEST(WmlValidatorTest, RejectsNonNumericUnboundedIntegerAttribute) {
-  const auto violations = ValidatePart(
-      "word/document.xml",
-      Wrap(R"(<w:p><w:r><w:endnoteReference w:id="12a"/></w:r></w:p>)"));
+  // Sign-only, doubled sign, decimal point and empty are not xsd:integer
+  // lexical forms.
+  for (const char* value : {"+", "-", "++1", "1.0", ""}) {
+    const auto violations = ValidatePart(
+        "word/document.xml",
+        Wrap(std::string(R"(<w:p><w:r><w:endnoteReference w:id=")") + value +
+             R"("/></w:r></w:p>)"));
+    ASSERT_EQ(violations.size(), 1u) << value << ": " << Describe(violations);
+    EXPECT_NE(violations[0].message.find("id"), std::string::npos)
+        << violations[0].message;
+  }
+}
 
-  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
-  EXPECT_NE(violations[0].message.find("id"), std::string::npos)
-      << violations[0].message;
+TEST(WmlValidatorTest, AcceptsSignedUnboundedIntegerAttribute) {
+  const auto violations =
+      ValidatePart("word/document.xml",
+                   Wrap(R"(<w:p><w:r><w:endnoteReference w:id="-42"/></w:r>)"
+                        R"(</w:p>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
 }
 
 TEST(WmlValidatorTest, SkipsXmlReservedAndExtensionAttributes) {

@@ -161,13 +161,13 @@ bool AttributeValueMatches(const AttributeSchema& attribute,
       });
       const std::size_t pad_start = value.find('=');
       const bool has_padding = pad_start != std::string_view::npos;
-      // Padded form: total length a multiple of four and one or two '=' at
-      // the very end — every character after the first '=' is padding.
+      // Total length a multiple of four, always; with padding, one or two
+      // '=' at the very end — every character after the first '=' is '='.
       const bool padding_shape =
-          !has_padding ||
-          (value.size() % 4 == 0 && value.size() - pad_start <= 2 &&
-           value.substr(pad_start).find_first_not_of('=') ==
-               std::string_view::npos);
+          value.size() % 4 == 0 &&
+          (!has_padding || (value.size() - pad_start <= 2 &&
+                            value.substr(pad_start).find_first_not_of('=') ==
+                                std::string_view::npos));
       if (lexical && padding_shape)
         return true;
       *why_not = "is not a valid xsd:base64Binary value";
