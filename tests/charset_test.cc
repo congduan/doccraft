@@ -98,6 +98,66 @@ TEST(CharsetTest, ZeroCodePageFallsBackToCp1252) {
   EXPECT_EQ(Decode(0, {0x80}), "\xE2\x82\xAC");
 }
 
+// glibc implements CP1255 (Hebrew) and CP1258 (Vietnamese) as stateful iconv
+// conversions: a high byte converts successfully but its character is held in
+// the conversion state until the next byte is converted. The character-at-a-
+// time decoder must still emit that character immediately (via flush), or the
+// last character of every run is lost and the whole run shifts one position.
+TEST(CharsetTest, StatefulPagesEmitEachByteImmediately) {
+  if (!SupportsCodepage(1255)) {
+    GTEST_SKIP() << "no backend for CP1255";
+  }
+  // Alef (0xE0) then bet (0xE1): each byte must produce its own character, in
+  // order, in a single call.
+  size_t used = 0;
+  EXPECT_EQ(Decode(1255, {0xE0}, &used), "\xD7\x90");
+  EXPECT_EQ(used, 1u);
+  EXPECT_EQ(Decode(1255, {0xE1}, &used), "\xD7\x91");
+  EXPECT_EQ(used, 1u);
+}
+
+TEST(CharsetTest, StatefulPagesDecodeRunsByteByByte) {
+  if (!SupportsCodepage(1255)) {
+    GTEST_SKIP() << "no backend for CP1255";
+  }
+  // A whole word, one character-at-a-time call per byte: shalom
+  // (shin 0xF9, lamed 0xEC, mem 0xEE, vav 0xE5, final mem 0xED).
+  const std::vector<uint8_t> word = {0xF9, 0xEC, 0xEE, 0xE5, 0xED};
+  std::string out;
+  for (uint8_t byte : word) {
+    const size_t used = DecodeAnsiChar(1255, Bytes({byte}), out);
+    ASSERT_EQ(used, 1u) << "byte " << std::hex << static_cast<int>(byte);
+  }
+  // The reference is a whole-run iconv conversion of the same bytes followed
+  // by a flush; the byte-by-byte path must reproduce it exactly, including
+  // the final character a stateful backend would otherwise hold back.
+  EXPECT_EQ(out, "\xD7\xA9\xD7\x9C\xD7\x9E\xD7\x95\xD7\x9D");
+}
+
+TEST(CharsetTest, StatefulPageSingleByteRunNotLost) {
+  if (!SupportsCodepage(1258)) {
+    GTEST_SKIP() << "no backend for CP1258";
+  }
+  // CP1258 0xE0 (a with grave) is held back by a stateful backend when it is
+  // the last byte of a run; the flush must recover it.
+  EXPECT_EQ(Decode(1258, {0xE0}), "\xC3\xA0");
+  // And a CP1255 last byte mid-word too.
+  EXPECT_EQ(Decode(1255, {0xE9}), "\xD7\x99");
+}
+
+// The invalid-byte contract must survive the stateful pages: an undefined
+// position yields U+FFFD (returned consumed == 0) and does not poison the
+// next character.
+TEST(CharsetTest, StatefulPagesInvalidByteThenValidByte) {
+  if (!SupportsCodepage(1255)) {
+    GTEST_SKIP() << "no backend for CP1255";
+  }
+  std::string out;
+  EXPECT_EQ(DecodeAnsiChar(1255, Bytes({0xFF}), out), 0u);
+  EXPECT_EQ(DecodeAnsiChar(1255, Bytes({0xE0}), out), 1u);
+  EXPECT_EQ(out, "\xD7\x90");
+}
+
 // The platform backend (iconv on POSIX, MultiByteToWideChar on Windows) must
 // agree with what SupportsCodepage() reports. These are the tests that actually
 // exercise the Windows backend in CI; on a build with no backend (WebAssembly)
@@ -126,12 +186,14 @@ TEST(CharsetTest, SupportedCodepagesDecodeKnownLetters) {
     uint8_t byte;
     const char* utf8;
   };
-  // Thai ko kai and Arabic alef. CP1255 and CP1258 are left out on purpose:
-  // glibc implements both as stateful tables that hold a character back until
-  // the next byte arrives, so a single byte cannot be asserted here; the known
-  // gap is recorded in docs/KNOWN-SIMPLIFICATIONS.md.
+  // Thai ko kai, Arabic alef, Hebrew yod and Vietnamese a with grave. CP1255
+  // and CP1258 used to be left out: glibc implements both as stateful tables
+  // that held a character back until the next byte arrived, so a single byte
+  // produced no output; the decoder now flushes after every byte, which makes
+  // single-byte assertions possible again.
   for (const Sample& sample :
-       {Sample{874, 0xA1, "\xE0\xB8\x81"}, Sample{1256, 0xC7, "\xD8\xA7"}}) {
+       {Sample{874, 0xA1, "\xE0\xB8\x81"}, Sample{1256, 0xC7, "\xD8\xA7"},
+        Sample{1255, 0xE9, "\xD7\x99"}, Sample{1258, 0xE0, "\xC3\xA0"}}) {
     SCOPED_TRACE(sample.codepage);
     if (!SupportsCodepage(sample.codepage))
       continue;

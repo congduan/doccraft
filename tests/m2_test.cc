@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/charset.h"
 #include "cfb/cfb_reader.h"
 #include "doc/fib.h"
 #include "doc/format.h"
@@ -311,6 +312,37 @@ TEST(PieceTableTest, DecodesCp932HalfWidthKatakana) {
   auto text = doccraft::doc::ExtractText(word, table, *fib);
   ASSERT_TRUE(text) << text.error().message;
   EXPECT_EQ(*text, "\xEF\xBD\xB1");
+}
+
+// glibc implements CP1255 (Hebrew) as a stateful iconv conversion: a high
+// byte converts successfully but its character is held in the conversion
+// state until the next byte is converted. The per-character decoder must
+// flush after every byte, or every compressed-piece run loses its last
+// character and shifts one position back. The bytes spell shalom
+// (shin 0xF9, lamed 0xEC, mem 0xEE, vav 0xE5, final mem 0xED).
+TEST(PieceTableTest, DecodesCompressedHebrewPiecesWithoutShift) {
+  std::vector<uint8_t> word = Fib(0, 0x040D);
+  Put32(word, 158 + 33 * 8, 21);
+  auto fib = doccraft::doc::ParseFib(word);
+  ASSERT_TRUE(fib);
+  ASSERT_EQ(fib->codepage, 1255u);
+  if (!doccraft::base::SupportsCodepage(1255)) {
+    GTEST_SKIP() << "no backend for CP1255";
+  }
+  std::vector<uint8_t> table(80);
+  table[40] = 2;
+  Put32(table, 41, 16);
+  Put32(table, 45, 0);
+  Put32(table, 49, 5);
+  Put16(table, 53, 0);
+  Put32(table, 55, 0x40000000u | (512u * 2));
+  Put16(table, 59, 0);
+  constexpr uint8_t kShalom[] = {0xF9, 0xEC, 0xEE, 0xE5, 0xED};
+  for (size_t i = 0; i < sizeof(kShalom); ++i)
+    word[512 + i] = kShalom[i];
+  auto text = doccraft::doc::ExtractText(word, table, *fib);
+  ASSERT_TRUE(text) << text.error().message;
+  EXPECT_EQ(*text, "\xD7\xA9\xD7\x9C\xD7\x9E\xD7\x95\xD7\x9D");
 }
 
 TEST(PieceTableTest, UnknownCodepageKeepsCp1252) {

@@ -174,7 +174,8 @@ bool BackendSupports(uint32_t codepage) {
 }
 
 // Converts exactly `len` bytes (1 or 2) as one character; false when they do
-// not form one character in `codepage`.
+// not form one character in `codepage`. Resets the conversion state first, so
+// callers get stateless per-character semantics.
 bool DecodeBackendChar(uint32_t codepage, const uint8_t* bytes, size_t len,
                        std::string* out) {
   iconv_t cd = CachedIconv(codepage);
@@ -191,7 +192,21 @@ bool DecodeBackendChar(uint32_t codepage, const uint8_t* bytes, size_t len,
   if (result == static_cast<size_t>(-1) || source_left != 0) {
     return false;
   }
-  out->append(buffer.data(), buffer.size() - target_left);
+  // glibc implements two of the pages a .doc can name (1255 Hebrew, 1258
+  // Vietnamese) as stateful conversions: a high byte converts successfully
+  // but its character is held in the conversion state and only emitted when
+  // the next byte is converted (verified by direct probe: feeding 0xE0 alone
+  // consumes the byte and produces no output; feeding 0xE1 next emits 0xE0's
+  // character). A character-at-a-time caller would lose the last character
+  // and shift the whole run one position back. Flushing the conversion right
+  // after each byte makes every call self-contained: the held character is
+  // emitted immediately, decoded through the same page (so the output matches
+  // what a whole-run conversion produces byte for byte). Stateless pages and
+  // stateless backends emit nothing on flush, so this is a no-op for them.
+  char* flush_target = target;
+  size_t flush_left = target_left;
+  iconv(cd, nullptr, nullptr, &flush_target, &flush_left);
+  out->append(buffer.data(), buffer.size() - flush_left);
   return true;
 }
 #elif defined(_WIN32)
