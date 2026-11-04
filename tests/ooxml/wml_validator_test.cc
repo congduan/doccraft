@@ -200,6 +200,102 @@ TEST(WmlValidatorTest, AcceptsValidBase64BinaryAttribute) {
   EXPECT_TRUE(violations.empty()) << Describe(violations);
 }
 
+TEST(WmlValidatorTest, AcceptsOnePadCharacterBase64BinaryAttribute) {
+  // "QQ8=" encodes two bytes: length a multiple of four with a single
+  // trailing '=' is a legal xsd:base64Binary lexical form.
+  const auto violations =
+      ValidatePart("word/settings.xml",
+                   WrapSettings(R"(<w:documentProtection w:hash="QQ8="/>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, AcceptsEmptyBase64BinaryAttribute) {
+  // xsd:base64Binary's lexical space includes the empty string.
+  const auto violations =
+      ValidatePart("word/settings.xml",
+                   WrapSettings(R"(<w:documentProtection w:hash=""/>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, RejectsBase64BinaryPaddingNotAtEnd) {
+  // "AA=A" has the right length and two '=' characters, but the byte after
+  // the first '=' is not padding.
+  const auto violations =
+      ValidatePart("word/settings.xml",
+                   WrapSettings(R"(<w:documentProtection w:hash="AA=A"/>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, RejectsBase64BinaryPaddingBeforeData) {
+  const auto violations =
+      ValidatePart("word/settings.xml",
+                   WrapSettings(R"(<w:documentProtection w:hash="A=AA"/>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, IgnoresUnprefixedAttributeDespiteDefaultNamespace) {
+  // XML namespaces do not apply to unprefixed attributes, so a default
+  // namespace declaration must not pull "bogus" into the WML namespace.
+  const auto violations =
+      ValidatePart("word/document.xml",
+                   Wrap(R"(<w:p xmlns="http://schemas.openxmlformats.org/)"
+                        R"(wordprocessingml/2006/main" bogus="1"><w:r>)"
+                        R"(<w:t>x</w:t></w:r></w:p>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest,
+     StillRejectsPrefixedUnknownAttributeWithDefaultNamespace) {
+  // Same document shape as the unprefixed case: the w:-prefixed unknown
+  // attribute must still be reported.
+  const auto violations =
+      ValidatePart("word/document.xml",
+                   Wrap(R"(<w:p xmlns="http://schemas.openxmlformats.org/)"
+                        R"(wordprocessingml/2006/main" w:bogus="1"><w:r>)"
+                        R"(<w:t>x</w:t></w:r></w:p>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("bogus"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, AcceptsUnboundedIntegerAttribute) {
+  // w:endnoteReference/@id is IntegerValue in the SDK metadata: xsd:integer
+  // is unbounded, so magnitudes beyond 19 digits are still lexically valid.
+  const auto violations = ValidatePart(
+      "word/document.xml", Wrap(R"(<w:p><w:r><w:endnoteReference w:id=")"
+                                R"(999999999999999999999999"/></w:r></w:p>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, AcceptsZeroPaddedUnboundedIntegerAttribute) {
+  const auto violations = ValidatePart(
+      "word/document.xml", Wrap(R"(<w:p><w:r><w:endnoteReference w:id=")"
+                                R"(000000000000000000000"/></w:r></w:p>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, RejectsNonNumericUnboundedIntegerAttribute) {
+  const auto violations = ValidatePart(
+      "word/document.xml",
+      Wrap(R"(<w:p><w:r><w:endnoteReference w:id="12a"/></w:r></w:p>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("id"), std::string::npos)
+      << violations[0].message;
+}
+
 TEST(WmlValidatorTest, SkipsXmlReservedAndExtensionAttributes) {
   const auto violations = ValidatePart(
       "word/document.xml",

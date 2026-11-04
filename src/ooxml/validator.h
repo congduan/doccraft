@@ -33,7 +33,9 @@ struct Violation {
 
 // Validates a WordprocessingML part against the schema tables generated from
 // DocumentFormat.OpenXml metadata: element order, occurrence bounds, unknown
-// elements and unexpected content. Attributes are not checked yet (see
+// elements, unexpected content, unknown WML-namespace attributes and the
+// lexical form of typed attribute values. Enum members, required attributes,
+// DateTime formats and part/relationship references are out of scope (see
 // docs/KNOWN-SIMPLIFICATIONS.md).
 //
 // `part_name` is only used to label violations.

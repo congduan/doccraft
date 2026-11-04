@@ -63,6 +63,22 @@ bool IsOnOffValue(std::string_view value) {
          value == "off" || value == "1" || value == "0";
 }
 
+// Unbounded xsd:integer lexical shape: optional sign, at least one decimal
+// digit, nothing else.
+bool IsIntegerShape(std::string_view value) {
+  if (value.empty())
+    return false;
+  const std::size_t digits = value.front() == '+' || value.front() == '-'
+                                 ? value.size() - 1
+                                 : value.size();
+  if (digits == 0)
+    return false;
+  return std::all_of(value.begin() + (value.size() - digits), value.end(),
+                     [](char digit) {
+                       return digit >= '0' && digit <= '9';
+                     });
+}
+
 // Parses a sign-prefixed decimal integer. Returns false on any other shape:
 // xsd integer lexical space has no underscores, spaces or exponent form.
 bool ParseInteger(std::string_view text, bool signed_type, int64_t* out) {
@@ -115,6 +131,13 @@ bool AttributeValueMatches(const AttributeSchema& attribute,
         return true;
       *why_not = "is not a valid ST_OnOff value (true/false/on/off/1/0)";
       return false;
+    case AttributeType::kInteger:
+      // xsd:integer is unbounded: only the lexical shape (optional sign
+      // followed by decimal digits) gates the value, with no magnitude cap.
+      if (IsIntegerShape(value))
+        return true;
+      *why_not = "is not a valid xsd:integer value";
+      return false;
     case AttributeType::kHexBinary: {
       // xsd:hexBinary: an even number of hexadecimal digits.
       if (value.size() % 2 == 0 &&
@@ -131,6 +154,7 @@ bool AttributeValueMatches(const AttributeSchema& attribute,
     case AttributeType::kBase64Binary: {
       // xsd:base64Binary with padding: length a multiple of four, only the
       // base64 alphabet, and '=' only as the final one or two characters.
+      // The empty string is in the lexical space.
       const bool lexical = std::all_of(value.begin(), value.end(), [](char c) {
         return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
                (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=';
@@ -138,11 +162,13 @@ bool AttributeValueMatches(const AttributeSchema& attribute,
       const std::size_t pad_start = value.find('=');
       const bool has_padding = pad_start != std::string_view::npos;
       // Padded form: total length a multiple of four and one or two '=' at
-      // the very end. A '=' in the middle or three of them fails both tests.
+      // the very end — every character after the first '=' is padding.
       const bool padding_shape =
           !has_padding ||
-          (value.size() % 4 == 0 && value.size() - pad_start <= 2);
-      if (lexical && padding_shape && !value.empty())
+          (value.size() % 4 == 0 && value.size() - pad_start <= 2 &&
+           value.substr(pad_start).find_first_not_of('=') ==
+               std::string_view::npos);
+      if (lexical && padding_shape)
         return true;
       *why_not = "is not a valid xsd:base64Binary value";
       return false;
@@ -159,8 +185,6 @@ bool AttributeValueMatches(const AttributeSchema& attribute,
       {AttributeType::kInt16, true, INT16_MIN, INT16_MAX},
       {AttributeType::kInt32, true, INT32_MIN, INT32_MAX},
       {AttributeType::kInt64, true, INT64_MIN, INT64_MAX},
-      // xsd:integer: unbounded, so the 64-bit parse range is the gate.
-      {AttributeType::kInteger, true, INT64_MIN, INT64_MAX},
       {AttributeType::kUInt16, false, 0, UINT16_MAX},
       {AttributeType::kUInt32, false, 0, UINT32_MAX},
       {AttributeType::kByte, false, 0, UINT8_MAX},
@@ -440,6 +464,10 @@ class PartValidator {
         continue;  // Namespace declarations are not schema attributes.
       const std::string prefix = PrefixPart(qualified);
       const std::string local = LocalPart(qualified);
+      // XML namespaces do not apply to unprefixed attributes: a default
+      // namespace declaration never pulls them in. Skip them outright.
+      if (prefix.empty())
+        continue;
       std::string ns;
       if (!ResolveNamespace(prefix, *stack_, &ns) || ns != kWordmlNamespace)
         continue;  // xml: and extension-namespace attributes are out of scope.
