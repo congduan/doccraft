@@ -344,6 +344,51 @@ TEST(M19Revisions, DeleteDateFromDttm) {
   EXPECT_NE(std::string::npos, xml.find(R"(w:date="1999-01-02T03:04:00Z")"));
 }
 
+// [MS-DOC] 2.9.65: DTTM weekday (bits 29-31) MUST be <= 6. A DTTM with every
+// other field valid but weekday 7 is invalid, so w:ins keeps its author and
+// text but carries no @w:date.
+TEST(M19Revisions, WeekdaySevenDttmOmitsInsertDate) {
+  // 2026-10-29T14:05:00Z with weekday field forced to 7.
+  constexpr uint32_t kDttm =
+      5 | (14 << 6) | (29 << 11) | (10 << 16) | (126 << 20) | (7u << 29);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0801, {1}), Prl(0x6805, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  EXPECT_EQ(kDttm, d->paragraphs[0].runs[0].revision_date_insert);
+  const std::string xml = Xml(*d);
+  EXPECT_NE(std::string::npos, xml.find(R"(<w:ins )"));
+  EXPECT_NE(std::string::npos, xml.find(R"(w:author="Unknown")"));
+  EXPECT_NE(std::string::npos, xml.find(">X</w:t>"));
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
+// The same weekday-7 rule applies to sprmCDttmRMarkDel: w:del keeps its
+// author and deleted text, only @w:date is omitted.
+TEST(M19Revisions, WeekdaySevenDttmOmitsDeleteDate) {
+  // 2026-10-29T14:05:00Z with weekday field forced to 7.
+  constexpr uint32_t kDttm =
+      5 | (14 << 6) | (29 << 11) | (10 << 16) | (126 << 20) | (7u << 29);
+  auto d = Synthetic(Prl(0x0000, {0}),
+                     Sprms({Prl(0x0800, {1}), Prl(0x6864, Dttm(kDttm))}),
+                     AuthorsTable({"Unknown"}));
+  ASSERT_TRUE(d.has_value());
+  ASSERT_EQ(1u, d->paragraphs[0].runs.size());
+  const model::Run& run = d->paragraphs[0].runs[0];
+  EXPECT_TRUE(run.revision_delete);
+  EXPECT_EQ(kDttm, run.revision_date_delete);
+  const std::string xml = Xml(*d);
+  const size_t del = xml.find(R"(<w:del )");
+  ASSERT_NE(std::string::npos, del);
+  EXPECT_NE(std::string::npos, xml.find(R"(w:author="Unknown")"));
+  const size_t text =
+      xml.find(R"(<w:delText xml:space="preserve">X</w:delText>)");
+  ASSERT_NE(std::string::npos, text);
+  EXPECT_LT(del, text);
+  EXPECT_EQ(std::string::npos, xml.find("w:date="));
+}
+
 // [MS-DOC] 2.9.65 DTTM: a day or month of 0 means the whole DTTM MUST be
 // ignored, so an explicitly stored all-zero value yields no @w:date.
 TEST(M19Revisions, ZeroDttmIgnored) {

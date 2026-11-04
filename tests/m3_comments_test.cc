@@ -211,17 +211,22 @@ void Put32(std::vector<uint8_t>& b, size_t p, uint32_t v) {
   }
 }
 
-// FibRgFcLcb97 row 113, read here as pair(112) (0-based pairs anchored by
-// fcClx = pair(33) at byte 0x01A2): fcAtrdExtra/lcbAtrdExtra point at the
-// ATRDPOST10 date array in the table stream ([MS-DOC] §2.16.6; LibreOffice
-// ww8scan.cxx reads the same pair at FIB offset 0x41A).
+// [MS-DOC] §2.5.8 FibRgFcLcb2002: fcAtrdExtra/lcbAtrdExtra is pair(112)
+// (row 113, 0-based pairs) of the 2002 extension, which continues past it
+// with fcPlrsid and friends. The pair table starts at FIB byte 0x9A, so
+// this pair sits at 0x9A + 112*8 = 0x41A; fcClx = pair(33) @ 0x9A + 33*8 =
+// 0x1A2. Per §2.5.7-2.5.8 the extension pairs are present when the counts
+// declare them: cbRgFcLcb 113 covers pair(112), and nFib 0x0101 (Word 2002)
+// is the writer version that does so.
+// It points at the ATRDPOST10 date array in the table stream ([MS-DOC]
+// §2.9.6; LibreOffice ww8scan.cxx reads the same row at 0x41A).
 TEST(M3Comments, FibReadsAtrdExtraFromPair112) {
   std::vector<uint8_t> word(4096);
   Put16(word, 0, 0xA5EC);
-  Put16(word, 2, 0x00C1);
+  Put16(word, 2, 0x0101);
   Put16(word, 32, 14);                // csw
   Put16(word, 62, 22);                // cslw
-  Put16(word, 152, 115);              // cbRgFcLcb > 113
+  Put16(word, 152, 113);              // cbRgFcLcb: through pair(112)
   Put32(word, 154 + 112 * 8, 0x3C2);  // fcAtrdExtra
   Put32(word, 158 + 112 * 8, 36);     // lcbAtrdExtra: two ATRDPOST10
   auto fib = doc::ParseFib(word);
@@ -287,7 +292,7 @@ SyntheticComments BuildComments(std::vector<uint8_t> atrd_post10) {
   return s;
 }
 
-// One 18-byte ATRDPOST10 record ([MS-DOC] §2.3.1): the DTTM sits at offset 0;
+// One 18-byte ATRDPOST10 record ([MS-DOC] §2.9.6): the DTTM sits at offset 0;
 // LibreOffice ww8par.cxx indexes pExtended[nIndex * 18] and reads the leading
 // 4-byte DTTM.
 void PutAtrdPost10(std::vector<uint8_t>& b, size_t index, uint32_t dttm) {
@@ -418,10 +423,13 @@ TEST(M3Comments, DamagedAtrdPost10WarnsAndKeepsComments) {
 }
 
 // A whole-record array with fewer records than comments is also damaged:
-// exactly one warning, every date unset, comment bodies intact.
+// exactly one warning, every date unset, comment bodies intact. The single
+// record carries a valid non-zero DTTM, so an implementation that wrongly
+// accepted the first record would set comments[0].date and fail here.
 TEST(M3Comments, ShortAtrdPost10RecordCountWarnsOnce) {
-  // Two comments but only one 18-byte ATRDPOST10 record (all-zero DTTM).
+  // Two comments but only one 18-byte ATRDPOST10 record (2021-08-04 10:04).
   std::vector<uint8_t> post10(18, 0);
+  PutAtrdPost10(post10, 0, 0x07982284);
   SyntheticComments s = BuildTwoComments(post10);
   auto d = doc::ParseFormatted(s.word, s.table, s.fib);
   ASSERT_TRUE(d) << d.error().message;
@@ -435,6 +443,29 @@ TEST(M3Comments, ShortAtrdPost10RecordCountWarnsOnce) {
   auto zip = docx::Write(*d);
   ASSERT_TRUE(zip);
   EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
+}
+
+// More ATRDPOST10 records than ATRDPre10 comments violates [MS-DOC] §2.9.5
+// (the counts MUST be equal). The reader tolerates that non-conforming input
+// the way LibreOffice does, reading the array by comment index, so it takes
+// the first `count` records and stays silent. Here the first record is valid
+// and the trailing one is zero, pinning both the order and the absence of a
+// warning.
+TEST(M3Comments, ExtraAtrdPost10RecordsUseFirstCount) {
+  std::vector<uint8_t> post10(36, 0);
+  PutAtrdPost10(post10, 0, 0x07982284);  // 2021-08-04 10:04
+  PutAtrdPost10(post10, 1, 0);           // trailing record must stay unread
+  SyntheticComments s = BuildComments(post10);
+  auto d = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->comments.size(), 1u);
+  EXPECT_EQ(d->comments[0].date, 0x07982284u);
+  EXPECT_TRUE(d->warnings.empty());
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip);
+  EXPECT_NE(
+      Part(*zip, "word/comments.xml").find("w:date=\"2021-08-04T10:04:00Z\""),
+      std::string::npos);
 }
 
 // Without fcAtrdExtra/lcbAtrdExtra (the pre-Word-2002 shape) no date is

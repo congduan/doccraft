@@ -119,7 +119,7 @@ std::expected<std::vector<CommentAnchor>, Error> ReadAnchors(
   return out;
 }
 
-// ATRDPOST10 ([MS-DOC] §2.3.1): one 18-byte record per comment, with the
+// ATRDPOST10 ([MS-DOC] §2.9.6): one 18-byte record per comment, with the
 // comment's DTTM ([MS-DOC] 2.9.60) in the leading 4 bytes (LibreOffice
 // ww8par.cxx indexes pExtended[nIndex * 18] the same way). A size that is
 // not a whole number of records, or fewer records than comments, means the

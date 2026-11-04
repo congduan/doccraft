@@ -268,9 +268,11 @@ std::expected<Fib, Error> ParseFib(std::span<const uint8_t> word) {
   f.atn_bkmk = pair(37);
   f.atn_bkf = pair(42);
   f.atn_bkl = pair(43);
-  // [MS-DOC] FibRgFcLcb97: fcAtrdExtra/lcbAtrdExtra is row 113, read here as
-  // pair(112) (0-based, anchored by fcClx = pair(33) = 0x01A2, so this pair
-  // sits at byte 0x41A, where LibreOffice ww8scan.cxx reads the same row).
+  // [MS-DOC] §2.5.8 FibRgFcLcb2002: fcAtrdExtra/lcbAtrdExtra is pair(112)
+  // (row 113, 0-based pairs) of the 2002 extension, which continues past it
+  // with fcPlrsid and friends. The pair table starts at byte 0x9A, so this
+  // pair sits at 0x9A + 112*8 = 0x41A; the anchor is fcClx = pair(33) @
+  // 0x9A + 33*8 = 0x1A2. LibreOffice ww8scan.cxx reads the same row at 0x41A.
   f.atrd_extra = pair(112);
   f.sttb_bkmk = pair(21);
   f.bkf = pair(22);

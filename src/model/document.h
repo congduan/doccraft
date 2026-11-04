@@ -341,8 +341,9 @@ struct Block {
 struct Comment {
   std::string author;
   std::string initials;
-  // ATRDPOST10 DTTM ([MS-DOC] 2.9.60); 0 = unset, matching the Run revision
-  // date convention. Invalid DTTMs are also left as 0 by the reader.
+  // Raw ATRDPOST10 DTTM ([MS-DOC] 2.9.60), stored as read; 0 = unset. The
+  // writer decides whether to emit it via RevisionDate, which rejects DTTMs
+  // that 2.9.65 deems invalid (e.g. weekday 7) and then writes no w:date.
   uint32_t date = 0;
   std::vector<Paragraph> paragraphs;
 };
