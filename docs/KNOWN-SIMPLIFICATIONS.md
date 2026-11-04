@@ -231,7 +231,9 @@
   次数、未知元素）+ **属性已知性与词法类**（r77 起元素带上属性切片：未知
   WML 属性报 violation；`ST_OnOff`、有界整型（Int16/Int32/Int64/UInt16/
   UInt32/Byte 按各自范围）、无界 `Integer`（r78 起只校验数字形状，不限
-  位数）、`hexBinary`、`base64Binary` 按词法校验；`xml:` 保留属性、扩展
+  位数）、`hexBinary`、`base64Binary` 按词法校验（`base64Binary` 自 r79 起
+  按 W3C 规范形：空白剥离后长度为 4 的倍数、尾部 padding 后不得再有数据、
+  被 padding 丢弃的低位必须为零；`xml:` 保留属性、扩展
   命名空间属性与无命名空间属性跳过）。**仍欠账**：枚举值成员
   校验（SDK 元数据无枚举成员表）、必填属性缺失检测（元数据未 dump required
   标志）、`StringValue` 属性的业务边界（如 `ST_TwipsMeasure` 上限——twips 类
