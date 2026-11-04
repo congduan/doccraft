@@ -323,18 +323,11 @@ def main():
             merged += 1
         # Union the attribute declarations of every CLR entry that shares this
         # qualified name, keyed by attribute local name. Attributes are
-        # qualified in practice (the WML table has exactly one unqualified
-        # name, w:customXml/@uri), so matching by local keeps the slice small;
-        # a mismatch would let a foreign attribute pass under a local name,
-        # which the validator closes by skipping attributes from other
-        # namespaces entirely.
-        # Union the attribute declarations of every CLR entry sharing this
-        # qualified name, keyed by attribute local name. Attributes are
         # qualified in practice (the WML table's only unqualified name is
         # w:customXml/@uri, which sits on a cross-namespace element the
-        # validator never reaches), so the same-namespace filter keeps the
-        # slice exact; the validator also skips attributes from other
-        # namespaces outright.
+        # validator never reaches), so matching by local keeps the slice
+        # exact; the validator closes the mismatch hole by skipping
+        # attributes from other namespaces entirely.
         types_by_local = {}
         for attribute in attrs_by_key.get(key, ()):
             if attribute["ns"] != key[0]:

@@ -95,9 +95,19 @@ bool ParseInteger(std::string_view text, bool signed_type, int64_t* out) {
   }
   if (at >= text.size())
     return false;
-  // FromInt is exact for the 19-digit magnitudes below; long input is a
-  // range failure, not a parse one, and both are reported the same way.
-  if (text.size() - at > 19)
+  if (!std::all_of(text.begin() + static_cast<std::ptrdiff_t>(at), text.end(),
+                   [](char digit) {
+                     return digit >= '0' && digit <= '9';
+                   }))
+    return false;
+  // Leading zeros carry no magnitude, so the range gate counts only the
+  // digits after them: "0000000000000000000001" is 1, not 22 digits of
+  // overflow. FromInt is exact for the 19-digit magnitudes below; a longer
+  // effective input is a range failure, reported the same way as a parse one.
+  std::size_t digits = at;
+  while (digits + 1 < text.size() && text[digits] == '0')
+    ++digits;
+  if (text.size() - digits > 19)
     return false;
   uint64_t magnitude = 0;
   for (const char digit : text.substr(at)) {

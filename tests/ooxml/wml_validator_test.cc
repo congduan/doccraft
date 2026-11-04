@@ -148,6 +148,36 @@ TEST(WmlValidatorTest, RejectsOutOfRangeIntegerAttribute) {
       << violations[0].message;
 }
 
+TEST(WmlValidatorTest, AcceptsLeadingZeroIntegersBeyondNineteenDigits) {
+  // Leading zeros carry no magnitude: a 22-character value that spells 1 is
+  // in Int32 range, and an all-zero string of any length is a valid 0. The
+  // range gate must count significant digits, not characters.
+  for (const char* value :
+       {"0000000000000000000001", "-00000000000000000001",
+        "000000000000000000000", "00000000000000000000000000000000000"}) {
+    const auto violations = ValidatePart(
+        "word/document.xml",
+        Wrap(std::string(R"(<w:p><w:pPr><w:spacing w:afterLines=")") + value +
+             R"("/></w:pPr>)"
+             R"(<w:r><w:t>x</w:t></w:r></w:p>)"));
+    EXPECT_TRUE(violations.empty()) << value << ": " << Describe(violations);
+  }
+}
+
+TEST(WmlValidatorTest, RejectsLeadingZeroIntegersStillOutOfRange) {
+  // Twenty-five significant digits stay a range violation even when padded
+  // with leading zeros.
+  const auto violations = ValidatePart(
+      "word/document.xml",
+      Wrap(R"(<w:p><w:pPr><w:spacing w:afterLines=)"
+           R"("0000000000000000000000001000000000000000000000001"/>)"
+           R"(</w:pPr><w:r><w:t>x</w:t></w:r></w:p>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("afterLines"), std::string::npos)
+      << violations[0].message;
+}
+
 TEST(WmlValidatorTest, RejectsNegativeUnsignedAttribute) {
   const auto violations =
       ValidatePart("word/document.xml",
@@ -275,7 +305,7 @@ TEST(WmlValidatorTest, RejectsBase64BinaryNonZeroPadBits) {
 TEST(WmlValidatorTest, AcceptsWhitespaceSeparatedBase64BinaryAttribute) {
   // The W3C lexical rule strips whitespace between quanta, so a value with
   // leading, trailing or embedded spaces is still valid. " \t\n " strips to
-  // the empty string, which is in the lexical space. The last sample builds
+  // the empty string, which is in the lexical space. The refs sample builds
   // its whitespace from character references, so the raw tab/newline/CR
   // characters reach the validator inside the attribute value.
   const std::string mixed = std::string("\tQU\nJD\r ");
