@@ -142,7 +142,9 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
   - 测试：googletest、libFuzzer
   - **仅测试期**的 OOXML schema 校验：`src/ooxml/` 用
     `tools/schema-gen` 离线导出的元素粒子表，在 `ctest` 中检查 writer 产出的
-    WordprocessingML 部件是否符合 ECMA-376 的元素顺序与出现次数。表由
+    WordprocessingML 部件是否符合 ECMA-376 的元素顺序与出现次数；表同时携带
+    每元素的属性切片，未知 WML 属性与整型/OnOff/hexBinary/base64Binary 词法
+    类属性值同样会被检出。表由
     `DocumentFormat.OpenXml` 3.3.0（MIT）的运行时元数据生成并已入库，构建和
     运行不需要 .NET；校验器不链接进 CLI 产物。
 - 选库标准：业界广泛使用、license 宽松（public domain/MIT/Apache）、

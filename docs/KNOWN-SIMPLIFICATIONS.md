@@ -227,9 +227,15 @@
 
 ## OOXML schema 校验器（`src/ooxml/`）
 
-- 覆盖范围只有 WordprocessingML 2006 main 命名空间的**元素**：子元素顺序、
-  出现次数、未知元素。属性（必填性、枚举、数值范围）与 part/关系引用尚未
-  校验，`OpenXmlValidator` 能报的属性类与关系类错误目前检不出来。
+- 覆盖范围：WordprocessingML 2006 main 命名空间的**元素**（子元素顺序、出现
+  次数、未知元素）+ **属性已知性与词法类**（r77 起元素带上属性切片：未知
+  WML 属性报 violation；`ST_OnOff`、整型族（Int16/Int32/Integer/UInt16/
+  UInt32/Byte 按各自范围）、`hexBinary`、`base64Binary` 按词法校验；`xml:`
+  保留属性、扩展命名空间属性与无命名空间属性跳过）。**仍欠账**：枚举值成员
+  校验（SDK 元数据无枚举成员表）、必填属性缺失检测（元数据未 dump required
+  标志）、`StringValue` 属性的业务边界（如 `ST_TwipsMeasure` 上限——twips 类
+  属性在 SDK 建模为 StringValue 以容纳 "auto"，词法校验对其不设限）、
+  DateTime 格式、part/关系引用校验。
 - 校验器按「命名空间 + 本地名」匹配，而 SDK 按 CLR 类型区分实例。同一 QName
   在不同上下文有不同内容模型时（`w:customXml` 作为 block/run/row/cell、
   `w:align`/`w:bottom` 等），生成器把多份粒子合并成一个 choice，任一形态通过
