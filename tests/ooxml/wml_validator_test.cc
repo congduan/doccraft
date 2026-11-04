@@ -25,8 +25,17 @@ constexpr char kHeader[] =
     R"(wordprocessingml/2006/main"><w:body>)";
 constexpr char kFooter[] = "</w:body></w:document>";
 
+constexpr char kSettingsHeader[] =
+    R"(<?xml version="1.0"?><w:settings xmlns:w="http://schemas.openxmlformats.org/)"
+    R"(wordprocessingml/2006/main">)";
+constexpr char kSettingsFooter[] = "</w:settings>";
+
 std::string Wrap(const std::string& body) {
   return std::string(kHeader) + body + kFooter;
+}
+
+std::string WrapSettings(const std::string& body) {
+  return std::string(kSettingsHeader) + body + kSettingsFooter;
 }
 
 std::string Describe(const std::vector<Violation>& violations) {
@@ -82,6 +91,132 @@ TEST(WmlValidatorTest, IgnoresExtensionNamespaces) {
       Wrap(R"(<w:p><w:pPr><w14:paraId xmlns:w14=")"
            R"(http://schemas.microsoft.com/office/word/2010/wordml"/>)"
            R"(</w:pPr></w:p>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, RejectsUnknownAttribute) {
+  const auto violations =
+      ValidatePart("word/document.xml",
+                   Wrap(R"(<w:p w:bogus="1"><w:r><w:t>x</w:t></w:r></w:p>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_EQ(violations[0].path, "/document[1]/body[1]/p[1]");
+  EXPECT_NE(violations[0].message.find("bogus"), std::string::npos)
+      << violations[0].message;
+  EXPECT_NE(violations[0].message.find("attribute"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, RejectsInvalidOnOffAttribute) {
+  const auto violations =
+      ValidatePart("word/document.xml",
+                   Wrap(R"(<w:p><w:pPr><w:keepNext w:val="maybe"/></w:pPr>)"
+                        R"(<w:r><w:t>x</w:t></w:r></w:p>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  // The schema table keys attributes by local name, so the message names the
+  // offending attribute and the type that rejected the value.
+  EXPECT_NE(violations[0].message.find("val"), std::string::npos)
+      << violations[0].message;
+  EXPECT_NE(violations[0].message.find("OnOff"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, RejectsNonNumericIntegerAttribute) {
+  // w:spacing/@afterLines is ST_DecimalNumberOrPercent's Int32 row in the
+  // SDK metadata (the signed-twips attributes are StringValue because the
+  // transitional schema allows "auto", so they are outside this check).
+  const auto violations =
+      ValidatePart("word/document.xml",
+                   Wrap(R"(<w:p><w:pPr><w:spacing w:afterLines="abc"/></w:pPr>)"
+                        R"(<w:r><w:t>x</w:t></w:r></w:p>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("afterLines"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, RejectsOutOfRangeIntegerAttribute) {
+  const auto violations = ValidatePart(
+      "word/document.xml",
+      Wrap(R"(<w:p><w:pPr><w:spacing w:afterLines="3000000000"/></w:pPr>)"
+           R"(<w:r><w:t>x</w:t></w:r></w:p>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("afterLines"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, RejectsNegativeUnsignedAttribute) {
+  const auto violations =
+      ValidatePart("word/document.xml",
+                   Wrap(R"(<w:sectPr><w:pgSz w:code="-1"/></w:sectPr>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("code"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, RejectsInvalidHexBinaryAttribute) {
+  const auto violations =
+      ValidatePart("word/document.xml",
+                   Wrap(R"(<w:p w:rsidR="xyz"><w:r><w:t>x</w:t></w:r></w:p>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("rsidR"), std::string::npos)
+      << violations[0].message;
+  EXPECT_NE(violations[0].message.find("hexBinary"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, RejectsInvalidBase64BinaryAttribute) {
+  const auto violations =
+      ValidatePart("word/settings.xml",
+                   WrapSettings(R"(<w:documentProtection w:hash="!!!!"/>)"));
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("hash"), std::string::npos)
+      << violations[0].message;
+  EXPECT_NE(violations[0].message.find("base64Binary"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, AcceptsLexicallyValidAttributes) {
+  const auto violations = ValidatePart(
+      "word/document.xml",
+      Wrap(R"(<w:p w:rsidR="00AB12CD"><w:pPr><w:keepNext w:val="on"/>)"
+           R"(<w:spacing w:after="120"/></w:pPr>)"
+           R"(<w:r><w:t xml:space="preserve">x</w:t></w:r></w:p>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, AcceptsValidBase64BinaryAttribute) {
+  const auto violations =
+      ValidatePart("word/settings.xml",
+                   WrapSettings(R"(<w:documentProtection w:hash="AA=="/>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, SkipsXmlReservedAndExtensionAttributes) {
+  const auto violations = ValidatePart(
+      "word/document.xml",
+      Wrap(R"(<w:p xmlns:w14="http://schemas.microsoft.com/office/word/2010/)"
+           R"(wordml" w14:paraId="00AB12CD"><w:r>)"
+           R"(<w:t xml:space="preserve">x</w:t></w:r></w:p>)"));
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, SkipsAttributesFromOtherNamespaces) {
+  const auto violations = ValidatePart(
+      "word/document.xml",
+      Wrap(
+          R"(<w:p><w:hyperlink xmlns:r=")"
+          R"(http://schemas.openxmlformats.org/officeDocument/2006/relationships)"
+          R"(" r:id="rId1"><w:r><w:t>x</w:t></w:r></w:hyperlink></w:p>)"));
 
   EXPECT_TRUE(violations.empty()) << Describe(violations);
 }

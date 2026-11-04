@@ -15,6 +15,7 @@
 #include "ooxml/validator.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -32,6 +33,151 @@ namespace {
 
 constexpr char kWordmlNamespace[] =
     "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+// The AttributeSchema rows of one element slice are sorted by local name, so
+// the lookup is a binary search over the slice.
+const AttributeSchema* FindAttribute(const ElementSchema* schema,
+                                     std::string_view local) {
+  std::size_t low = 0;
+  std::size_t high = schema->attribute_count;
+  while (low < high) {
+    const std::size_t mid = low + (high - low) / 2;
+    const AttributeSchema& candidate =
+        generated::kAttributes[schema->first_attribute + mid];
+    const int order = std::string_view(candidate.local).compare(local);
+    if (order < 0) {
+      low = mid + 1;
+    } else if (order > 0) {
+      high = mid;
+    } else {
+      return &candidate;
+    }
+  }
+  return nullptr;
+}
+
+// ST_OnOff: the union of xsd:boolean and the two-word spelling the
+// transitional schema allows. An empty value is not a member.
+bool IsOnOffValue(std::string_view value) {
+  return value == "true" || value == "false" || value == "on" ||
+         value == "off" || value == "1" || value == "0";
+}
+
+// Parses a sign-prefixed decimal integer. Returns false on any other shape:
+// xsd integer lexical space has no underscores, spaces or exponent form.
+bool ParseInteger(std::string_view text, bool signed_type, int64_t* out) {
+  if (text.empty())
+    return false;
+  std::size_t at = 0;
+  bool negative = false;
+  if (text[0] == '+' || text[0] == '-') {
+    negative = text[0] == '-';
+    at = 1;
+    if (!signed_type && text[0] == '-')
+      return false;
+  }
+  if (at >= text.size())
+    return false;
+  // FromInt is exact for the 19-digit magnitudes below; long input is a
+  // range failure, not a parse one, and both are reported the same way.
+  if (text.size() - at > 19)
+    return false;
+  uint64_t magnitude = 0;
+  for (const char digit : text.substr(at)) {
+    if (digit < '0' || digit > '9')
+      return false;
+    magnitude = magnitude * 10 + static_cast<uint64_t>(digit - '0');
+  }
+  if (!negative) {
+    *out = static_cast<int64_t>(magnitude);
+    return magnitude <= static_cast<uint64_t>(INT64_MAX);
+  }
+  if (magnitude > static_cast<uint64_t>(INT64_MAX) + 1)
+    return false;
+  *out = magnitude == static_cast<uint64_t>(INT64_MAX) + 1
+             ? INT64_MIN
+             : -static_cast<int64_t>(magnitude);
+  return true;
+}
+
+// One lexical check per SDK attribute type. The kind decides which check
+// runs; kString, kEnum, kDateTime and kOther accept any lexical form.
+bool AttributeValueMatches(const AttributeSchema& attribute,
+                           std::string_view value, std::string* why_not) {
+  switch (attribute.type) {
+    case AttributeType::kString:
+    case AttributeType::kEnum:
+    case AttributeType::kDateTime:
+    case AttributeType::kOther:
+      return true;
+    case AttributeType::kOnOff:
+      if (IsOnOffValue(value))
+        return true;
+      *why_not = "is not a valid ST_OnOff value (true/false/on/off/1/0)";
+      return false;
+    case AttributeType::kHexBinary: {
+      // xsd:hexBinary: an even number of hexadecimal digits.
+      if (value.size() % 2 == 0 &&
+          std::all_of(value.begin(), value.end(), [](char digit) {
+            return (digit >= '0' && digit <= '9') ||
+                   (digit >= 'a' && digit <= 'f') ||
+                   (digit >= 'A' && digit <= 'F');
+          })) {
+        return true;
+      }
+      *why_not = "is not a valid xsd:hexBinary value";
+      return false;
+    }
+    case AttributeType::kBase64Binary: {
+      // xsd:base64Binary with padding: length a multiple of four, only the
+      // base64 alphabet, and '=' only as the final one or two characters.
+      const bool lexical = std::all_of(value.begin(), value.end(), [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+               (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=';
+      });
+      const std::size_t pad_start = value.find('=');
+      const bool has_padding = pad_start != std::string_view::npos;
+      // Padded form: total length a multiple of four and one or two '=' at
+      // the very end. A '=' in the middle or three of them fails both tests.
+      const bool padding_shape =
+          !has_padding ||
+          (value.size() % 4 == 0 && value.size() - pad_start <= 2);
+      if (lexical && padding_shape && !value.empty())
+        return true;
+      *why_not = "is not a valid xsd:base64Binary value";
+      return false;
+    }
+    default:
+      break;
+  }
+  static constexpr struct {
+    AttributeType type;
+    bool signed_type;
+    int64_t low;
+    int64_t high;
+  } kBounds[] = {
+      {AttributeType::kInt16, true, INT16_MIN, INT16_MAX},
+      {AttributeType::kInt32, true, INT32_MIN, INT32_MAX},
+      {AttributeType::kInt64, true, INT64_MIN, INT64_MAX},
+      // xsd:integer: unbounded, so the 64-bit parse range is the gate.
+      {AttributeType::kInteger, true, INT64_MIN, INT64_MAX},
+      {AttributeType::kUInt16, false, 0, UINT16_MAX},
+      {AttributeType::kUInt32, false, 0, UINT32_MAX},
+      {AttributeType::kByte, false, 0, UINT8_MAX},
+  };
+  for (const auto& bound : kBounds) {
+    if (bound.type != attribute.type)
+      continue;
+    int64_t parsed = 0;
+    if (ParseInteger(value, bound.signed_type, &parsed) &&
+        parsed >= bound.low && parsed <= bound.high) {
+      return true;
+    }
+    *why_not = "is not a valid integer in the attribute's range";
+    return false;
+  }
+  return true;
+}
 
 // Positions in the child list; kNoIndex marks a child whose element name is
 // absent from the schema table.
@@ -242,6 +388,7 @@ class PartValidator {
       : part_(part), out_(out) {}
 
   void Walk(pugi::xml_node node, const Frame* parent, NamespaceStack* stack) {
+    stack_ = stack;
     const std::size_t pushed = PushNamespaces(node, stack);
     const std::string qualified(node.name());
     const std::string prefix = PrefixPart(qualified);
@@ -274,11 +421,41 @@ class PartValidator {
     }
 
     CheckChildren(node, schema, &frame);
+    CheckAttributes(node, schema, &frame);
     for (pugi::xml_node child : node.children()) {
       if (child.type() == pugi::node_element)
         Walk(child, &frame, stack);
     }
     PopNamespaces(pushed, stack);
+  }
+
+  // Attributes: unknown WML-namespace names are violations; known ones get
+  // the lexical check their SDK type implies. Namespaces are resolved from
+  // the walk's stack, which by now holds every declaration in scope.
+  void CheckAttributes(pugi::xml_node node, const ElementSchema* schema,
+                       const Frame* frame) {
+    for (pugi::xml_attribute attribute : node.attributes()) {
+      const std::string qualified(attribute.name());
+      if (qualified.rfind("xmlns", 0) == 0)
+        continue;  // Namespace declarations are not schema attributes.
+      const std::string prefix = PrefixPart(qualified);
+      const std::string local = LocalPart(qualified);
+      std::string ns;
+      if (!ResolveNamespace(prefix, *stack_, &ns) || ns != kWordmlNamespace)
+        continue;  // xml: and extension-namespace attributes are out of scope.
+      const AttributeSchema* attribute_schema = FindAttribute(schema, local);
+      if (attribute_schema == nullptr) {
+        Report(frame, "unknown attribute '" + local + "' on element <" +
+                          std::string(schema->local) + ">");
+        continue;
+      }
+      std::string_view value(attribute.value());
+      std::string why_not;
+      if (!AttributeValueMatches(*attribute_schema, value, &why_not)) {
+        Report(frame, "attribute '" + local + "' value '" + std::string(value) +
+                          "' " + why_not);
+      }
+    }
   }
 
  private:
@@ -372,6 +549,7 @@ class PartValidator {
   }
 
   std::string_view part_;
+  NamespaceStack* stack_ = nullptr;
   std::vector<Violation>* out_;
 };
 
