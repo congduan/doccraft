@@ -2651,9 +2651,10 @@ TEST(LegacyWord, Word6TableCellBrc10ReachesDocx) {
 }
 
 TEST(LegacyWord, Word6UnrecognisedSetBrc10BecomesExplicitNil) {
-  // r72: the 0xC7 path shares the TC80 explicit-nil semantics. BRC10 0x0001
-  // maps to no line type, so both cells get a set, type-0 border with zeroed
-  // width/space and the writer emits w:val="nil" instead of a border residue.
+  // r72: the 0xC7 path shares the TC80 explicit-nil semantics for non-zero
+  // words. BRC10 0x0001 maps to no line type, so both cells get a set, type-0
+  // border with zeroed width/space and the writer emits w:val="nil" instead of
+  // a border residue.
   auto document = ParseWord6TableEdits({
       0xC7, 0x00, 0x02, 0x01, 0x01, 0x00,  // Top [0,2), BRC10 0x0001.
   });
@@ -2668,6 +2669,35 @@ TEST(LegacyWord, Word6UnrecognisedSetBrc10BecomesExplicitNil) {
     EXPECT_EQ(cell.borders[0].width, 0);
     EXPECT_EQ(cell.borders[0].space, 0);
     EXPECT_FALSE(cell.borders[1].set);
+  }
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tcBorders><w:top w:val=\"nil\"/></w:tcBorders>"),
+            std::string::npos)
+      << xml;
+}
+
+TEST(LegacyWord, Word6ZeroSetBrc10StaysExplicitNilUnlikeTc80) {
+  // r72 review: an all-zero BRC10 word is NOT unset on the 0xC7 path.
+  // AppendBrc10(0) still writes the ico=-1 colour with zero width/type, and
+  // TableBorder has no zero-value skip on the ApplyCellBorders route, so the
+  // border lands as set, type 0 and the writer emits w:val="nil". The TC80
+  // path (sprmTDefTable) skips all-zero BRC80 words as unset instead; the
+  // divergence is deliberate and recorded in KNOWN-SIMPLIFICATIONS r72.
+  auto document = ParseWord6TableEdits({
+      0xC7, 0x00, 0x02, 0x01, 0x00, 0x00,  // Top [0,2), BRC10 0x0000.
+  });
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 2u);
+  for (const auto& cell : table.row_properties[0].cells) {
+    EXPECT_TRUE(cell.borders[0].set);
+    EXPECT_EQ(cell.borders[0].type, 0u);
+    EXPECT_EQ(cell.borders[0].width, 0);
+    EXPECT_EQ(cell.borders[0].space, 0);
   }
   auto zip = doccraft::docx::Write(*document);
   ASSERT_TRUE(zip) << zip.error().message;
