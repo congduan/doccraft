@@ -1044,9 +1044,12 @@ TEST(M5FloatingImages, NestedContainerTruncationWarnsWithOuterOffset) {
   Put16(tail, 0, 0x0F32);
   Put16(tail, 2, 0x3BEB);
   Put32(tail, 4, 0x9A8B0000);  // Declared length runs past the stream.
-  std::vector<uint8_t> f003 = Art(0xF003, 15, shape);
-  Append(f003, tail);
-  const std::vector<uint8_t> dg = Art(0xF002, 15, f003);
+  // The tail must sit *inside* the F003 body: build the record from
+  // shape + tail so the F003 declared length covers the garbage header and
+  // the truncation happens in the nested scan, not at the DgContainer level.
+  std::vector<uint8_t> f003_body = shape;
+  Append(f003_body, tail);
+  const std::vector<uint8_t> dg = Art(0xF002, 15, Art(0xF003, 15, f003_body));
   const size_t story_at = 61;  // group (60) + label (1).
   const size_t plc_at = s.fib.spa_main.offset;
   ASSERT_EQ(plc_at, story_at + 32);
@@ -1072,10 +1075,10 @@ TEST(M5FloatingImages, NestedContainerTruncationWarnsWithOuterOffset) {
   EXPECT_NE(warning.find("extends past the end of the stream"),
             std::string::npos)
       << warning;
-  // The garbage header sits 8 (F003 header) + 24 (shape container extent)
-  // = 32 bytes into the F003 body, and the F003 record starts at the very
-  // beginning of the DgContainer body scan, so the top-level offset is
-  // exactly 32 (8-byte F003 header + 24 bytes of shape container).
+  // The garbage header sits 24 bytes (shape container extent) into the F003
+  // body, so the nested scan soft-ends at offset 24; the outer DgContainer
+  // body scan adds the 8-byte F003 header, and the warning must carry that
+  // translated outer offset 32 — not the nested 24.
   EXPECT_NE(warning.find("offset 32 "), std::string::npos) << warning;
 }
 
