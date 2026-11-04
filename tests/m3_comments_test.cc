@@ -294,6 +294,61 @@ void PutAtrdPost10(std::vector<uint8_t>& b, size_t index, uint32_t dttm) {
   Put32(b, index * 18, dttm);
 }
 
+// Same story shape with two anchored comments ("X\x05\x05\r" main story,
+// "AB\rAB\r" annotation story), for tests that need a date-array count
+// mismatch (fewer ATRDPOST10 records than comments).
+SyntheticComments BuildTwoComments(std::vector<uint8_t> atrd_post10) {
+  SyntheticComments s;
+  const std::string main = "X\x05\x05\r";
+  const std::string atn = "AB\rAB\r";
+  s.fib.ccp_text = static_cast<uint32_t>(main.size());
+  s.fib.ccp_atn = static_cast<uint32_t>(atn.size());
+  const std::string all = main + atn;
+  constexpr uint32_t kFc = 512;
+  s.word.assign(4096, 0);
+  for (size_t i = 0; i < all.size(); i++) {
+    s.word[kFc + i] = static_cast<uint8_t>(all[i]);
+  }
+  s.fib.fc_clx = 0;
+  s.fib.lcb_clx = 21;
+  s.table.assign(21, 0);
+  s.table[0] = 2;
+  Put32(s.table, 1, 16);
+  Put32(s.table, 5, 0);
+  Put32(s.table, 9, static_cast<uint32_t>(all.size()));
+  Put32(s.table, 15, 0x40000000u | (kFc * 2));
+  // PlcfandRef: anchors at CP 1 and 2 plus the guard CP, two zeroed
+  // 30-byte ATRDs (author index 0 -> "Alice" for both).
+  constexpr uint32_t kAnchorCount = 2;
+  s.fib.and_ref = {21, 4 * (kAnchorCount + 1) + 30 * kAnchorCount};
+  s.table.resize(21 + s.fib.and_ref.size);
+  Put32(s.table, 21, 1);
+  Put32(s.table, 25, 2);
+  Put32(s.table, 29, 3);
+  // PlcfandTxt: story ranges [0,3) and [3,6) plus the guard CP.
+  const size_t txt = 21 + s.fib.and_ref.size;
+  s.fib.and_txt = {static_cast<uint32_t>(txt), 4 * (kAnchorCount + 1)};
+  s.table.resize(txt + s.fib.and_txt.size);
+  Put32(s.table, txt, 0);
+  Put32(s.table, txt + 4, 3);
+  Put32(s.table, txt + 8, 6);
+  // GrpXstAtnOwners: one Xst "Alice" (2-byte cch + 5 UTF-16 chars).
+  const size_t owners = s.table.size();
+  s.table.resize(owners + 12);
+  Put16(s.table, owners, 5);
+  for (size_t i = 0; i < 5; i++) {
+    Put16(s.table, owners + 2 + 2 * i, static_cast<uint16_t>("Alice"[i]));
+  }
+  s.fib.atn_owners = {static_cast<uint32_t>(owners), 12};
+  if (!atrd_post10.empty()) {
+    const size_t at = s.table.size();
+    s.table.insert(s.table.end(), atrd_post10.begin(), atrd_post10.end());
+    s.fib.atrd_extra = {static_cast<uint32_t>(at),
+                        static_cast<uint32_t>(atrd_post10.size())};
+  }
+  return s;
+}
+
 TEST(M3Comments, CommentDateFromAtrdPost10ReachesDocx) {
   std::vector<uint8_t> post10(18, 0);
   // 0x07982284: [MS-DOC] 2.9.60 DTTM for 2021-08-04 10:04 (day 4, month 8,
@@ -357,6 +412,26 @@ TEST(M3Comments, DamagedAtrdPost10WarnsAndKeepsComments) {
   ASSERT_EQ(d->warnings.size(), 1u);
   EXPECT_NE(d->warnings[0].find("skipped comment dates"), std::string::npos);
   EXPECT_EQ(d->comments[0].date, 0u);
+  auto zip = docx::Write(*d);
+  ASSERT_TRUE(zip);
+  EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
+}
+
+// A whole-record array with fewer records than comments is also damaged:
+// exactly one warning, every date unset, comment bodies intact.
+TEST(M3Comments, ShortAtrdPost10RecordCountWarnsOnce) {
+  // Two comments but only one 18-byte ATRDPOST10 record (all-zero DTTM).
+  std::vector<uint8_t> post10(18, 0);
+  SyntheticComments s = BuildTwoComments(post10);
+  auto d = doc::ParseFormatted(s.word, s.table, s.fib);
+  ASSERT_TRUE(d) << d.error().message;
+  ASSERT_EQ(d->comments.size(), 2u);
+  EXPECT_NE(ParagraphText(d->comments[0].paragraphs[0]), "");
+  EXPECT_NE(ParagraphText(d->comments[1].paragraphs[0]), "");
+  ASSERT_EQ(d->warnings.size(), 1u);
+  EXPECT_NE(d->warnings[0].find("skipped comment dates"), std::string::npos);
+  EXPECT_EQ(d->comments[0].date, 0u);
+  EXPECT_EQ(d->comments[1].date, 0u);
   auto zip = docx::Write(*d);
   ASSERT_TRUE(zip);
   EXPECT_EQ(Part(*zip, "word/comments.xml").find("w:date="), std::string::npos);
