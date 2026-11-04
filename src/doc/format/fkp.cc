@@ -485,9 +485,16 @@ Brc10Line DecodeBrc10(uint16_t v) {
 
 // Modern eight-byte Brc as used by TSetBrcOperand: COLORREF, width, type,
 // flags and a reserved byte. BRC10 has no palette index; ico 0 ("auto") maps
-// to -1, Word's COLORREF value for an unset colour.
+// to -1, Word's COLORREF value for an unset colour. A non-zero word that maps
+// to no line type becomes the all-ones undefined sentinel (r72), matching the
+// TC80 path, so TableBorder sees an explicit nil instead of a width/type
+// residue that would clear nothing but keep stale width and space values.
 void AppendBrc10(std::vector<uint8_t>& out, uint16_t v) {
   const Brc10Line line = DecodeBrc10(v);
+  if (v != 0 && line.type == 0) {
+    out.insert(out.end(), kBrcSize, 0xFF);
+    return;
+  }
   PutU32(out, static_cast<uint32_t>(Ico(0)));
   out.push_back(line.width);
   out.push_back(line.type);

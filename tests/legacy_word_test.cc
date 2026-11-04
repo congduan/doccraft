@@ -2163,20 +2163,61 @@ TEST(LegacyWord, LegacyScanMapsLegacyTableSetBrc10) {
       0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
   };
   EXPECT_EQ(out, zero_expected);
-  // An illegal (line1, gap, line2) triple stays type 0 instead of rejecting
-  // the document. line1=3 with no gap or line 2 is not in the mapping table,
-  // so the Brc keeps width 3 but gets type 0 (no line) and no error.
+  // An illegal (line1, gap, line2) triple becomes the all-ones explicit-nil
+  // sentinel (r72) instead of keeping a width residue; the IR and XML still
+  // read it as a set border with no line (w:val="nil"), never an error.
   out.clear();
   const std::vector<uint8_t> illegal = {0xC7, 0x00, 0x01, 0x01, 0xC0, 0x00};
   EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(illegal, out),
             doccraft::doc::detail::LegacySprmScan::kComplete);
   const std::vector<uint8_t> illegal_expected = {
       0x2F, 0xD6, 0x0B, 0x00, 0x01, 0x01, 0xFF,
-      0xFF, 0xFF, 0xFF, 0x03, 0x00, 0x00, 0x00,
+      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
   };
   EXPECT_EQ(out, illegal_expected);
-  ASSERT_EQ(out.size(), 14u);
-  EXPECT_EQ(out[11], 0);  // Type byte of the rebuilt Brc.
+}
+
+TEST(LegacyWord, LegacyScanMapsUnrecognisedSetBrc10ToExplicitNil) {
+  // r72: the 0xC7 path now agrees with the TC80 path (r53-fix). A non-zero
+  // BRC10 word that maps to no line type becomes the all-ones Brc sentinel,
+  // so TableBorder(old=false) sees an explicit nil instead of a width/type
+  // residue that could outvote an inherited border. All-zero stays the
+  // width-zero, type-zero border and legal triples keep their widths.
+  std::vector<uint8_t> out;
+  // 0x0001: line1=1, gap=0, line2=0, space=0 -> not in the mapping table.
+  const std::vector<uint8_t> residue = {0xC7, 0x00, 0x01, 0x01, 0x01, 0x00};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(residue, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> residue_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x01, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+  };
+  EXPECT_EQ(out, residue_expected);
+  // 0x0200: flags-only word (space=1), also type 0.
+  out.clear();
+  const std::vector<uint8_t> flags_only = {0xC7, 0x00, 0x01, 0x01, 0x00, 0x02};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(flags_only, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  EXPECT_EQ(out, residue_expected);
+  // Zero and legal triples are unchanged by r72.
+  out.clear();
+  const std::vector<uint8_t> zero = {0xC7, 0x00, 0x01, 0x01, 0x00, 0x00};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(zero, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> zero_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x01, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+  };
+  EXPECT_EQ(out, zero_expected);
+  out.clear();
+  const std::vector<uint8_t> single = {0xC7, 0x00, 0x01, 0x01, 0x40, 0x02};
+  EXPECT_EQ(doccraft::doc::detail::ScanLegacySprms(single, out),
+            doccraft::doc::detail::LegacySprmScan::kComplete);
+  const std::vector<uint8_t> single_expected = {
+      0x2F, 0xD6, 0x0B, 0x00, 0x01, 0x01, 0xFF,
+      0xFF, 0xFF, 0xFF, 0x01, 0x01, 0x01, 0x00,
+  };
+  EXPECT_EQ(out, single_expected);
 }
 
 TEST(LegacyWord, LegacyScanMapsLegacyTableSetShd) {
@@ -2605,6 +2646,33 @@ TEST(LegacyWord, Word6TableCellBrc10ReachesDocx) {
   // w:sz="2"; the missing colour becomes the automatic colour.
   EXPECT_NE(xml.find("<w:tcBorders><w:top w:val=\"single\" w:sz=\"2\" "
                      "w:color=\"auto\" w:space=\"1\"/></w:tcBorders>"),
+            std::string::npos)
+      << xml;
+}
+
+TEST(LegacyWord, Word6UnrecognisedSetBrc10BecomesExplicitNil) {
+  // r72: the 0xC7 path shares the TC80 explicit-nil semantics. BRC10 0x0001
+  // maps to no line type, so both cells get a set, type-0 border with zeroed
+  // width/space and the writer emits w:val="nil" instead of a border residue.
+  auto document = ParseWord6TableEdits({
+      0xC7, 0x00, 0x02, 0x01, 0x01, 0x00,  // Top [0,2), BRC10 0x0001.
+  });
+  ASSERT_TRUE(document) << document.error().message;
+  ASSERT_EQ(document->tables.size(), 1u);
+  const auto& table = document->tables[0];
+  ASSERT_EQ(table.row_properties.size(), 1u);
+  ASSERT_EQ(table.row_properties[0].cells.size(), 2u);
+  for (const auto& cell : table.row_properties[0].cells) {
+    EXPECT_TRUE(cell.borders[0].set);
+    EXPECT_EQ(cell.borders[0].type, 0u);
+    EXPECT_EQ(cell.borders[0].width, 0);
+    EXPECT_EQ(cell.borders[0].space, 0);
+    EXPECT_FALSE(cell.borders[1].set);
+  }
+  auto zip = doccraft::docx::Write(*document);
+  ASSERT_TRUE(zip) << zip.error().message;
+  const std::string xml = Part(*zip, "word/document.xml");
+  EXPECT_NE(xml.find("<w:tcBorders><w:top w:val=\"nil\"/></w:tcBorders>"),
             std::string::npos)
       << xml;
 }
