@@ -171,6 +171,10 @@ void OverlayParagraph(model::Paragraph& dst, const model::Paragraph& src) {
     dst.nest = src.nest;
     dst.nest_set = true;
   }
+  if (src.frame_lock_set) {
+    dst.frame_lock = src.frame_lock;
+    dst.frame_lock_set = true;
+  }
   if (src.before >= 0)
     dst.before = src.before;
   if (src.after >= 0)

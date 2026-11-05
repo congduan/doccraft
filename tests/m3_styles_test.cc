@@ -990,6 +990,25 @@ TEST(M3Styles, StyleInheritanceKeepsExplicitWidowControlOff) {
   EXPECT_FALSE(styles[1].resolved_paragraph.widow_control);
 }
 
+TEST(M3Styles, StyleInheritanceKeepsExplicitFrameLock) {
+  // sprmPFLocked is tri-state: the base style explicitly locks the frame and a
+  // derived style that sets nothing must inherit both the value and its flag,
+  // otherwise the overlay drops w:framePr/@w:lock.
+  Std base;
+  base.name = "Base";
+  base.blocks.push_back(Sprms({Prl(doc::detail::kSprmPFLocked, {1})}));
+  base.blocks.back().insert(base.blocks.back().begin(), {0, 0});
+  Std derived;
+  derived.name = "Derived";
+  derived.base = 0;
+  auto styles = Read(BuildStsh({base, derived}));
+  ASSERT_EQ(styles.size(), 2u);
+  ASSERT_TRUE(styles[0].resolved_paragraph.frame_lock_set);
+  EXPECT_TRUE(styles[0].resolved_paragraph.frame_lock);
+  ASSERT_TRUE(styles[1].resolved_paragraph.frame_lock_set);
+  EXPECT_TRUE(styles[1].resolved_paragraph.frame_lock);
+}
+
 TEST(M3Styles, OverlayPropagatesParagraphFlagWhitelist) {
   // Every tri-state flag the pPrDefault whitelist copies must survive the
   // style overlay; setting it on Normal and resolving it is the propagation
