@@ -456,5 +456,164 @@ TEST(WmlValidatorTest, ReportsMalformedXml) {
   EXPECT_NE(violations[0].message.find("well-formed"), std::string::npos);
 }
 
+constexpr char kRelationshipsNamespace[] =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+constexpr char kPackageRelationshipsNamespace[] =
+    "http://schemas.openxmlformats.org/package/2006/relationships";
+
+std::string Rels(const std::string& body) {
+  return std::string(R"(<?xml version="1.0"?><Relationships xmlns=")") +
+         kPackageRelationshipsNamespace + R"(">)" + body + "</Relationships>";
+}
+
+constexpr char kRelationshipTypeBase[] =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+
+std::string Relationship(const std::string& id, const std::string& type,
+                         const std::string& target,
+                         const std::string& mode = std::string()) {
+  std::string out = "<Relationship Id=\"" + id + "\" Type=\"" +
+                    kRelationshipTypeBase + type + "\" Target=\"" + target +
+                    "\"";
+  if (!mode.empty())
+    out += " TargetMode=\"" + mode + "\"";
+  out += "/>";
+  return out;
+}
+
+std::string DrawingWithEmbed(const std::string& rid) {
+  return Wrap(std::string(R"(<w:p><w:r><w:drawing><a:blip xmlns:a=")"
+                          R"(http://schemas.openxmlformats.org/drawingml/2006/)"
+                          R"(main" xmlns:r=")") +
+              kRelationshipsNamespace + R"(" r:embed=")" + rid +
+              R"("/></w:drawing></w:r></w:p>)");
+}
+
+TEST(WmlValidatorTest, DanglingRelationshipIdReportsViolation) {
+  const std::string document = DrawingWithEmbed("rId9");
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "media/image1.png"));
+  const std::string image = "not-xml";
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+      {"word/media/image1.png", image},
+  });
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_EQ(violations[0].part, "word/document.xml");
+  EXPECT_NE(violations[0].message.find("rId9"), std::string::npos)
+      << violations[0].message;
+  EXPECT_NE(violations[0].path.find("drawing"), std::string::npos)
+      << violations[0].path;
+}
+
+TEST(WmlValidatorTest, DanglingInternalRelationshipTargetReportsViolation) {
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId4", "image", "media/missing.png"));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_EQ(violations[0].part, "word/_rels/document.xml.rels");
+  EXPECT_NE(violations[0].message.find("media/missing.png"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, ExternalRelationshipTargetNeedsNoPart) {
+  const std::string document = Wrap(
+      std::string("<w:p><w:hyperlink xmlns:r=\"") + kRelationshipsNamespace +
+      "\" r:id=\"rId2\"><w:r><w:t>x</w:t></w:r></w:hyperlink></w:p>");
+  const std::string rels = Rels(Relationship(
+      "rId2", "hyperlink", "https://example.com/page", "External"));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, DuplicateRelationshipIdReportsViolation) {
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId5", "hyperlink", "https://a/", "External") +
+           Relationship("rId5", "hyperlink", "https://b/", "External"));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_EQ(violations[0].part, "word/_rels/document.xml.rels");
+  EXPECT_NE(violations[0].message.find("rId5"), std::string::npos)
+      << violations[0].message;
+  EXPECT_NE(violations[0].message.find("duplicate"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, EmptyRelationshipTargetReportsViolation) {
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels = Rels(Relationship("rId3", "image", std::string()));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("empty"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, ResolvesRelativeTargetFromPartDirectory) {
+  // A header lives in word/, so media/image1.png resolves to
+  // word/media/image1.png.
+  const std::string header =
+      std::string(
+          "<?xml version=\"1.0\"?><w:hdr xmlns:w=\""
+          "http://schemas.openxmlformats.org/wordprocessingml/2006/"
+          "main\" xmlns:r=\"") +
+      kRelationshipsNamespace +
+      "\"><w:p><w:hyperlink r:id=\"rId1\"><w:r><w:t>x</w:t></w:r>"
+      "</w:hyperlink></w:p></w:hdr>";
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "media/image1.png"));
+  const std::string image = "not-xml";
+
+  const auto violations = ValidatePackage({
+      {"word/header1.xml", header},
+      {"word/_rels/header1.xml.rels", rels},
+      {"word/media/image1.png", image},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, ResolvesParentRelativeTarget) {
+  // A part one directory down climbs back to the shared media directory.
+  const std::string header =
+      "<?xml version=\"1.0\"?><w:hdr xmlns:w=\"http://schemas."
+      "openxmlformats.org/wordprocessingml/2006/main\"><w:p/></w:hdr>";
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "../media/image1.png"));
+  const std::string image = "not-xml";
+
+  const auto violations = ValidatePackage({
+      {"word/chapters/header1.xml", header},
+      {"word/chapters/_rels/header1.xml.rels", rels},
+      {"word/media/image1.png", image},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
 }  // namespace
 }  // namespace doccraft::ooxml

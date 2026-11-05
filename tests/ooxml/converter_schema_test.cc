@@ -98,7 +98,7 @@ bool IsWordmlPart(const std::string& name) {
          name.compare(name.size() - 4, 4, ".xml") == 0;
 }
 
-std::vector<Part> WordParts(const std::vector<uint8_t>& zip) {
+std::vector<Part> ZipParts(const std::vector<uint8_t>& zip) {
   std::vector<Part> parts;
   mz_zip_archive archive = {};
   if (!mz_zip_reader_init_mem(&archive, zip.data(), zip.size(), 0)) {
@@ -112,9 +112,6 @@ std::vector<Part> WordParts(const std::vector<uint8_t>& zip) {
       continue;
     }
     const std::string part_name(name);
-    if (!IsWordmlPart(part_name))
-      continue;
-
     std::size_t size = 0;
     void* data = mz_zip_reader_extract_to_heap(&archive, i, &size, 0);
     if (data == nullptr)
@@ -149,8 +146,17 @@ std::vector<ooxml::Violation> ValidateDocument(const model::Document& document,
     return {ooxml::Violation{"", "", "writer failed: " + zip.error().message}};
   }
 
-  std::vector<ooxml::Violation> all;
-  for (const Part& part : WordParts(*zip)) {
+  const std::vector<Part> parts = ZipParts(*zip);
+  std::vector<ooxml::PackagePart> package;
+  package.reserve(parts.size());
+  for (const Part& part : parts) {
+    package.push_back({part.name, part.xml});
+  }
+
+  std::vector<ooxml::Violation> all = ooxml::ValidatePackage(package);
+  for (const Part& part : parts) {
+    if (!IsWordmlPart(part.name))
+      continue;
     auto violations = ooxml::ValidatePart(part.name, part.xml);
     all.insert(all.end(), violations.begin(), violations.end());
     ++*validated_parts;
