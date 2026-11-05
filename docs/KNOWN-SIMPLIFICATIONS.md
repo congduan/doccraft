@@ -242,15 +242,20 @@
   属性在 SDK 建模为 StringValue 以容纳 "auto"，词法校验对其不设限）、
   DateTime 格式。part/关系引用校验由包级入口 `ValidatePackage` 覆盖（见下）。
 - 包级关系校验（r81，`ValidatePackage`）：输入为 `{name, content}` 部件列表，
-  校验三件事——①**悬空引用**：以 WML main 命名空间为根的内容部件中，
+  校验三件事——①**悬空引用**：所有 `.xml` 内容部件（`.rels` 除外）中，
   `officeDocument/2006/relationships` 命名空间的 `r:id`/`r:embed` 属性值必须
   出现在该部件对应 rels 的 `Relationship @Id` 集合中（`word/document.xml` →
   `word/_rels/document.xml.rels`，无目录部件 → `_rels/<name>.rels`，包根空名 →
   `_rels/.rels`；属性按 (ns, local) 匹配，`xml:` 保留属性、无前缀属性与其他
-  命名空间属性跳过）；②**重复 Id**：同一 .rels 部件内重复的
+  命名空间属性跳过）。引用扫描与 WML schema 校验相互独立，不要求根元素属于
+  WML main 命名空间，因此 VML 根等非 WML 内容部件中的 `r:id`/`r:embed` 同样
+  会被检查；②**重复 Id**：同一 .rels 部件内重复的
   `Relationship @Id`；③**悬空目标**：`Target` 为空串一律报 violation，
-  `TargetMode="External"` 跳过存在性检查，内部 Target 相对所属部件目录解析
-  （支持 `/` 绝对名、`.`/`..`）后必须命中包内部件。**不做**：Relationship
+  `TargetMode="External"` 跳过存在性检查，内部 Target 按 OPC 语义解析——
+  先剥去 `#` 后的片段，再按 RFC 3986 做 percent-decoding，最后相对所属部件
+  目录合并并归一化 `.`/`..`（支持 `/` 绝对名），结果必须命中包内部件；
+  归一化中 `..` 越过包根报 violation，而不是拼出越界名字后漏报。**不做**：
+  Relationship
   `Type` 与目标部件类型的匹配、.rels 自身的 schema 校验（rels 不在 WML 元素
   表内）、External URL 的格式校验、`[Content_Types].xml` 与部件的一致性。
 - 校验器按「命名空间 + 本地名」匹配，而 SDK 按 CLR 类型区分实例。同一 QName
