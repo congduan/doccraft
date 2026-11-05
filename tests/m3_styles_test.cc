@@ -174,6 +174,17 @@ DocDefaults ReadDocDefaults(const model::Document& d) {
   out.kern = rpr.child("w:kern").attribute("w:val").value();
   return out;
 }
+
+// The paragraph defaults written into w:docDefaults/w:pPrDefault. The caller
+// owns `xml`; the returned node is valid for as long as it lives.
+pugi::xml_node ReadPPrDefault(pugi::xml_document* xml,
+                              const model::Document& d) {
+  const std::string text = Part(d, "word/styles.xml");
+  if (!xml->load_string(text.c_str())) {
+    return {};
+  }
+  return xml->child("w:styles").child("w:docDefaults").child("w:pPrDefault");
+}
 }  // namespace
 
 TEST(M3Styles, ParagraphInheritanceChain) {
@@ -843,4 +854,125 @@ TEST(M3Styles, DocDefaultsUseFirstParagraphStyleWithoutNormal) {
   const DocDefaults defaults = ReadDocDefaults(d);
   EXPECT_EQ(defaults.font, "Foo Bar");
   EXPECT_EQ(defaults.size, "28");
+}
+
+TEST(M3Styles, DocDefaultsWriteNormalParagraphProperties) {
+  // Normal's resolved spacing/indent/alignment seed w:pPrDefault, so text that
+  // names no style keeps the same layout as text that names Normal.
+  Std normal;
+  normal.name = "Normal";
+  // PAPX carries a 2-byte istd prefix before its sprms.
+  normal.blocks.push_back(Sprms({
+      Prl(doc::detail::kSprmPDyaBefore, {0xF0, 0x00}),            // 240
+      Prl(doc::detail::kSprmPDyaAfter, {0x78, 0x00}),             // 120
+      Prl(doc::detail::kSprmPDyaLine, {0x68, 0x01, 0x01, 0x00}),  // 360 auto
+      Prl(doc::detail::kSprmPDxaLeft, {0xD0, 0x02}),              // 720
+      Prl(doc::detail::kSprmPDxaRight, {0x68, 0x01}),             // 360
+      Prl(doc::detail::kSprmPDxaLeft1, {0x98, 0xFE}),             // -360
+      Prl(doc::detail::kSprmPJc, {1}),                            // center
+  }));
+  normal.blocks.back().insert(normal.blocks.back().begin(), {0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const auto& resolved = d.styles[0].resolved_paragraph;
+  ASSERT_EQ(resolved.before, 240);
+  ASSERT_EQ(resolved.after, 120);
+  ASSERT_EQ(resolved.line, 360);
+  ASSERT_EQ(resolved.left, 720);
+  ASSERT_EQ(resolved.right, 360);
+  ASSERT_EQ(resolved.first, -360);
+  ASSERT_EQ(resolved.align, 1);
+
+  pugi::xml_document xml;
+  const pugi::xml_node ppr = ReadPPrDefault(&xml, d);
+  ASSERT_FALSE(ppr.empty());
+  const pugi::xml_node props = ppr.child("w:pPr");
+  ASSERT_FALSE(props.empty());
+
+  const pugi::xml_node spacing = props.child("w:spacing");
+  ASSERT_FALSE(spacing.empty());
+  EXPECT_STREQ(spacing.attribute("w:before").value(), "240");
+  EXPECT_STREQ(spacing.attribute("w:after").value(), "120");
+  EXPECT_STREQ(spacing.attribute("w:line").value(), "360");
+  EXPECT_STREQ(spacing.attribute("w:lineRule").value(), "auto");
+
+  const pugi::xml_node ind = props.child("w:ind");
+  ASSERT_FALSE(ind.empty());
+  EXPECT_STREQ(ind.attribute("w:left").value(), "720");
+  EXPECT_STREQ(ind.attribute("w:right").value(), "360");
+  EXPECT_STREQ(ind.attribute("w:hanging").value(), "360");
+  EXPECT_TRUE(ind.attribute("w:firstLine").empty());
+
+  const pugi::xml_node jc = props.child("w:jc");
+  ASSERT_FALSE(jc.empty());
+  EXPECT_STREQ(jc.attribute("w:val").value(), "center");
+}
+
+TEST(M3Styles, DocDefaultsSkipUnsetNormalParagraphProperties) {
+  // An empty Normal must not gain a w:pPrDefault: emitting the IR defaults
+  // would change rendering for paragraphs that name no style.
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back({0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+
+  pugi::xml_document xml;
+  EXPECT_TRUE(ReadPPrDefault(&xml, d).empty());
+}
+
+TEST(M3Styles, DocDefaultsWithoutParagraphStylesOmitParagraphDefaults) {
+  // No STSH at all: w:rPrDefault still falls back to Word 97, but there is no
+  // paragraph style to derive w:pPrDefault from.
+  model::Document d;
+  pugi::xml_document xml;
+  const std::string text = Part(d, "word/styles.xml");
+  ASSERT_TRUE(xml.load_string(text.c_str()));
+  EXPECT_FALSE(xml.child("w:styles")
+                   .child("w:docDefaults")
+                   .child("w:rPrDefault")
+                   .empty());
+  EXPECT_TRUE(xml.child("w:styles")
+                  .child("w:docDefaults")
+                  .child("w:pPrDefault")
+                  .empty());
+}
+
+TEST(M3Styles, DocDefaultsParagraphFallBackToFirstParagraphStyle) {
+  // No Normal: the first paragraph style (a localized Normal in Word 6/95
+  // sheets) supplies the defaults; a preceding character style is skipped.
+  Std symbol;
+  symbol.type = 2;
+  symbol.name = "Default Paragraph Font";
+  Std body;
+  body.name = "Body";
+  body.blocks.push_back(Sprms({
+      Prl(doc::detail::kSprmPDxaLeft, {0xD0, 0x07}),  // 2000
+      Prl(doc::detail::kSprmPJc, {2}),                // right
+  }));
+  body.blocks.back().insert(body.blocks.back().begin(), {0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({symbol, body}));
+  ASSERT_EQ(d.styles.size(), 2u);
+
+  pugi::xml_document xml;
+  const pugi::xml_node ppr = ReadPPrDefault(&xml, d);
+  ASSERT_FALSE(ppr.empty());
+  const pugi::xml_node props = ppr.child("w:pPr");
+  EXPECT_STREQ(props.child("w:ind").attribute("w:left").value(), "2000");
+  EXPECT_STREQ(props.child("w:jc").attribute("w:val").value(), "right");
+}
+
+TEST(M3Styles, DocDefaultsKeepMinimalStylesXmlStable) {
+  // A document with no stylesheet keeps the exact styles.xml it had before
+  // w:pPrDefault support: only the fallback run defaults may appear.
+  model::Document d;
+  EXPECT_EQ(Part(d, "word/styles.xml"),
+            "<?xml version=\"1.0\"?><w:styles "
+            "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/"
+            "main\"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts "
+            "w:ascii=\"Times New Roman\" w:hAnsi=\"Times New "
+            "Roman\"/><w:sz w:val=\"24\"/><w:kern "
+            "w:val=\"2\"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>");
 }
