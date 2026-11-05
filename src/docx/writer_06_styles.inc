@@ -217,25 +217,25 @@ void WriteStyle(pugi::xml_node styles, const model::Document& document,
 // Prefer the sheet's Normal (or its first paragraph style, which is the
 // localized Normal in Word 6/95 sheets) so localized and custom documents keep
 // their own font and size.
+const model::Style* DefaultStyle(const model::Document& document) {
+  for (const auto& style : document.styles) {
+    if (style.type == 1 && style.name == "Normal") {
+      return &style;
+    }
+  }
+  for (const auto& style : document.styles) {
+    if (style.type == 1) {
+      return &style;
+    }
+  }
+  return nullptr;
+}
+
 model::Run DefaultRun(const model::Document& document) {
   model::Run run;
   run.font = "Times New Roman";
   run.size = 24;
-  const model::Style* base = nullptr;
-  for (const auto& style : document.styles) {
-    if (style.type == 1 && style.name == "Normal") {
-      base = &style;
-      break;
-    }
-  }
-  if (base == nullptr) {
-    for (const auto& style : document.styles) {
-      if (style.type == 1) {
-        base = &style;
-        break;
-      }
-    }
-  }
+  const model::Style* base = DefaultStyle(document);
   if (base == nullptr) {
     return run;
   }
@@ -248,6 +248,90 @@ model::Run DefaultRun(const model::Document& document) {
   return run;
 }
 
+// Paragraph defaults are the same Normal resolved set DefaultRun uses. Only
+// fields the writer already emits through ParaPr() and whose IR carries a
+// clean tri-state (value + *_set, or a negative sentinel) are copied. Tabs,
+// numbering, borders, shading, frames, line numbering and outline level stay on
+// the style itself: promoting them to the document defaults would change
+// paragraphs that name another style.
+bool HasDefaultParagraphProperties(const model::Paragraph& p) {
+  return p.align >= 0 || p.left_set || p.right_set || p.first_set ||
+         p.nest_set || p.left_chars_set || p.right_chars_set ||
+         p.first_line_chars_set || p.before >= 0 || p.after >= 0 ||
+         p.line != 0 || p.before_lines_set || p.after_lines_set ||
+         p.before_auto_set || p.after_auto_set || p.widow_control_set ||
+         p.suppress_hyphenation_set || p.contextual_spacing_set ||
+         p.mirror_indents_set || p.snap_to_grid_set || p.adjust_right_set ||
+         p.kinsoku_set || p.overflow_punct_set || p.top_line_punct_set ||
+         p.auto_space_de_set || p.auto_space_dn_set || p.word_wrap_set ||
+         p.bidi_set || p.keep_next_set || p.keep_lines_set ||
+         p.page_break_before_set;
+}
+
+model::Paragraph DefaultParagraph(const model::Paragraph& p) {
+  model::Paragraph q;
+  q.align = p.align;
+  q.left = p.left;
+  q.left_set = p.left_set;
+  q.right = p.right;
+  q.right_set = p.right_set;
+  q.first = p.first;
+  q.first_set = p.first_set;
+  q.nest = p.nest;
+  q.nest_set = p.nest_set;
+  q.left_chars = p.left_chars;
+  q.left_chars_set = p.left_chars_set;
+  q.right_chars = p.right_chars;
+  q.right_chars_set = p.right_chars_set;
+  q.first_line_chars = p.first_line_chars;
+  q.first_line_chars_set = p.first_line_chars_set;
+  q.before = p.before;
+  q.after = p.after;
+  q.line = p.line;
+  q.line_auto = p.line_auto;
+  q.before_lines = p.before_lines;
+  q.before_lines_set = p.before_lines_set;
+  q.after_lines = p.after_lines;
+  q.after_lines_set = p.after_lines_set;
+  q.before_auto = p.before_auto;
+  q.before_auto_set = p.before_auto_set;
+  q.after_auto = p.after_auto;
+  q.after_auto_set = p.after_auto_set;
+  q.widow_control = p.widow_control;
+  q.widow_control_set = p.widow_control_set;
+  q.suppress_hyphenation = p.suppress_hyphenation;
+  q.suppress_hyphenation_set = p.suppress_hyphenation_set;
+  q.contextual_spacing = p.contextual_spacing;
+  q.contextual_spacing_set = p.contextual_spacing_set;
+  q.mirror_indents = p.mirror_indents;
+  q.mirror_indents_set = p.mirror_indents_set;
+  q.snap_to_grid = p.snap_to_grid;
+  q.snap_to_grid_set = p.snap_to_grid_set;
+  q.adjust_right = p.adjust_right;
+  q.adjust_right_set = p.adjust_right_set;
+  q.kinsoku = p.kinsoku;
+  q.kinsoku_set = p.kinsoku_set;
+  q.overflow_punct = p.overflow_punct;
+  q.overflow_punct_set = p.overflow_punct_set;
+  q.top_line_punct = p.top_line_punct;
+  q.top_line_punct_set = p.top_line_punct_set;
+  q.auto_space_de = p.auto_space_de;
+  q.auto_space_de_set = p.auto_space_de_set;
+  q.auto_space_dn = p.auto_space_dn;
+  q.auto_space_dn_set = p.auto_space_dn_set;
+  q.word_wrap = p.word_wrap;
+  q.word_wrap_set = p.word_wrap_set;
+  q.bidi = p.bidi;
+  q.bidi_set = p.bidi_set;
+  q.keep_next = p.keep_next;
+  q.keep_next_set = p.keep_next_set;
+  q.keep_lines = p.keep_lines;
+  q.keep_lines_set = p.keep_lines_set;
+  q.page_break_before = p.page_break_before;
+  q.page_break_before_set = p.page_break_before_set;
+  return q;
+}
+
 pugi::xml_document WriteStyles(const model::Document& document) {
   pugi::xml_document styles;
   auto sr = styles.append_child("w:styles");
@@ -257,6 +341,18 @@ pugi::xml_document WriteStyles(const model::Document& document) {
   auto run_defaults = defaults.append_child("w:rPrDefault");
   RunPr(run_defaults, default_run, &document);
   Value(run_defaults.child("w:rPr"), "w:kern", 2);
+  // CT_DocDefaults keeps rPrDefault before pPrDefault. An empty result is
+  // omitted so a document without paragraph formatting keeps a minimal
+  // w:docDefaults.
+  const model::Style* base = DefaultStyle(document);
+  if (base != nullptr) {
+    const model::Paragraph paragraph =
+        DefaultParagraph(base->resolved_paragraph);
+    if (HasDefaultParagraphProperties(paragraph)) {
+      std::vector<model::TabStop> no_tabs;
+      ParaPr(defaults.append_child("w:pPrDefault"), paragraph, true, &no_tabs);
+    }
+  }
   for (size_t i = 0; i < document.styles.size(); i++) {
     const auto& style = document.styles[i];
     if (style.type < 1 || style.type > 4 || style.name.empty()) {
