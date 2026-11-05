@@ -251,10 +251,15 @@
   WML main 命名空间，因此 VML 根等非 WML 内容部件中的 `r:id`/`r:embed` 同样
   会被检查；②**重复 Id**：同一 .rels 部件内重复的
   `Relationship @Id`；③**悬空目标**：`Target` 为空串一律报 violation，
-  `TargetMode="External"` 跳过存在性检查，内部 Target 按 OPC 语义解析——
-  先剥去 `#` 后的片段，再按 RFC 3986 做 percent-decoding，最后相对所属部件
-  目录合并并归一化 `.`/`..`（支持 `/` 绝对名），结果必须命中包内部件；
-  归一化中 `..` 越过包根报 violation，而不是拼出越界名字后漏报。**不做**：
+  `TargetMode="External"` 跳过存在性检查，内部 Target 按 RFC 3986 §5.2.2
+  的参考解析处理——先剥去 `#` 后的片段与 `?` 后的查询（只认字面分隔符，
+  `%23`/`%3F` 属于部件名；先切片段，片段内的 `?` 不会被当成查询分隔符），
+  空相对路径继承引用方的完整路径（`Target="#anchor"` 指向源部件本身），
+  再按 §2.1 做 percent-decoding，最后相对所属部件目录合并并归一化
+  `.`/`..`（支持 `/` 绝对名），结果必须命中包内部件。**项目自身收紧规则**：
+  归一化中 `..` 越过包根一律报 violation；OPC 规范的 `CombinePartUri`
+  示例会把越根的 `..` 折叠回包内合法路径，本校验器不采用该行为，因此
+  不能表述为「完全按 OPC 解析」。**不做**：
   Relationship
   `Type` 与目标部件类型的匹配、.rels 自身的 schema 校验（rels 不在 WML 元素
   表内）、External URL 的格式校验、`[Content_Types].xml` 与部件的一致性。
