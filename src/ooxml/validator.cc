@@ -468,9 +468,12 @@ std::string StripLeadingSlashes(std::string_view name) {
   return std::string(name);
 }
 
-// Collapses "." and ".." segments and empty separators. Climbing past the
-// package root is dropped: the result then simply fails the existence check.
-std::string NormalizePartPath(std::string_view path) {
+// Collapses "." and ".." segments and empty separators. When `escapes_root`
+// is non-null it is set if a ".." segment would climb past the package root:
+// the segment is still dropped (RFC 3986 §5.2.4), but OPC part names must
+// stay inside the package, so callers report that case as a violation.
+std::string NormalizePartPath(std::string_view path,
+                              bool* escapes_root = nullptr) {
   std::vector<std::string_view> segments;
   std::size_t start = 0;
   while (start <= path.size()) {
@@ -481,8 +484,11 @@ std::string NormalizePartPath(std::string_view path) {
     if (segment.empty() || segment == ".") {
       // Empty separators and the current directory are no-ops.
     } else if (segment == "..") {
-      if (!segments.empty())
+      if (!segments.empty()) {
         segments.pop_back();
+      } else if (escapes_root != nullptr) {
+        *escapes_root = true;
+      }
     } else {
       segments.push_back(segment);
     }
@@ -498,6 +504,44 @@ std::string NormalizePartPath(std::string_view path) {
     normalized.append(segments[i]);
   }
   return normalized;
+}
+
+// Drops the fragment of a Target URI (RFC 3986 §3.5). Only a literal '#'
+// starts one: a percent-encoded "%23" belongs to the part name.
+std::string_view StripFragment(std::string_view target) {
+  const std::size_t hash = target.find('#');
+  return hash == std::string_view::npos ? target : target.substr(0, hash);
+}
+
+int HexValue(char digit) {
+  if (digit >= '0' && digit <= '9')
+    return digit - '0';
+  if (digit >= 'a' && digit <= 'f')
+    return digit - 'a' + 10;
+  if (digit >= 'A' && digit <= 'F')
+    return digit - 'A' + 10;
+  return -1;
+}
+
+// RFC 3986 §2.1 percent-decoding. A malformed escape is kept literally
+// instead of rejected: the decoded name still has to match a package entry,
+// so a stray '%' cannot make a missing part look present.
+std::string PercentDecode(std::string_view target) {
+  std::string decoded;
+  decoded.reserve(target.size());
+  for (std::size_t i = 0; i < target.size(); ++i) {
+    if (target[i] == '%' && i + 2 < target.size()) {
+      const int high = HexValue(target[i + 1]);
+      const int low = HexValue(target[i + 2]);
+      if (high >= 0 && low >= 0) {
+        decoded.push_back(static_cast<char>(high * 16 + low));
+        i += 2;
+        continue;
+      }
+    }
+    decoded.push_back(target[i]);
+  }
+  return decoded;
 }
 
 // "word/document.xml" -> "word/_rels/document.xml.rels"; a part without a
@@ -530,13 +574,22 @@ std::string RelationshipsOwnerDirectory(std::string_view rels_part) {
   return directory;
 }
 
-std::string ResolveRelationshipTarget(std::string_view owner_directory,
-                                      std::string_view target) {
-  if (!target.empty() && target.front() == '/')
-    return NormalizePartPath(target);
-  std::string joined(owner_directory);
-  joined.append(target);
-  return NormalizePartPath(joined);
+// Resolves an internal Target against the owner part's directory in the order
+// OPC prescribes: strip the fragment, percent-decode, then merge and
+// normalize the path. Returns false when normalization climbs past the
+// package root.
+bool ResolveRelationshipTarget(std::string_view owner_directory,
+                               std::string_view target, std::string* resolved) {
+  const std::string decoded = PercentDecode(StripFragment(target));
+  bool escapes_root = false;
+  if (!decoded.empty() && decoded.front() == '/') {
+    *resolved = NormalizePartPath(decoded, &escapes_root);
+  } else {
+    std::string joined(owner_directory);
+    joined.append(decoded);
+    *resolved = NormalizePartPath(joined, &escapes_root);
+  }
+  return !escapes_root;
 }
 
 std::string BuildPath(const Frame* frame) {
@@ -771,8 +824,13 @@ std::unordered_set<std::string> ScanRelationships(
     }
     if (mode == "External")
       continue;
-    const std::string resolved =
-        ResolveRelationshipTarget(owner_directory, target);
+    std::string resolved;
+    if (!ResolveRelationshipTarget(owner_directory, target, &resolved)) {
+      out->push_back(Violation{std::string(part_name), path,
+                               "Relationship '" + id + "' Target '" + target +
+                                   "' resolves outside the package root"});
+      continue;
+    }
     if (!package_parts.contains(resolved)) {
       out->push_back(
           Violation{std::string(part_name), path,
@@ -784,10 +842,10 @@ std::unordered_set<std::string> ScanRelationships(
   return ids;
 }
 
-// Reports every r:id / r:embed attribute in one WordprocessingML content part
-// that the part's .rels file does not define. Attribute matching is by
-// (namespace, local name), like the element-side checks; xml: reserved
-// attributes and attributes with no prefix are not in a namespace.
+// Reports every r:id / r:embed attribute in one XML content part that the
+// part's .rels file does not define. Attribute matching is by (namespace,
+// local name), like the element-side checks; xml: reserved attributes and
+// attributes with no prefix are not in a namespace.
 void ScanRelationshipReferences(pugi::xml_node node, const Frame* parent,
                                 NamespaceStack* stack,
                                 std::string_view part_name,
@@ -891,9 +949,11 @@ std::vector<Violation> ValidatePackage(const std::vector<PackagePart>& parts) {
     if (!parsed)
       continue;  // ValidatePart() reports malformed WordprocessingML parts.
     pugi::xml_node root = document.document_element();
-    if (!root || ElementNamespace(root) != kWordmlNamespace)
+    if (!root)
       continue;
 
+    // The relationship-reference scan is not schema validation: it applies
+    // to every XML content part, whatever the root element's namespace.
     const std::string rels_part = RelationshipsPartName(name);
     const auto found = ids_by_rels.find(rels_part);
     NamespaceStack stack;

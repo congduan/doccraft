@@ -51,12 +51,15 @@ std::vector<Violation> ValidatePart(std::string_view part_name,
                                     std::string_view xml);
 
 // Validates the relationship graph of a package:
-//   * every r:id / r:embed reference in a WordprocessingML content part
-//     resolves to a Relationship Id defined by that part's .rels part;
+//   * every r:id / r:embed reference in an XML content part resolves to a
+//     Relationship Id defined by that part's .rels part (the scan covers
+//     every .xml part, not only WordprocessingML-rooted ones);
 //   * Relationship Ids are unique within one .rels part;
 //   * every internal Relationship Target names a part that exists in the
-//     package. TargetMode="External" is exempt; an empty Target is always a
-//     violation.
+//     package. The Target is resolved by dropping its fragment,
+//     percent-decoding it, then merging and normalizing the path; a path
+//     that climbs past the package root is a violation. TargetMode="External"
+//     is exempt; an empty Target is always a violation.
 // Relationship Type / target-kind agreement, the schema of .rels parts,
 // external URL syntax and [Content_Types].xml consistency are out of scope.
 std::vector<Violation> ValidatePackage(const std::vector<PackagePart>& parts);

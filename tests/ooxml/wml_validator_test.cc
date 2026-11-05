@@ -615,5 +615,98 @@ TEST(WmlValidatorTest, ResolvesParentRelativeTarget) {
   EXPECT_TRUE(violations.empty()) << Describe(violations);
 }
 
+TEST(WmlValidatorTest, FragmentTargetResolvesToExistingPart) {
+  // A fragment selects an anchor inside the target part; only the part name
+  // before '#' takes part in existence checking.
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "document.xml#section1"));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, PercentEncodedTargetResolvesToExistingPart) {
+  // OPC stores the space in "image one.png" as "%20" in the relationship
+  // Target; the decoded name is what has to match the package entry.
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "media/image%20one.png"));
+  const std::string image = "not-xml";
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+      {"word/media/image one.png", image},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, PercentEncodedMissingTargetReportsViolation) {
+  // Decoding must not make a missing part look present: there is no
+  // "media/image two.png" entry in the package.
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "media/image%20two.png"));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_EQ(violations[0].part, "word/_rels/document.xml.rels");
+  EXPECT_NE(violations[0].message.find("media/image%20two.png"),
+            std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, TargetEscapingPackageRootReportsViolation) {
+  // The owner part lives in word/, so the first ".." reaches the package
+  // root and the second one climbs past it; OPC part names must stay inside.
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "../../media/image1.png"));
+  const std::string image = "not-xml";
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+      {"media/image1.png", image},
+  });
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_EQ(violations[0].part, "word/_rels/document.xml.rels");
+  EXPECT_NE(violations[0].message.find("../../media/image1.png"),
+            std::string::npos)
+      << violations[0].message;
+  EXPECT_NE(violations[0].message.find("outside the package root"),
+            std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, DanglingReferenceInNonWmlPartReportsViolation) {
+  // The relationship-reference scan is independent of the root element's
+  // namespace: a VML root part is still an XML content part.
+  const std::string drawing =
+      R"(<?xml version="1.0"?><v:shape xmlns:v="urn:schemas-microsoft-com:vml" )"
+      R"(xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/)"
+      R"(relationships" r:id="rId9"/>)";
+
+  const auto violations = ValidatePackage({
+      {"word/vmlDrawing1.xml", drawing},
+  });
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_EQ(violations[0].part, "word/vmlDrawing1.xml");
+  EXPECT_NE(violations[0].message.find("rId9"), std::string::npos)
+      << violations[0].message;
+}
+
 }  // namespace
 }  // namespace doccraft::ooxml
