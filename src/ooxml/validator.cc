@@ -506,11 +506,16 @@ std::string NormalizePartPath(std::string_view path,
   return normalized;
 }
 
-// Drops the fragment of a Target URI (RFC 3986 §3.5). Only a literal '#'
-// starts one: a percent-encoded "%23" belongs to the part name.
-std::string_view StripFragment(std::string_view target) {
+// Drops the query and fragment of a Target URI (RFC 3986 §3.4 and §3.5).
+// The fragment is cut first so that a '?' inside it is not mistaken for the
+// query delimiter. Only literal delimiters count: a percent-encoded "%3F" or
+// "%23" belongs to the part name.
+std::string_view StripQueryAndFragment(std::string_view target) {
   const std::size_t hash = target.find('#');
-  return hash == std::string_view::npos ? target : target.substr(0, hash);
+  std::string_view path =
+      hash == std::string_view::npos ? target : target.substr(0, hash);
+  const std::size_t question = path.find('?');
+  return question == std::string_view::npos ? path : path.substr(0, question);
 }
 
 int HexValue(char digit) {
@@ -556,36 +561,55 @@ std::string RelationshipsPartName(std::string_view part) {
          ".rels";
 }
 
-// The directory that a relationship Target is resolved against: the directory
-// of the part that owns the .rels file, not the directory of the .rels file
-// itself.
-std::string RelationshipsOwnerDirectory(std::string_view rels_part) {
+// The directory a part lives in, with its trailing slash: "word/document.xml"
+// -> "word/", a package-root part -> "".
+std::string PartDirectory(std::string_view part) {
+  const std::size_t slash = part.rfind('/');
+  return slash == std::string::npos ? std::string()
+                                    : std::string(part.substr(0, slash + 1));
+}
+
+// The part that owns a .rels file: "word/_rels/document.xml.rels" ->
+// "word/document.xml"; the package-level "_rels/.rels" maps to the empty
+// package-root name.
+std::string RelationshipsOwnerPart(std::string_view rels_part) {
   const std::string name = StripLeadingSlashes(rels_part);
   const std::size_t slash = name.rfind('/');
-  if (slash == std::string::npos)
-    return std::string();
-  std::string directory = name.substr(0, slash + 1);
+  std::string directory =
+      slash == std::string::npos ? std::string() : name.substr(0, slash + 1);
+  std::string_view file(name);
+  if (slash != std::string::npos)
+    file = file.substr(slash + 1);
   constexpr std::string_view kRelsDirectory = "_rels/";
   if (directory.size() >= kRelsDirectory.size() &&
       directory.compare(directory.size() - kRelsDirectory.size(),
                         kRelsDirectory.size(), kRelsDirectory) == 0) {
     directory.resize(directory.size() - kRelsDirectory.size());
   }
-  return directory;
+  constexpr std::string_view kRelsSuffix = ".rels";
+  if (file.size() >= kRelsSuffix.size() &&
+      file.compare(file.size() - kRelsSuffix.size(), kRelsSuffix.size(),
+                   kRelsSuffix) == 0) {
+    file.remove_suffix(kRelsSuffix.size());
+  }
+  return directory + std::string(file);
 }
 
-// Resolves an internal Target against the owner part's directory in the order
-// OPC prescribes: strip the fragment, percent-decode, then merge and
-// normalize the path. Returns false when normalization climbs past the
-// package root.
-bool ResolveRelationshipTarget(std::string_view owner_directory,
+// Resolves an internal Target against the part that owns the .rels file in
+// the order RFC 3986 §5.2.2 prescribes: drop the query and fragment,
+// percent-decode, then merge with the base path and normalize. An empty
+// relative path inherits the base path, i.e. the owner part itself. Returns
+// false when normalization climbs past the package root.
+bool ResolveRelationshipTarget(std::string_view owner_part,
                                std::string_view target, std::string* resolved) {
-  const std::string decoded = PercentDecode(StripFragment(target));
+  const std::string decoded = PercentDecode(StripQueryAndFragment(target));
   bool escapes_root = false;
-  if (!decoded.empty() && decoded.front() == '/') {
+  if (decoded.empty()) {
+    *resolved = NormalizePartPath(owner_part, &escapes_root);
+  } else if (decoded.front() == '/') {
     *resolved = NormalizePartPath(decoded, &escapes_root);
   } else {
-    std::string joined(owner_directory);
+    std::string joined = PartDirectory(owner_part);
     joined.append(decoded);
     *resolved = NormalizePartPath(joined, &escapes_root);
   }
@@ -799,7 +823,7 @@ std::unordered_set<std::string> ScanRelationships(
     return ids;
   }
 
-  const std::string owner_directory = RelationshipsOwnerDirectory(part_name);
+  const std::string owner_part = RelationshipsOwnerPart(part_name);
   const Frame root_frame{root, nullptr};
   for (pugi::xml_node child : root.children()) {
     if (child.type() != pugi::node_element ||
@@ -825,7 +849,7 @@ std::unordered_set<std::string> ScanRelationships(
     if (mode == "External")
       continue;
     std::string resolved;
-    if (!ResolveRelationshipTarget(owner_directory, target, &resolved)) {
+    if (!ResolveRelationshipTarget(owner_part, target, &resolved)) {
       out->push_back(Violation{std::string(part_name), path,
                                "Relationship '" + id + "' Target '" + target +
                                    "' resolves outside the package root"});
