@@ -56,10 +56,16 @@ std::vector<Violation> ValidatePart(std::string_view part_name,
 //     every .xml part, not only WordprocessingML-rooted ones);
 //   * Relationship Ids are unique within one .rels part;
 //   * every internal Relationship Target names a part that exists in the
-//     package. The Target is resolved by dropping its fragment,
-//     percent-decoding it, then merging and normalizing the path; a path
-//     that climbs past the package root is a violation. TargetMode="External"
-//     is exempt; an empty Target is always a violation.
+//     package. Resolution follows RFC 3986 §5.2.2: drop the fragment, drop
+//     the query, percent-decode, then merge with the owner part's directory
+//     and normalize "." / ".." (a leading "/" starts at the package root).
+//     Only literal delimiters are cut, so "%3F" and "%23" stay part-name
+//     characters; an empty relative path inherits the owner part's full
+//     path, so "#anchor" names the part that owns the .rels file. A path
+//     that climbs past the package root is a violation: that is a project
+//     tightening, not OPC CombinePartUri behaviour, which folds such a ".."
+//     back inside the package. TargetMode="External" is exempt; an empty
+//     Target is always a violation.
 // Relationship Type / target-kind agreement, the schema of .rels parts,
 // external URL syntax and [Content_Types].xml consistency are out of scope.
 std::vector<Violation> ValidatePackage(const std::vector<PackagePart>& parts);
