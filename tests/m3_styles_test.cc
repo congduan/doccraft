@@ -909,6 +909,185 @@ TEST(M3Styles, DocDefaultsWriteNormalParagraphProperties) {
   EXPECT_STREQ(jc.attribute("w:val").value(), "center");
 }
 
+TEST(M3Styles, DocDefaultsPropagateWidowControl) {
+  // Normal turns widow control off; the resolved style must keep the explicit
+  // "off" (not fall back to the IR default true) so w:pPrDefault can say so.
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back(Sprms({Prl(doc::detail::kSprmPFWidowControl, {0})}));
+  normal.blocks.back().insert(normal.blocks.back().begin(), {0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const auto& resolved = d.styles[0].resolved_paragraph;
+  ASSERT_TRUE(resolved.widow_control_set);
+  EXPECT_FALSE(resolved.widow_control);
+
+  pugi::xml_document xml;
+  const pugi::xml_node ppr = ReadPPrDefault(&xml, d);
+  ASSERT_FALSE(ppr.empty());
+  const pugi::xml_node widow = ppr.child("w:pPr").child("w:widowControl");
+  ASSERT_FALSE(widow.empty());
+  EXPECT_STREQ(widow.attribute("w:val").value(), "0");
+}
+
+TEST(M3Styles, DocDefaultsPropagateKinsoku) {
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back(Sprms({Prl(doc::detail::kSprmPFKinsoku, {1})}));
+  normal.blocks.back().insert(normal.blocks.back().begin(), {0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const auto& resolved = d.styles[0].resolved_paragraph;
+  ASSERT_TRUE(resolved.kinsoku_set);
+  EXPECT_TRUE(resolved.kinsoku);
+
+  pugi::xml_document xml;
+  const pugi::xml_node ppr = ReadPPrDefault(&xml, d);
+  ASSERT_FALSE(ppr.empty());
+  const pugi::xml_node kinsoku = ppr.child("w:pPr").child("w:kinsoku");
+  ASSERT_FALSE(kinsoku.empty());
+  EXPECT_TRUE(kinsoku.attribute("w:val").empty());
+}
+
+TEST(M3Styles, DocDefaultsPropagateSnapToGrid) {
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back(
+      Sprms({Prl(doc::detail::kSprmPFUsePgsuSettings, {1})}));
+  normal.blocks.back().insert(normal.blocks.back().begin(), {0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const auto& resolved = d.styles[0].resolved_paragraph;
+  ASSERT_TRUE(resolved.snap_to_grid_set);
+  EXPECT_TRUE(resolved.snap_to_grid);
+
+  pugi::xml_document xml;
+  const pugi::xml_node ppr = ReadPPrDefault(&xml, d);
+  ASSERT_FALSE(ppr.empty());
+  const pugi::xml_node snap = ppr.child("w:pPr").child("w:snapToGrid");
+  ASSERT_FALSE(snap.empty());
+  EXPECT_TRUE(snap.attribute("w:val").empty());
+}
+
+TEST(M3Styles, StyleInheritanceKeepsExplicitWidowControlOff) {
+  // The base style explicitly disables widow control; a derived style that
+  // sets nothing must inherit the disabled value through the resolved copy.
+  Std base;
+  base.name = "Base";
+  base.blocks.push_back(Sprms({Prl(doc::detail::kSprmPFWidowControl, {0})}));
+  base.blocks.back().insert(base.blocks.back().begin(), {0, 0});
+  Std derived;
+  derived.name = "Derived";
+  derived.base = 0;
+  auto styles = Read(BuildStsh({base, derived}));
+  ASSERT_EQ(styles.size(), 2u);
+  ASSERT_TRUE(styles[0].resolved_paragraph.widow_control_set);
+  EXPECT_FALSE(styles[0].resolved_paragraph.widow_control);
+  ASSERT_TRUE(styles[1].resolved_paragraph.widow_control_set);
+  EXPECT_FALSE(styles[1].resolved_paragraph.widow_control);
+}
+
+TEST(M3Styles, OverlayPropagatesParagraphFlagWhitelist) {
+  // Every tri-state flag the pPrDefault whitelist copies must survive the
+  // style overlay; setting it on Normal and resolving it is the propagation
+  // check, the writer tests above cover the concrete XML for three of them.
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back(Sprms({
+      Prl(doc::detail::kSprmPFBiDi, {1}),
+      Prl(doc::detail::kSprmPFNoAutoHyph, {1}),
+      Prl(doc::detail::kSprmPFDyaBeforeAuto, {1}),
+      Prl(doc::detail::kSprmPFDyaAfterAuto, {1}),
+      Prl(doc::detail::kSprmPFContextualSpacing, {1}),
+      Prl(doc::detail::kSprmPFMirrorIndents, {1}),
+      Prl(doc::detail::kSprmPFAdjustRight, {1}),
+      Prl(doc::detail::kSprmPFWordWrap, {1}),
+      Prl(doc::detail::kSprmPFOverflowPunct, {1}),
+      Prl(doc::detail::kSprmPFTopLinePunct, {1}),
+      Prl(doc::detail::kSprmPFAutoSpaceDE, {1}),
+      Prl(doc::detail::kSprmPFAutoSpaceDN, {1}),
+  }));
+  normal.blocks.back().insert(normal.blocks.back().begin(), {0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const auto& resolved = d.styles[0].resolved_paragraph;
+  EXPECT_TRUE(resolved.bidi_set);
+  EXPECT_TRUE(resolved.bidi);
+  EXPECT_TRUE(resolved.suppress_hyphenation_set);
+  EXPECT_TRUE(resolved.suppress_hyphenation);
+  EXPECT_TRUE(resolved.before_auto_set);
+  EXPECT_TRUE(resolved.before_auto);
+  EXPECT_TRUE(resolved.after_auto_set);
+  EXPECT_TRUE(resolved.after_auto);
+  EXPECT_TRUE(resolved.contextual_spacing_set);
+  EXPECT_TRUE(resolved.contextual_spacing);
+  EXPECT_TRUE(resolved.mirror_indents_set);
+  EXPECT_TRUE(resolved.mirror_indents);
+  EXPECT_TRUE(resolved.adjust_right_set);
+  EXPECT_TRUE(resolved.adjust_right);
+  EXPECT_TRUE(resolved.word_wrap_set);
+  EXPECT_TRUE(resolved.word_wrap);
+  EXPECT_TRUE(resolved.overflow_punct_set);
+  EXPECT_TRUE(resolved.overflow_punct);
+  EXPECT_TRUE(resolved.top_line_punct_set);
+  EXPECT_TRUE(resolved.top_line_punct);
+  EXPECT_TRUE(resolved.auto_space_de_set);
+  EXPECT_TRUE(resolved.auto_space_de);
+  EXPECT_TRUE(resolved.auto_space_dn_set);
+  EXPECT_TRUE(resolved.auto_space_dn);
+}
+
+TEST(M3Styles, OverlayPropagatesCharacterIndentsAndLineSpacing) {
+  // Character-unit indents, line-unit spacing and table nesting are also in
+  // the pPrDefault whitelist, so they need the same overlay treatment.
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back(Sprms({
+      Prl(doc::detail::kSprmPDxcLeft, {0xD0, 0x02}),    // 720
+      Prl(doc::detail::kSprmPDxcRight, {0x68, 0x01}),   // 360
+      Prl(doc::detail::kSprmPDxcLeft1, {0x98, 0xFE}),   // -360
+      Prl(doc::detail::kSprmPDylBefore, {0x02, 0x00}),  // 2 lines
+      Prl(doc::detail::kSprmPDylAfter, {0x01, 0x00}),   // 1 line
+      Prl(doc::detail::kSprmPNest, {0x01, 0x00}),       // 1 level
+  }));
+  normal.blocks.back().insert(normal.blocks.back().begin(), {0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const auto& resolved = d.styles[0].resolved_paragraph;
+  EXPECT_TRUE(resolved.left_chars_set);
+  EXPECT_EQ(resolved.left_chars, 720);
+  EXPECT_TRUE(resolved.right_chars_set);
+  EXPECT_EQ(resolved.right_chars, 360);
+  EXPECT_TRUE(resolved.first_line_chars_set);
+  EXPECT_EQ(resolved.first_line_chars, -360);
+  EXPECT_TRUE(resolved.before_lines_set);
+  EXPECT_EQ(resolved.before_lines, 2);
+  EXPECT_TRUE(resolved.after_lines_set);
+  EXPECT_EQ(resolved.after_lines, 1);
+  EXPECT_TRUE(resolved.nest_set);
+  EXPECT_EQ(resolved.nest, 1);
+}
+
+TEST(M3Styles, OverlayPropagatesNoLineNumber) {
+  // Line numbering is kept on the style rather than promoted to pPrDefault,
+  // but inheritance within the style chain still has to carry it.
+  Std normal;
+  normal.name = "Normal";
+  normal.blocks.push_back(Sprms({Prl(doc::detail::kSprmPFNoLineNumb, {1})}));
+  normal.blocks.back().insert(normal.blocks.back().begin(), {0, 0});
+  model::Document d;
+  d.styles = Read(BuildStsh({normal}));
+  ASSERT_EQ(d.styles.size(), 1u);
+  const auto& resolved = d.styles[0].resolved_paragraph;
+  EXPECT_TRUE(resolved.no_line_number_set);
+  EXPECT_TRUE(resolved.no_line_number);
+}
+
 TEST(M3Styles, DocDefaultsSkipUnsetNormalParagraphProperties) {
   // An empty Normal must not gain a w:pPrDefault: emitting the IR defaults
   // would change rendering for paragraphs that name no style.
