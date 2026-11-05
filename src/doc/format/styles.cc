@@ -147,6 +147,30 @@ void OverlayParagraph(model::Paragraph& dst, const model::Paragraph& src) {
     dst.first = src.first;
     dst.first_set = true;
   }
+  if (src.left_chars_set) {
+    dst.left_chars = src.left_chars;
+    dst.left_chars_set = true;
+  }
+  if (src.right_chars_set) {
+    dst.right_chars = src.right_chars;
+    dst.right_chars_set = true;
+  }
+  if (src.first_line_chars_set) {
+    dst.first_line_chars = src.first_line_chars;
+    dst.first_line_chars_set = true;
+  }
+  if (src.before_lines_set) {
+    dst.before_lines = src.before_lines;
+    dst.before_lines_set = true;
+  }
+  if (src.after_lines_set) {
+    dst.after_lines = src.after_lines;
+    dst.after_lines_set = true;
+  }
+  if (src.nest_set) {
+    dst.nest = src.nest;
+    dst.nest_set = true;
+  }
   if (src.before >= 0)
     dst.before = src.before;
   if (src.after >= 0)
@@ -154,6 +178,70 @@ void OverlayParagraph(model::Paragraph& dst, const model::Paragraph& src) {
   if (src.line) {
     dst.line = src.line;
     dst.line_auto = src.line_auto;
+  }
+  if (src.widow_control_set) {
+    dst.widow_control = src.widow_control;
+    dst.widow_control_set = true;
+  }
+  if (src.bidi_set) {
+    dst.bidi = src.bidi;
+    dst.bidi_set = true;
+  }
+  if (src.suppress_hyphenation_set) {
+    dst.suppress_hyphenation = src.suppress_hyphenation;
+    dst.suppress_hyphenation_set = true;
+  }
+  if (src.before_auto_set) {
+    dst.before_auto = src.before_auto;
+    dst.before_auto_set = true;
+  }
+  if (src.after_auto_set) {
+    dst.after_auto = src.after_auto;
+    dst.after_auto_set = true;
+  }
+  if (src.contextual_spacing_set) {
+    dst.contextual_spacing = src.contextual_spacing;
+    dst.contextual_spacing_set = true;
+  }
+  if (src.mirror_indents_set) {
+    dst.mirror_indents = src.mirror_indents;
+    dst.mirror_indents_set = true;
+  }
+  if (src.snap_to_grid_set) {
+    dst.snap_to_grid = src.snap_to_grid;
+    dst.snap_to_grid_set = true;
+  }
+  if (src.adjust_right_set) {
+    dst.adjust_right = src.adjust_right;
+    dst.adjust_right_set = true;
+  }
+  if (src.no_line_number_set) {
+    dst.no_line_number = src.no_line_number;
+    dst.no_line_number_set = true;
+  }
+  if (src.word_wrap_set) {
+    dst.word_wrap = src.word_wrap;
+    dst.word_wrap_set = true;
+  }
+  if (src.kinsoku_set) {
+    dst.kinsoku = src.kinsoku;
+    dst.kinsoku_set = true;
+  }
+  if (src.overflow_punct_set) {
+    dst.overflow_punct = src.overflow_punct;
+    dst.overflow_punct_set = true;
+  }
+  if (src.top_line_punct_set) {
+    dst.top_line_punct = src.top_line_punct;
+    dst.top_line_punct_set = true;
+  }
+  if (src.auto_space_de_set) {
+    dst.auto_space_de = src.auto_space_de;
+    dst.auto_space_de_set = true;
+  }
+  if (src.auto_space_dn_set) {
+    dst.auto_space_dn = src.auto_space_dn;
+    dst.auto_space_dn_set = true;
   }
   if (src.keep_next_set) {
     dst.keep_next = src.keep_next;
