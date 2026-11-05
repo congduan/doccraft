@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,9 @@ namespace {
 
 constexpr char kWordmlNamespace[] =
     "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+constexpr char kRelationshipsNamespace[] =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 // The AttributeSchema rows of one element slice are sorted by local name, so
 // the lookup is a binary search over the slice.
@@ -436,6 +440,105 @@ bool ResolveNamespace(const std::string& prefix, const NamespaceStack& stack,
   return false;
 }
 
+// Resolves an element's namespace from the declarations in scope, starting at
+// the element itself and walking up to the document root.
+std::string ElementNamespace(pugi::xml_node node) {
+  const std::string qualified(node.name());
+  const std::size_t colon = qualified.find(':');
+  const std::string prefix =
+      colon == std::string::npos ? std::string() : qualified.substr(0, colon);
+  const std::string declaration = "xmlns:" + prefix;
+  for (pugi::xml_node scope = node; scope; scope = scope.parent()) {
+    for (pugi::xml_attribute attribute : scope.attributes()) {
+      const std::string name(attribute.name());
+      if (prefix.empty() && name == "xmlns")
+        return attribute.value();
+      if (!prefix.empty() && name == declaration)
+        return attribute.value();
+    }
+  }
+  return std::string();
+}
+
+// OPC part names have no leading slash in a ZIP, but relationship Targets may
+// be written as absolute references ("/word/document.xml").
+std::string StripLeadingSlashes(std::string_view name) {
+  while (!name.empty() && name.front() == '/')
+    name.remove_prefix(1);
+  return std::string(name);
+}
+
+// Collapses "." and ".." segments and empty separators. Climbing past the
+// package root is dropped: the result then simply fails the existence check.
+std::string NormalizePartPath(std::string_view path) {
+  std::vector<std::string_view> segments;
+  std::size_t start = 0;
+  while (start <= path.size()) {
+    std::size_t end = path.find('/', start);
+    if (end == std::string_view::npos)
+      end = path.size();
+    const std::string_view segment = path.substr(start, end - start);
+    if (segment.empty() || segment == ".") {
+      // Empty separators and the current directory are no-ops.
+    } else if (segment == "..") {
+      if (!segments.empty())
+        segments.pop_back();
+    } else {
+      segments.push_back(segment);
+    }
+    if (end == path.size())
+      break;
+    start = end + 1;
+  }
+
+  std::string normalized;
+  for (std::size_t i = 0; i < segments.size(); ++i) {
+    if (i != 0)
+      normalized.push_back('/');
+    normalized.append(segments[i]);
+  }
+  return normalized;
+}
+
+// "word/document.xml" -> "word/_rels/document.xml.rels"; a part without a
+// directory gets "_rels/<part>.rels", and the package root (empty name) maps
+// to "_rels/.rels".
+std::string RelationshipsPartName(std::string_view part) {
+  const std::string name = StripLeadingSlashes(part);
+  const std::size_t slash = name.rfind('/');
+  if (slash == std::string::npos)
+    return "_rels/" + name + ".rels";
+  return name.substr(0, slash + 1) + "_rels/" + name.substr(slash + 1) +
+         ".rels";
+}
+
+// The directory that a relationship Target is resolved against: the directory
+// of the part that owns the .rels file, not the directory of the .rels file
+// itself.
+std::string RelationshipsOwnerDirectory(std::string_view rels_part) {
+  const std::string name = StripLeadingSlashes(rels_part);
+  const std::size_t slash = name.rfind('/');
+  if (slash == std::string::npos)
+    return std::string();
+  std::string directory = name.substr(0, slash + 1);
+  constexpr std::string_view kRelsDirectory = "_rels/";
+  if (directory.size() >= kRelsDirectory.size() &&
+      directory.compare(directory.size() - kRelsDirectory.size(),
+                        kRelsDirectory.size(), kRelsDirectory) == 0) {
+    directory.resize(directory.size() - kRelsDirectory.size());
+  }
+  return directory;
+}
+
+std::string ResolveRelationshipTarget(std::string_view owner_directory,
+                                      std::string_view target) {
+  if (!target.empty() && target.front() == '/')
+    return NormalizePartPath(target);
+  std::string joined(owner_directory);
+  joined.append(target);
+  return NormalizePartPath(joined);
+}
+
 std::string BuildPath(const Frame* frame) {
   if (frame == nullptr)
     return std::string();
@@ -602,20 +705,7 @@ class PartValidator {
   // Resolves a child's namespace without pushing its declarations; the
   // element walk handles the stack proper, this only feeds ordering checks.
   std::string NamespaceOf(pugi::xml_node node) {
-    const std::string qualified(node.name());
-    const std::string prefix = PrefixPart(qualified);
-    const std::string declaration = "xmlns:" + prefix;
-    // The stack is not available here, so re-resolve from the node upwards.
-    for (pugi::xml_node scope = node; scope; scope = scope.parent()) {
-      for (pugi::xml_attribute attribute : scope.attributes()) {
-        const std::string name(attribute.name());
-        if (prefix.empty() && name == "xmlns")
-          return attribute.value();
-        if (!prefix.empty() && name == declaration)
-          return attribute.value();
-      }
-    }
-    return std::string();
+    return ElementNamespace(node);
   }
 
   void Report(const Frame* frame, const std::string& message) {
@@ -631,6 +721,117 @@ class PartValidator {
   NamespaceStack* stack_ = nullptr;
   std::vector<Violation>* out_;
 };
+
+// Parses one .rels part, reports duplicate Ids, empty Targets and internal
+// Targets that name no part in the package, and returns the defined Ids.
+std::unordered_set<std::string> ScanRelationships(
+    std::string_view part_name, std::string_view xml,
+    const std::unordered_set<std::string>& package_parts,
+    std::vector<Violation>* out) {
+  std::unordered_set<std::string> ids;
+  pugi::xml_document document;
+  const pugi::xml_parse_result parsed = document.load_buffer(
+      xml.data(), xml.size(), pugi::parse_default, pugi::encoding_utf8);
+  if (!parsed) {
+    out->push_back(Violation{
+        std::string(part_name), std::string(),
+        "XML is not well-formed: " + std::string(parsed.description())});
+    return ids;
+  }
+
+  pugi::xml_node root = document.document_element();
+  if (!root) {
+    out->push_back(Violation{std::string(part_name), std::string(),
+                             "XML has no document element"});
+    return ids;
+  }
+
+  const std::string owner_directory = RelationshipsOwnerDirectory(part_name);
+  const Frame root_frame{root, nullptr};
+  for (pugi::xml_node child : root.children()) {
+    if (child.type() != pugi::node_element ||
+        LocalPart(child.name()) != "Relationship") {
+      continue;
+    }
+    const Frame frame{child, &root_frame};
+    const std::string path = BuildPath(&frame);
+    const std::string id = child.attribute("Id").value();
+    const std::string target = child.attribute("Target").value();
+    const std::string mode = child.attribute("TargetMode").value();
+
+    if (!ids.insert(id).second) {
+      out->push_back(Violation{std::string(part_name), path,
+                               "duplicate Relationship Id '" + id + "'"});
+    }
+    if (target.empty()) {
+      out->push_back(
+          Violation{std::string(part_name), path,
+                    "Relationship '" + id + "' has an empty Target"});
+      continue;
+    }
+    if (mode == "External")
+      continue;
+    const std::string resolved =
+        ResolveRelationshipTarget(owner_directory, target);
+    if (!package_parts.contains(resolved)) {
+      out->push_back(
+          Violation{std::string(part_name), path,
+                    "Relationship '" + id + "' Target '" + target +
+                        "' does not name a part in the package (resolved to '" +
+                        resolved + "')"});
+    }
+  }
+  return ids;
+}
+
+// Reports every r:id / r:embed attribute in one WordprocessingML content part
+// that the part's .rels file does not define. Attribute matching is by
+// (namespace, local name), like the element-side checks; xml: reserved
+// attributes and attributes with no prefix are not in a namespace.
+void ScanRelationshipReferences(pugi::xml_node node, const Frame* parent,
+                                NamespaceStack* stack,
+                                std::string_view part_name,
+                                const std::string& rels_part,
+                                const std::unordered_set<std::string>* ids,
+                                bool has_rels, std::vector<Violation>* out) {
+  const std::size_t pushed = PushNamespaces(node, stack);
+  const Frame frame{node, parent};
+  for (pugi::xml_attribute attribute : node.attributes()) {
+    const std::string qualified(attribute.name());
+    if (qualified.rfind("xmlns", 0) == 0)
+      continue;
+    const std::string prefix = PrefixPart(qualified);
+    if (prefix.empty())
+      continue;
+    std::string ns;
+    if (!ResolveNamespace(prefix, *stack, &ns) ||
+        ns != kRelationshipsNamespace) {
+      continue;
+    }
+    const std::string local = LocalPart(qualified);
+    if (local != "id" && local != "embed")
+      continue;
+    const std::string value(attribute.value());
+    if (ids != nullptr && ids->contains(value))
+      continue;
+
+    std::string message = "attribute '" + qualified + "' value '" + value +
+                          "' does not resolve to a Relationship Id";
+    message +=
+        has_rels ? " in " + rels_part : " (the part has no " + rels_part + ")";
+    out->push_back(
+        Violation{std::string(part_name), BuildPath(&frame), message});
+  }
+
+  for (pugi::xml_node child : node.children()) {
+    if (child.type() == pugi::node_element) {
+      ScanRelationshipReferences(child, &frame, stack, part_name, rels_part,
+                                 ids, has_rels, out);
+    }
+  }
+  for (std::size_t i = 0; i < pushed; ++i)
+    stack->pop_back();
+}
 
 }  // namespace
 
@@ -657,6 +858,51 @@ std::vector<Violation> ValidatePart(std::string_view part_name,
   PartValidator validator(part_name, &violations);
   NamespaceStack stack;
   validator.Walk(root, nullptr, &stack);
+  return violations;
+}
+
+std::vector<Violation> ValidatePackage(const std::vector<PackagePart>& parts) {
+  std::vector<Violation> violations;
+
+  std::unordered_set<std::string> package_parts;
+  package_parts.reserve(parts.size());
+  for (const PackagePart& part : parts)
+    package_parts.insert(NormalizePartPath(part.name));
+
+  // Relationships first: the content pass needs the Ids each part defines.
+  std::unordered_map<std::string, std::unordered_set<std::string>> ids_by_rels;
+  for (const PackagePart& part : parts) {
+    const std::string name = NormalizePartPath(part.name);
+    if (!name.ends_with(".rels"))
+      continue;
+    ids_by_rels.emplace(name, ScanRelationships(name, part.content,
+                                                package_parts, &violations));
+  }
+
+  for (const PackagePart& part : parts) {
+    const std::string name = NormalizePartPath(part.name);
+    if (name.ends_with(".rels") || !name.ends_with(".xml"))
+      continue;
+
+    pugi::xml_document document;
+    const pugi::xml_parse_result parsed =
+        document.load_buffer(part.content.data(), part.content.size(),
+                             pugi::parse_default, pugi::encoding_utf8);
+    if (!parsed)
+      continue;  // ValidatePart() reports malformed WordprocessingML parts.
+    pugi::xml_node root = document.document_element();
+    if (!root || ElementNamespace(root) != kWordmlNamespace)
+      continue;
+
+    const std::string rels_part = RelationshipsPartName(name);
+    const auto found = ids_by_rels.find(rels_part);
+    NamespaceStack stack;
+    ScanRelationshipReferences(
+        root, nullptr, &stack, name, rels_part,
+        found == ids_by_rels.end() ? nullptr : &found->second,
+        found != ids_by_rels.end(), &violations);
+  }
+
   return violations;
 }
 
