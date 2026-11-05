@@ -724,6 +724,27 @@ TEST(WmlValidatorTest, PercentEncodedMissingTargetReportsViolation) {
       << violations[0].message;
 }
 
+TEST(WmlValidatorTest, PercentEncodedSeparatorStaysInPartName) {
+  // "%3F" and "%23" are path characters, not query and fragment delimiters:
+  // the delimiters are stripped before decoding, so both Targets name parts
+  // that contain a literal '?' / '#'. Without that ordering the names would
+  // be cut at "file" and the package entries would go unreferenced.
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "media/file%3Fname.png") +
+           Relationship("rId2", "image", "media/file%23name.png"));
+  const std::string image = "not-xml";
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+      {"word/media/file?name.png", image},
+      {"word/media/file#name.png", image},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
 TEST(WmlValidatorTest, TargetEscapingPackageRootReportsViolation) {
   // The owner part lives in word/, so the first ".." reaches the package
   // root and the second one climbs past it; OPC part names must stay inside.
