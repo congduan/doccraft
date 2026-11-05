@@ -144,9 +144,11 @@ doccraft diff in.doc ref.docx                                 # 结构对比（Q
     `tools/schema-gen` 离线导出的元素粒子表，在 `ctest` 中检查 writer 产出的
     WordprocessingML 部件是否符合 ECMA-376 的元素顺序与出现次数；表同时携带
     每元素的属性切片，未知 WML 属性与整型/OnOff/hexBinary/base64Binary 词法
-    类属性值同样会被检出（base64Binary 按 W3C 规范形含 pad 位零检查）。表由
-    `DocumentFormat.OpenXml` 3.3.0（MIT）的运行时元数据生成并已入库，构建和
-    运行不需要 .NET；校验器不链接进 CLI 产物。
+    类属性值同样会被检出（base64Binary 按 W3C 规范形含 pad 位零检查）。包级
+    入口 `ValidatePackage`（r81）另外检查内容部件中 `r:id`/`r:embed` 的悬空
+    引用、同一 .rels 内的重复 Id 以及内部 Target 指向的部件是否存在于包内。
+    表由 `DocumentFormat.OpenXml` 3.3.0（MIT）的运行时元数据生成并已入库，
+    构建和运行不需要 .NET；校验器不链接进 CLI 产物。
 - 选库标准：业界广泛使用、license 宽松（public domain/MIT/Apache）、
   可 FetchContent 单一来源引入、不引入传递依赖
 
