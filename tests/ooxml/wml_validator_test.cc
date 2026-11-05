@@ -630,6 +630,64 @@ TEST(WmlValidatorTest, FragmentTargetResolvesToExistingPart) {
   EXPECT_TRUE(violations.empty()) << Describe(violations);
 }
 
+TEST(WmlValidatorTest, FragmentOnlyTargetResolvesToOwnerPart) {
+  // RFC 3986 §5.2.2: an empty relative path inherits the base path, so a
+  // Target of "#section1" names the part that owns the .rels file.
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels = Rels(Relationship("rId1", "image", "#section1"));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, FragmentOnlyTargetStillNeedsOwnerPart) {
+  // Inheritance names word/document.xml; without that part the Target is
+  // dangling even though it carries only a fragment.
+  const std::string rels = Rels(Relationship("rId1", "image", "#section1"));
+
+  const auto violations = ValidatePackage({
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  ASSERT_EQ(violations.size(), 1u) << Describe(violations);
+  EXPECT_NE(violations[0].message.find("word/document.xml"), std::string::npos)
+      << violations[0].message;
+}
+
+TEST(WmlValidatorTest, QueryTargetResolvesToExistingPart) {
+  // A query is a URI component, not part of the part name (RFC 3986 §3.4):
+  // "document.xml?rev=1" names word/document.xml.
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "document.xml?rev=1"));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
+TEST(WmlValidatorTest, QueryAndFragmentTargetResolvesToExistingPart) {
+  // The query precedes the fragment; both delimiters are stripped before the
+  // path is resolved.
+  const std::string document = Wrap(R"(<w:p><w:r><w:t>x</w:t></w:r></w:p>)");
+  const std::string rels =
+      Rels(Relationship("rId1", "image", "document.xml?a=1#section1"));
+
+  const auto violations = ValidatePackage({
+      {"word/document.xml", document},
+      {"word/_rels/document.xml.rels", rels},
+  });
+
+  EXPECT_TRUE(violations.empty()) << Describe(violations);
+}
+
 TEST(WmlValidatorTest, PercentEncodedTargetResolvesToExistingPart) {
   // OPC stores the space in "image one.png" as "%20" in the relationship
   // Target; the decoded name is what has to match the package entry.
